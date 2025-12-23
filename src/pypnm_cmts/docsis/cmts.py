@@ -6,14 +6,13 @@ from __future__ import annotations
 import logging
 
 from pypnm.config.pnm_config_manager import PnmConfigManager
-from pypnm.docsis.cm_snmp_operation import CmSnmpOperation
 from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import HostNameStr
 from pypnm.lib.ping import Ping
 
 
-class Cmts(CmSnmpOperation):
+class Cmts(CmtsOperation):
     """
     Represents a CMTS device with SNMP operations and basic reachability checks.
 
