@@ -1,9 +1,9 @@
 <p align="center">
   <a href="docs/index.md">
     <picture>
-      <source srcset="docs/images/pypnm-cmts-hp-dark.png"
+      <source srcset="docs/images/pypnm-cmts-hp-dark-43.png"
               media="(prefers-color-scheme: dark)" />
-      <img src="docs/images/pypnm-cmts-hp-light.png"
+      <img src="docs/images/pypnm-cmts-hp-light-43.png"
            alt="PyPNM-CMTS Logo"
            width="220"
            style="border-radius: 24px;" />
