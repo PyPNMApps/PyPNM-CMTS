@@ -17,6 +17,10 @@ source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e "${PROJECT_ROOT}[dev]"
 
+if [[ -x "${PROJECT_ROOT}/scripts/install_aliases.sh" ]]; then
+  "${PROJECT_ROOT}/scripts/install_aliases.sh"
+fi
+
 log_target="$(python - <<'PYCODE'
 from __future__ import annotations
 
