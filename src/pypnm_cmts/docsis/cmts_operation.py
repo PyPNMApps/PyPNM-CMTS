@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import logging
 
-from pypnm.docsis.data_type.sysDescr import SystemDescriptor
 from pypnm.lib.inet import Inet
 from pypnm.snmp.snmp_v2c import Snmp_v2c
+
+from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
 
 class CmtsOperation:
@@ -40,28 +41,24 @@ class CmtsOperation:
     def __load_snmp_version(self) -> Snmp_v2c:
         return Snmp_v2c(host=self._inet, community=self._community, port=self._port)
 
-    async def getSysDescr(self) -> SystemDescriptor:
+    async def getSysDescr(self) -> CmtsSysDescrModel:
         """
         Fetch and parse sysDescr for the CMTS.
 
         Returns:
-            SystemDescriptor: Parsed sysDescr or SystemDescriptor.empty() on failure.
+            CmtsSysDescrModel: Parsed sysDescr or empty model on failure.
         """
         try:
             result = await self._snmp.get(f'{"sysDescr"}.0')
         except Exception as exc:
             self.logger.error(f"SNMP get failed for sysDescr: {exc}")
-            return SystemDescriptor.empty()
+            return CmtsSysDescrModel.empty()
 
         if not result:
-            return SystemDescriptor.empty()
+            return CmtsSysDescrModel.empty()
 
         raw_value = Snmp_v2c.get_result_value(result)
         if not raw_value:
-            return SystemDescriptor.empty()
+            return CmtsSysDescrModel.empty()
 
-        try:
-            return SystemDescriptor.parse(raw_value)
-        except ValueError as exc:
-            self.logger.error(f"Failed to parse sysDescr: {exc}")
-            return SystemDescriptor.empty()
+        return CmtsSysDescrModel.parse(raw_value)

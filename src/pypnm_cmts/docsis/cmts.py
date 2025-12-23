@@ -7,6 +7,7 @@ import logging
 
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.lib.inet import Inet, InetAddressStr
+from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr
@@ -39,8 +40,34 @@ class Cmts(CmtsOperation):
             inet (Inet): The IP address of the CMTS.
             write_community (str, optional): SNMP write community string. Defaults to the configured value.
         """
-        super().__init__(inet=inet, write_community=write_community)
         self.logger = logging.getLogger(self.__class__.__name__)
+        resolved_inet: Inet | None = None
+
+        hostname_value: HostNameStr = hostname.strip()
+        if hostname_value != "":
+            endpoint = HostEndpoint(hostname_value)
+            addresses = endpoint.resolve()
+            if addresses:
+                try:
+                    resolved_inet = Inet(addresses[0])
+                except ValueError as exc:
+                    self.logger.warning(f"Invalid inet from hostname {hostname_value}: {exc}")
+            else:
+                self.logger.warning(f"Hostname resolution failed for {hostname_value}")
+
+        inet_candidate: Inet | None = None
+        if resolved_inet is None:
+            if isinstance(inet, Inet):
+                inet_candidate = inet
+            else:
+                self.logger.warning(f"Invalid inet provided: {type(inet).__name__}")
+
+        if resolved_inet is None and inet_candidate is None:
+            self.logger.error(f"Failed to resolve hostname or inet for {hostname_value}")
+            exit(1)
+
+        inet_to_use = resolved_inet if resolved_inet is not None else inet_candidate
+        super().__init__(inet=inet_to_use, write_community=write_community)
         self._hostname: HostNameStr = hostname
 
 
@@ -80,8 +107,8 @@ class Cmts(CmtsOperation):
         Returns:
             bool: True if SNMP communication is successful, False otherwise.
         """
-        system_description = await self.getSysDescr(timeout=1, retries=1)
-        return not system_description.is_empty()
+        system_description = await self.getSysDescr()
+        return not system_description.is_empty
 
     def same_inet_version(self, other: Inet) -> bool:
         """

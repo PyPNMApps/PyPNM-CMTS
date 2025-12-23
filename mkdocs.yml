@@ -1,0 +1,40 @@
+site_name: PyPNM-CMTS
+site_description: CMTS operations toolkit documentation for PyPNM-CMTS.
+site_url: https://pypnm.io
+repo_url: https://github.com/PyPNMApps/PyPNM-CMTS
+repo_name: PyPNMApps/PyPNM-CMTS
+
+nav:
+  - Docs hub: index.md
+  - Install: install/index.md
+  - System: system/index.md
+  - Tools: tools/index.md
+  - Scripts: scripts/index.md
+  - Examples:
+      - Overview: examples/index.md
+      - CLI: examples/cli.md
+  - API:
+      - Overview: api/index.md
+      - FastAPI: api/fast-api/index.md
+      - Python: api/python/index.md
+  - Tests: tests/index.md
+  - Topology: topology/index.md
+  - Docker: docker/index.md
+  - Release: release/index.md
+  - Issues: issues/index.md
+  - Style guide: style-guide.md
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+  palette:
+    - scheme: slate
+      primary: blue
+      accent: blue
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
