@@ -66,7 +66,7 @@ class SystemCmtsSnmpService:
             operation = CmtsOperation(
                 inet=inet,
                 write_community=request.snmp.snmp_v2c.community,
-                port=request.snmp.snmp_v2c.port,
+                port=request.snmp.port,
             )
             system_description = await operation.getSysDescr()
         except Exception as exc:

@@ -7,11 +7,13 @@ from pydantic import BaseModel, Field
 
 from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import SNMPConfig
 from pypnm.lib.types import HostNameStr, InetAddressStr
+from pypnm.snmp.snmp_v2c import Snmp_v2c
 
 class CmtsSnmpConfig(SNMPConfig):
     """
     SNMP configuration settings for CMTS requests.
     """
+    port: int = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
 class CmtsTarget(BaseModel):
     """
     CMTS connection target details.
