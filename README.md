@@ -80,6 +80,12 @@ If you used the installer defaults, activate the `.env` environment:
   pypnm-cmts --version
   ```
 
+### 5) Run the FastAPI service
+
+  ```bash
+  pypnm-cmts
+  ```
+
 ## Documentation
 
 - Docs are being assembled; see `docs/` as the starting point.

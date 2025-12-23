@@ -8,6 +8,7 @@ nav:
   - Docs hub: index.md
   - Install: install/index.md
   - System: system/index.md
+  - CLI: system/cli.md
   - Tools: tools/index.md
   - Scripts: scripts/index.md
   - Examples:
