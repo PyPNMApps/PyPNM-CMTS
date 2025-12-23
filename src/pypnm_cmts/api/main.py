@@ -13,6 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
 from pypnm_cmts.startup.startup import StartUp
 from pypnm_cmts.version import __version__
+from pypnm.api.main import app as pypnm_app
 
 GZIP_MIN_SIZE_BYTES = 100_000
 
@@ -49,6 +50,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+app.include_router(pypnm_app.router, prefix="/pypnm")
 
 
 @app.get("/health", tags=["health"])
