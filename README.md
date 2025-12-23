@@ -11,8 +11,9 @@
   </a>
 </p>
 
-# PyPNM-CMTS - CMTS Operations Toolkit for PyPNM
+# PyPNM-CMTS - CMTS Operations Toolkit for PyPNM (Under Development)
 
+[![PyPI version](https://badge.fury.io/py/pypnm-cmts.svg)](https://badge.fury.io/py/pypnm-cmts)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 
