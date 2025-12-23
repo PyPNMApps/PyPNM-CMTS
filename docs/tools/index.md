@@ -6,3 +6,7 @@ Operational tools and helpers for PyPNM-CMTS.
 
 - `tools/maintenance/clean.sh` - cleanup utility for logs, caches, and build artifacts.
 - `tools/maintenance/add-required-python-headers.py` - add or update SPDX + copyright headers.
+
+## Release
+
+- `tools/release/release.py` - release helper (version bump, tests, tagging).

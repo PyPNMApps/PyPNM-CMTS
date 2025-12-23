@@ -63,7 +63,10 @@ append_alias "alias pypnm-cmts-clean='cd \"${PROJECT_ROOT}\" && ./tools/maintena
 append_alias "alias pypnm-cmts-headers='cd \"${PROJECT_ROOT}\" && python tools/maintenance/add-required-python-headers.py'"
 append_alias "alias pypnm-cmts-docs='cd \"${PROJECT_ROOT}\" && mkdocs serve'"
 append_alias "alias pypnm-cmts-api='cd \"${PROJECT_ROOT}\" && python -m pypnm_cmts.api.main'"
+append_alias "alias pypnm-cmts-release='cd \"${PROJECT_ROOT}\" && python tools/release/release.py'"
+append_alias "alias pypnm-cmts-version-check='cd \"${PROJECT_ROOT}\" && python tools/release/check_version.py'"
 append_alias "alias pycmts-clean='cd \"${PROJECT_ROOT}\" && ./tools/maintenance/clean.sh'"
+append_alias "alias pypnm-config-menu='python -m pypnm.tools.system_config.menu'"
 
 # Example placeholder for future aliases (keep but commented-out for now):
 # append_alias "alias pypnm-cmts-env='cd \"${PROJECT_ROOT}\" && source .env/bin/activate'"
