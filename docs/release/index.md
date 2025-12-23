@@ -16,6 +16,8 @@
 
 [7. Quick reference](#7-quick-reference)
 
+[8. Release workflow](#8-release-workflow)
+
 This guide follows the PyPNM release strategy and uses the same four-part versioning scheme.
 The release entry point is `tools/release/release.py`.
 
@@ -139,3 +141,34 @@ python "$REPO_ROOT/tools/release/release.py" --skip-tests
   REPO_ROOT="/path/to/PyPNM-CMTS"
   python "$REPO_ROOT/tools/release/release.py" --dry-run
   ```
+
+## 8. Release workflow
+
+Use this flow for routine releases on `main`:
+
+```bash
+REPO_ROOT="/path/to/PyPNM-CMTS"
+cd "$REPO_ROOT"
+git checkout main
+git pull origin main
+python tools/release/release.py --dry-run
+python tools/release/release.py
+```
+
+Hot-fix releases use the `hot-fix` branch and bump the `BUILD` segment:
+
+```bash
+REPO_ROOT="/path/to/PyPNM-CMTS"
+cd "$REPO_ROOT"
+git fetch origin
+git checkout hot-fix
+git pull origin hot-fix
+python tools/release/release.py --next build --branch hot-fix
+```
+
+If you installed aliases with `scripts/install_aliases.sh`, you can use:
+
+```bash
+pypnm-cmts-release
+pypnm-cmts-release-hot-fix
+```
