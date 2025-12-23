@@ -8,8 +8,10 @@ import logging
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.mac_address import MacAddress
-from pypnm.lib.types import HostNameStr
 from pypnm.lib.ping import Ping
+from pypnm.lib.types import HostNameStr
+
+from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 
 
 class Cmts(CmtsOperation):
@@ -40,7 +42,7 @@ class Cmts(CmtsOperation):
         super().__init__(inet=inet, write_community=write_community)
         self.logger = logging.getLogger(self.__class__.__name__)
         self._hostname: HostNameStr = hostname
-        self._mac_address: MacAddress = mac_address
+
 
     @property
     def get_hostname(self) -> HostNameStr:
@@ -51,16 +53,6 @@ class Cmts(CmtsOperation):
             HostNameStr: The CMTS hostname.
         """
         return self._hostname
-
-    @property
-    def get_mac_address(self) -> MacAddress:
-        """
-        Returns the MAC address of the CMTS.
-
-        Returns:
-            MacAddress: The CMTS MAC address.
-        """
-        return self._mac_address
 
     @property
     def get_inet_address(self) -> InetAddressStr:
