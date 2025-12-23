@@ -15,7 +15,7 @@ fi
 source "${VENV_DIR}/bin/activate"
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e "${PROJECT_ROOT}"
+python -m pip install -e "${PROJECT_ROOT}[dev]"
 
 python - <<'PYCODE'
 import pypnm_cmts

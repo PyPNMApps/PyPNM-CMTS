@@ -34,6 +34,11 @@ dependencies = [
   "pypnm-docsis>=1.0.6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
 [project.urls]
 Homepage    = "https://www.pypnm.io"
 Repository  = "https://github.com/PyPNMApps/PyPNM-CMTS"
@@ -55,7 +60,6 @@ minversion   = "8.0"
 pythonpath   = ["src"]
 testpaths    = ["tests"]
 addopts      = "-ra -q --strict-markers --tb=short"
-asyncio_mode = "auto"
 
 [tool.black]
 line-length = 100
