@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import Final, List
 
 
-VERSION_FILE_PATH: Final[Path]               = Path("src/pypnm/version.py")
+VERSION_FILE_PATH: Final[Path]               = Path("src/pypnm_cmts/version.py")
 PYPROJECT_FILE_PATH: Final[Path]             = Path("pyproject.toml")
 VERSION_PART_SEPARATOR: Final[str]           = "."
 EXPECTED_VERSION_PARTS: Final[int]           = 4
 DEFAULT_SANITIZE_CONFIG: Final[bool]         = True
 GOLDEN_CONFIG_PATHS: Final[tuple[Path, Path]] = (
     Path("deploy/docker/config/system.json"),
-    Path("src/pypnm/settings/system.json"),
+    Path("src/pypnm_cmts/settings/system.json"),
 )
 DOC_TAG_ROOT: Final[Path] = Path("docs")
 BANNER_BADGE_PATTERN: Final[re.Pattern[str]] = re.compile(r'https://img.shields.io/badge/Docker-[^-]+-2496ED')
@@ -238,9 +238,9 @@ def _compute_next_version(current_version: str, mode: str) -> str:
 
 
 def main() -> None:
-    """CLI entry point for inspecting or updating the PyPNM version.
+    """CLI entry point for inspecting or updating the PyPNM-CMTS version.
 
-    This updates both src/pypnm/version.py and pyproject.toml [project].version.
+    This updates both src/pypnm_cmts/version.py and pyproject.toml [project].version.
 
     Modes
     -----
@@ -258,7 +258,7 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Inspect or update the __version__ string in src/pypnm/version.py and "
+            "Inspect or update the __version__ string in src/pypnm_cmts/version.py and "
             "the [project].version field in pyproject.toml. "
             "Version format: MAJOR.MINOR.MAINTENANCE.BUILD (e.g. 1.3.1.0)."
         )

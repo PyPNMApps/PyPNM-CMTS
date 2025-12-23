@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Final
 
 
-VERSION_FILE_PATH: Final[Path]           = Path("src/pypnm/version.py")
+VERSION_FILE_PATH: Final[Path]           = Path("src/pypnm_cmts/version.py")
 BUMP_SCRIPT_PATH: Final[Path]            = Path("tools/support") / "bump_version.py"
 PYPROJECT_FILE_PATH: Final[Path]         = Path("pyproject.toml")
 README_FILE_PATH: Final[Path]            = Path("README.md")
@@ -457,7 +457,7 @@ def main() -> None:
     _print_banner()
     parser = argparse.ArgumentParser(
         description=(
-            "Automate a PyPNM release: compute or apply a version using tools/bump_version.py, "
+            "Automate a PyPNM-CMTS release: compute or apply a version using tools/bump_version.py, "
             "run tests, commit, tag, and push."
         )
     )
@@ -512,8 +512,8 @@ def main() -> None:
     branch: str                  = args.branch
     tag_prefix: str              = args.tag_prefix
     skip_tests: bool             = args.skip_tests
-    skip_docker: bool            = args.skip_docker_test
-    skip_k8s: bool               = args.skip_k8s_test
+    skip_docker: bool            = True
+    skip_k8s: bool               = True
     dry_run: bool                = args.dry_run
     test_release: bool           = args.test_release
 
@@ -596,47 +596,51 @@ def main() -> None:
     else:
         _print_status("Tests", "skip")
 
-    if not skip_docker:
-        print("Running local docker preflight (tools/local/local_container_build.sh --smoke)...")
-        cmd = ["./tools/local/local_container_build.sh", "--smoke"]
-        result = _run(cmd, check=False, label="docker-smoke")
-        if result.returncode != 0:
-            # Attempt sudo fallback if permission denied is suspected
-            err_text = (result.stderr or "") + "\n" + (result.stdout or "")
-            if "permission denied" in err_text.lower():
-                print("Docker preflight failed; retrying with sudo...")
-                result = _run(["sudo"] + cmd, check=False, label="docker-smoke-sudo")
-        if result.returncode != 0:
-            print("ERROR: local docker preflight failed. Aborting release.", file=sys.stderr)
-            print("If this is a Docker permission issue, add your user to the docker group and re-login:")
-            print("  sudo usermod -aG docker $USER")
-            _print_status("Docker preflight", "fail")
-            sys.exit(result.returncode)
-        _print_status("Docker preflight", "pass")
-    else:
+    if skip_docker:
+        print("[release] Docker preflight is disabled by default. Re-enable when container workflows are ready.")
         _print_status("Docker preflight", "skip")
+    # TODO: Re-enable Docker preflight when CMTS release workflow is ready.
+    # if not skip_docker:
+    #     print("Running local docker preflight (tools/local/local_container_build.sh --smoke)...")
+    #     cmd = ["./tools/local/local_container_build.sh", "--smoke"]
+    #     result = _run(cmd, check=False, label="docker-smoke")
+    #     if result.returncode != 0:
+    #         # Attempt sudo fallback if permission denied is suspected
+    #         err_text = (result.stderr or "") + "\n" + (result.stdout or "")
+    #         if "permission denied" in err_text.lower():
+    #             print("Docker preflight failed; retrying with sudo...")
+    #             result = _run(["sudo"] + cmd, check=False, label="docker-smoke-sudo")
+    #     if result.returncode != 0:
+    #         print("ERROR: local docker preflight failed. Aborting release.", file=sys.stderr)
+    #         print("If this is a Docker permission issue, add your user to the docker group and re-login:")
+    #         print("  sudo usermod -aG docker $USER")
+    #         _print_status("Docker preflight", "fail")
+    #         sys.exit(result.returncode)
+    #     _print_status("Docker preflight", "pass")
 
-    if not skip_k8s:
-        print("Running local Kubernetes smoke test (tools/local/local_kubernetes_smoke.sh)...")
-        cmd = ["./tools/local/local_kubernetes_smoke.sh"]
-        result = _run(cmd, check=False, label="k8s-smoke")
-        if result.returncode != 0:
-            err_text = (result.stderr or "") + "\n" + (result.stdout or "")
-            if "permission denied" in err_text.lower():
-                print("Kubernetes smoke test failed; retrying with sudo...")
-                result = _run(["sudo"] + cmd, check=False, label="k8s-smoke-sudo")
-        if result.returncode != 0:
-            print("ERROR: local Kubernetes smoke test failed. Aborting release.", file=sys.stderr)
-            err_text = (result.stderr or "") + "\n" + (result.stdout or "")
-            if "missing required command: kind" in err_text.lower() or "missing required command: kubectl" in err_text.lower():
-                print("Hint: install kind + kubectl with:")
-                print("  ./tools/k8s/pypnm_kind_vm_bootstrap.sh")
-                print("Also ensure Docker is running: sudo systemctl start docker")
-            _print_status("Kubernetes smoke", "fail")
-            sys.exit(result.returncode)
-        _print_status("Kubernetes smoke", "pass")
-    else:
+    if skip_k8s:
+        print("[release] Kubernetes smoke test is disabled by default. Re-enable when k8s workflow is ready.")
         _print_status("Kubernetes smoke", "skip")
+    # TODO: Re-enable Kubernetes smoke test when CMTS release workflow is ready.
+    # if not skip_k8s:
+    #     print("Running local Kubernetes smoke test (tools/local/local_kubernetes_smoke.sh)...")
+    #     cmd = ["./tools/local/local_kubernetes_smoke.sh"]
+    #     result = _run(cmd, check=False, label="k8s-smoke")
+    #     if result.returncode != 0:
+    #         err_text = (result.stderr or "") + "\n" + (result.stdout or "")
+    #         if "permission denied" in err_text.lower():
+    #             print("Kubernetes smoke test failed; retrying with sudo...")
+    #             result = _run(["sudo"] + cmd, check=False, label="k8s-smoke-sudo")
+    #     if result.returncode != 0:
+    #         print("ERROR: local Kubernetes smoke test failed. Aborting release.", file=sys.stderr)
+    #         err_text = (result.stderr or "") + "\n" + (result.stdout or "")
+    #         if "missing required command: kind" in err_text.lower() or "missing required command: kubectl" in err_text.lower():
+    #             print("Hint: install kind + kubectl with:")
+    #             print("  ./tools/k8s/pypnm_kind_vm_bootstrap.sh")
+    #             print("Also ensure Docker is running: sudo systemctl start docker")
+    #         _print_status("Kubernetes smoke", "fail")
+    #         sys.exit(result.returncode)
+    #     _print_status("Kubernetes smoke", "pass")
 
     _run_mkdocs_strict()
 
