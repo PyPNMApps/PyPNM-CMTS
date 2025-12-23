@@ -76,6 +76,7 @@ The release script:
 * Runs tests (unless skipped).
 * Builds docs.
 * Commits, tags, and optionally pushes.
+* Writes a markdown release report under `release-reports/`.
 
 Docker and Kubernetes preflight steps are currently skipped by default in PyPNM-CMTS.
 The release script prints a reminder so this can be revisited later.

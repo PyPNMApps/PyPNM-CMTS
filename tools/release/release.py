@@ -23,6 +23,7 @@ PYPROJECT_FILE_PATH: Final[Path]         = Path("pyproject.toml")
 README_FILE_PATH: Final[Path]            = Path("README.md")
 DOCS_ROOT: Final[Path]                   = Path("docs")
 README_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r'TAG="v\d+\.\d+\.\d+\.\d+"')
+WORKFLOWS_DIR: Final[Path]               = Path(".github") / "workflows"
 
 VERSION_PART_SEPARATOR: Final[str]       = "."
 EXPECTED_VERSION_PARTS: Final[int]       = 4
@@ -31,6 +32,25 @@ MAJOR_INDEX: Final[int]                  = 0
 MINOR_INDEX: Final[int]                  = 1
 MAINTENANCE_INDEX: Final[int]            = 2
 BUILD_INDEX: Final[int]                  = 3
+
+REPORT_DIR_NAME: Final[str]              = "release-reports"
+REPORT_FILE_PREFIX: Final[str]           = "release-report"
+REPORT_SECTIONS: Final[list[str]]        = [
+    "Docs",
+    "Docker",
+    "K8s",
+    "FastAPI",
+    "REST",
+    "DOCSIS",
+    "PNM",
+    "PNM-Python",
+    "Tools",
+    "Install",
+]
+REPORT_HEADERS: Final[list[str]]         = ["Section", "Files Changed"]
+INSTALL_PREFIXES: Final[list[str]]       = ["install.sh", "scripts/install", "deploy/"]
+DOCKER_PREFIXES: Final[list[str]]        = ["docker/", "docker-compose", "docs/docker/"]
+K8S_PREFIX: Final[str]                   = "docs/kubernetes/"
 
 
 SUMMARY: dict[str, str] = {}
@@ -48,7 +68,9 @@ def _init_release_logging() -> None:
     """Create a temporary directory for failed-command logs and announce it."""
     global RELEASE_LOG_DIR
     if RELEASE_LOG_DIR is None:
-        RELEASE_LOG_DIR = Path(tempfile.mkdtemp(prefix="pypnm-release-logs-"))
+        logs_dir = Path(REPORT_DIR_NAME) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        RELEASE_LOG_DIR = Path(tempfile.mkdtemp(prefix="pypnm-release-logs-", dir=str(logs_dir)))
         print(f"[release] Command failures will be logged under: {RELEASE_LOG_DIR}")
 
 
@@ -258,6 +280,187 @@ def _read_pyproject_version() -> str:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _get_head_commit() -> str:
+    result = _run(["git", "rev-parse", "HEAD"], label="git-head", check=False)
+    commit = (result.stdout or "").strip()
+    return commit
+
+
+def _get_previous_commit() -> str:
+    result = _run(["git", "rev-parse", "HEAD^"], label="git-head-prev", check=False)
+    commit = (result.stdout or "").strip()
+    return commit
+
+
+def _collect_commit_files(commit: str) -> list[str]:
+    result = _run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit],
+        label="git-diff-tree",
+        check=False,
+    )
+    output = result.stdout or ""
+    files = [line.strip() for line in output.splitlines() if line.strip()]
+    return files
+
+
+def _summarize_sections(files: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {section: 0 for section in REPORT_SECTIONS}
+    other_count = 0
+
+    for path in files:
+        normalized = path.replace("\\", "/")
+        if normalized.startswith("docs/"):
+            counts["Docs"] += 1
+        elif normalized.startswith("docs/docker/"):
+            counts["Docker"] += 1
+        elif normalized.startswith(K8S_PREFIX):
+            counts["K8s"] += 1
+        elif normalized.startswith("src/pypnm_cmts/api/"):
+            counts["FastAPI"] += 1
+        elif normalized.startswith("src/pypnm_cmts/rest/"):
+            counts["REST"] += 1
+        elif normalized.startswith("src/pypnm_cmts/docsis/"):
+            counts["DOCSIS"] += 1
+        elif normalized.startswith("src/pypnm_cmts/pnm/"):
+            counts["PNM"] += 1
+        elif normalized.startswith("src/pypnm_cmts/"):
+            counts["PNM-Python"] += 1
+        elif normalized.startswith("tools/"):
+            counts["Tools"] += 1
+        elif any(normalized.startswith(prefix) for prefix in INSTALL_PREFIXES):
+            counts["Install"] += 1
+        elif any(normalized.startswith(prefix) for prefix in DOCKER_PREFIXES):
+            counts["Docker"] += 1
+        else:
+            other_count += 1
+
+    if other_count > 0:
+        counts["Other"] = other_count
+    return counts
+
+
+def _render_markdown_table(counts: dict[str, int]) -> str:
+    rows = [(section, str(counts.get(section, 0))) for section in REPORT_SECTIONS]
+    if counts.get("Other", 0) > 0:
+        rows.append(("Other", str(counts["Other"])))
+
+    lines = [
+        f"| {REPORT_HEADERS[0]} | {REPORT_HEADERS[1]} |",
+        "| --- | --- |",
+    ]
+    for section, count in rows:
+        lines.append(f"| {section} | {count} |")
+    return "\n".join(lines)
+
+
+def _read_workflow_name(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return path.name
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("name:"):
+            return stripped.split(":", 1)[1].strip() or path.name
+
+    return path.name
+
+
+def _collect_workflows() -> list[tuple[str, str]]:
+    if not WORKFLOWS_DIR.exists():
+        return []
+
+    workflows: list[tuple[str, str]] = []
+    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflows.append((_read_workflow_name(path), os.path.relpath(path, Path.cwd())))
+    for path in sorted(WORKFLOWS_DIR.glob("*.yaml")):
+        workflows.append((_read_workflow_name(path), os.path.relpath(path, Path.cwd())))
+    return workflows
+
+
+def _write_release_report(
+    commit: str,
+    version: str,
+    tag_name: str,
+    branch: str,
+    report_mode: str,
+) -> Path:
+    report_dir = Path(REPORT_DIR_NAME)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    report_path = report_dir / f"{REPORT_FILE_PREFIX}-{version}-{timestamp}.md"
+    files = _collect_commit_files(commit)
+    sorted_files = sorted(files)
+    counts = _summarize_sections(files)
+    workflows = _collect_workflows()
+
+    lines = [
+        f"# PyPNM-CMTS {report_mode} report",
+        "",
+        f"- Generated: {datetime.now().isoformat(timespec='seconds')}",
+        f"- Branch: {branch}",
+        f"- Source commit: `{commit}`",
+        f"- Release version: `{version}`",
+        f"- Release tag: `{tag_name}`",
+        "",
+        "## Workflows",
+        "",
+    ]
+    if workflows:
+        lines.extend(f"- `{name}` (`{path}`)" for name, path in workflows)
+    else:
+        lines.append("_No workflows found._")
+    lines.extend(
+        [
+            "",
+            "## Change summary (commit)",
+            "",
+            _render_markdown_table(counts),
+            "",
+            "## Files (commit)",
+            "",
+        ]
+    )
+    if sorted_files:
+        lines.extend(f"- `{path}`" for path in sorted_files)
+    else:
+        lines.append("_No files detected._")
+    lines.append("")
+    if SUMMARY:
+        lines.extend(
+            [
+                "## Release step summary",
+                "",
+            ]
+        )
+        for label, state in SUMMARY.items():
+            lines.append(f"- {state.upper()} {label}")
+        lines.append("")
+
+    if RELEASE_LOG_DIR:
+        log_files = sorted(RELEASE_LOG_DIR.glob("*.log"))
+        log_dir_display = os.path.relpath(RELEASE_LOG_DIR, Path.cwd())
+        lines.extend(
+            [
+                "## Failure logs",
+                "",
+                f"- [Release Log]({log_dir_display})",
+            ]
+        )
+        if log_files:
+            lines.extend(
+                f"- [`{os.path.relpath(log_file, Path.cwd())}`]({os.path.relpath(log_file, Path.cwd())})"
+                for log_file in log_files
+            )
+        else:
+            lines.append("- _No failure logs generated._")
+        lines.append("")
+
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
 
 
 def _validate_version_string(version: str) -> None:
@@ -650,11 +853,34 @@ def main() -> None:
         _print_status("Commit", "skip")
         _print_status("Tag", "skip")
         _print_status("Push", "skip")
+        report_commit = _get_head_commit()
+        if report_commit:
+            report_path = _write_release_report(
+                report_commit,
+                new_version,
+                "n/a",
+                branch,
+                "test-release",
+            )
+            _print_status("Release report", "pass")
+            print(f"Release report saved to {report_path}")
         return
 
     _commit_version_bump(new_version)
     tag_name = _create_tag(new_version, tag_prefix)
     _push_branch_and_tag(branch, tag_name)
+
+    report_commit = _get_head_commit()
+    if report_commit:
+        report_path = _write_release_report(
+            report_commit,
+            new_version,
+            tag_name,
+            branch,
+            "release",
+        )
+        _print_status("Release report", "pass")
+        print(f"Release report saved to {report_path}")
 
     print(f"Release {new_version} completed on branch '{branch}' with tag '{tag_name}'.")
 
