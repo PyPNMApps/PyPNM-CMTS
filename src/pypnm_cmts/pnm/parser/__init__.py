@@ -2,3 +2,5 @@
 # Copyright (c) 2025 Maurice Garcia
 
 """PyPNM-CMTS pnm/parser package."""
+from __future__ import annotations
+

@@ -2,3 +2,5 @@
 # Copyright (c) 2025 Maurice Garcia
 
 """Configuration manager placeholder for PyPNM-CMTS."""
+from __future__ import annotations
+

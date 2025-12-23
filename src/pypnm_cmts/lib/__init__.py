@@ -2,3 +2,5 @@
 # Copyright (c) 2025 Maurice Garcia
 
 """PyPNM-CMTS lib package."""
+from __future__ import annotations
+

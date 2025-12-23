@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Maurice Garcia
 
 """PyPNM-CMTS docsis package."""
+from __future__ import annotations
 
 from .cmts import Cmts
 

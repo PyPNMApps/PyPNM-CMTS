@@ -60,6 +60,7 @@ append_alias() {
 # ---------------------------------------------------------------------------
 
 append_alias "alias pypnm-cmts-clean='cd \"${PROJECT_ROOT}\" && ./tools/maintenance/clean.sh'"
+append_alias "alias pypnm-cmts-headers='cd \"${PROJECT_ROOT}\" && python tools/maintenance/add-required-python-headers.py'"
 append_alias "alias pypnm-cmts-docs='cd \"${PROJECT_ROOT}\" && mkdocs serve'"
 append_alias "alias pypnm-cmts-api='cd \"${PROJECT_ROOT}\" && python -m pypnm_cmts.api.main'"
 append_alias "alias pycmts-clean='cd \"${PROJECT_ROOT}\" && ./tools/maintenance/clean.sh'"

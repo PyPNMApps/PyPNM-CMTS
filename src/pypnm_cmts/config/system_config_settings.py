@@ -2,3 +2,5 @@
 # Copyright (c) 2025 Maurice Garcia
 
 """System configuration settings placeholder for PyPNM-CMTS."""
+from __future__ import annotations
+
