@@ -1,6 +1,7 @@
 # PyPNM-CMTS documentation hub
 
 Use this page to get to the right guide for installs, operations, API references, and examples.
+PyPNM-CMTS is designed to service a single CMTS instance; scale horizontally using Docker or Kubernetes.
 
 ## New to PyPNM-CMTS? (start here)
 

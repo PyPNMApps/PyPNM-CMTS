@@ -17,9 +17,10 @@ PYPROJECT_FILE_PATH: Final[Path]             = Path("pyproject.toml")
 VERSION_PART_SEPARATOR: Final[str]           = "."
 EXPECTED_VERSION_PARTS: Final[int]           = 4
 DEFAULT_SANITIZE_CONFIG: Final[bool]         = True
-GOLDEN_CONFIG_PATHS: Final[tuple[Path, Path]] = (
+GOLDEN_CONFIG_PATHS: Final[tuple[Path, Path, Path]] = (
     Path("deploy/docker/config/system.json"),
     Path("src/pypnm_cmts/settings/system.json"),
+    Path("src/pypnm_cmts/settings/cmts_system.json"),
 )
 DOC_TAG_ROOT: Final[Path] = Path("docs")
 BANNER_BADGE_PATTERN: Final[re.Pattern[str]] = re.compile(r'https://img.shields.io/badge/Docker-[^-]+-2496ED')
@@ -185,6 +186,29 @@ def _sanitize_system_config(config_path: Path) -> None:
             v3["username"] = "user"
             v3["authPassword"] = ""
             v3["privPassword"] = ""
+
+    cmts_root = data.get("pypnm-cmts")
+    if isinstance(cmts_root, dict):
+        cmts_entries = cmts_root.get("cmts")
+        if isinstance(cmts_entries, list):
+            for entry in cmts_entries:
+                if not isinstance(entry, dict):
+                    continue
+                cmts_snmp = entry.get("SNMP")
+                if not isinstance(cmts_snmp, dict):
+                    continue
+                cmts_versions = cmts_snmp.get("version")
+                if not isinstance(cmts_versions, dict):
+                    continue
+                v2c = cmts_versions.get("2c")
+                if isinstance(v2c, dict):
+                    v2c["read_community"] = ""
+                    v2c["write_community"] = ""
+                v3 = cmts_versions.get("3")
+                if isinstance(v3, dict):
+                    v3["username"] = "user"
+                    v3["authPassword"] = ""
+                    v3["privPassword"] = ""
 
     config_path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
 
