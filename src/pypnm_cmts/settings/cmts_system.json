@@ -1,39 +1,44 @@
 {
-  "pypnm-cmts": {
-    "cmts": [
-      {
-        "device": {
-          "hostname": "",
-          "model": "",
-          "vendor": ""
-        },
-        "SNMP": {
-          "timeouts": {
-            "request_seconds": 5,
-            "retries": 1
-          },
-          "version": {
-            "2c": {
-              "port": 161,
-              "enable": true,
-              "read_community": "public",
-              "retries": 3,
-              "write_community": "private"
-            },
-            "3": {
-              "enable": false,
-              "port": 161,
-              "authPassword": "",
-              "authProtocol": "SHA",
-              "privPassword": "",
-              "privProtocol": "AES",
-              "retries": 3,
-              "securityLevel": "authPriv",
-              "username": "user"
+    "pypnm-cmts": {
+        "cmts": [
+            {
+                "device": {
+                    "hostname": "",
+                    "model": "",
+                    "vendor": ""
+                },
+                "SNMP": {
+                    "timeouts": {
+                        "request_seconds": 5,
+                        "retries": 1
+                    },
+                    "version": {
+                        "2c": {
+                            "port": 161,
+                            "enable": true,
+                            "read_community": "",
+                            "retries": 3,
+                            "write_community": ""
+                        },
+                        "3": {
+                            "enable": false,
+                            "port": 161,
+                            "authPassword": "",
+                            "authProtocol": "SHA",
+                            "privPassword": "",
+                            "privProtocol": "AES",
+                            "retries": 3,
+                            "securityLevel": "authPriv",
+                            "username": "user"
+                        }
+                    }
+                }
             }
-          }
+        ]
+    },
+    "PnmFileRetrieval": {
+        "retrival_method": {
+            "methods": {}
         }
-      }
-    ]
-  }
+    }
 }

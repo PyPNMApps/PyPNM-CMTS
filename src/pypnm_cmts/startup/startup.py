@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -14,6 +15,7 @@ class StartUp:
     @staticmethod
     def initialize() -> bool:
         """Run startup initialization steps for PyPNM-CMTS."""
+        StartUp._ensure_cmts_system_config()
         StartUp._configure_logging()
         StartUp._ensure_logs_symlink()
         return True
@@ -62,6 +64,73 @@ class StartUp:
                 return
 
         link_path.symlink_to(log_dir, target_is_directory=True)
+
+    @staticmethod
+    def _ensure_cmts_system_config() -> None:
+        """
+        Ensure the CMTS config block exists in the pypnm-docsis system.json file.
+        """
+        cmts_template_path = StartUp._cmts_template_path()
+        if cmts_template_path is None or not cmts_template_path.exists():
+            return
+
+        system_config_path = StartUp._pypnm_system_config_path()
+        if system_config_path is None or not system_config_path.exists():
+            return
+
+        try:
+            template_data = json.loads(cmts_template_path.read_text(encoding="utf-8"))
+            system_data = json.loads(system_config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        if not isinstance(template_data, dict) or not isinstance(system_data, dict):
+            return
+
+        updated = StartUp._merge_missing(system_data, template_data)
+        if not updated:
+            return
+
+        system_config_path.write_text(json.dumps(system_data, indent=4) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _merge_missing(target: dict[str, object], template: dict[str, object]) -> bool:
+        updated = False
+        for key, value in template.items():
+            if key not in target:
+                target[key] = value
+                updated = True
+                continue
+            target_value = target[key]
+            if isinstance(target_value, dict) and isinstance(value, dict):
+                if StartUp._merge_missing(target_value, value):
+                    updated = True
+        return updated
+
+    @staticmethod
+    def _cmts_template_path() -> Path | None:
+        """
+        Resolve the CMTS template config path from the active package.
+        """
+        package_root = Path(__file__).resolve().parents[1]
+        return package_root / "settings" / "cmts_system.json"
+
+    @staticmethod
+    def _pypnm_system_config_path() -> Path | None:
+        """
+        Resolve the system.json path from the installed pypnm-docsis package.
+        """
+        try:
+            import sys
+            import pypnm
+        except Exception:
+            return None
+
+        package_root = StartUp._site_packages_root(sys.prefix)
+        if package_root is None:
+            package_root = Path(pypnm.__file__).resolve().parent
+
+        return package_root / "settings" / "system.json"
 
     @staticmethod
     def _resolve_pypnm_log_dir() -> Path | None:

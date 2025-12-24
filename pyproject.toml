@@ -55,6 +55,9 @@ pypnm-cmts = "pypnm_cmts.cli:main"
 package-dir = { "" = "src" }
 include-package-data = true
 
+[tool.setuptools.package-data]
+pypnm_cmts = ["settings/*.json"]
+
 [tool.setuptools.packages.find]
 where   = ["src"]
 include = ["pypnm_cmts*"]
