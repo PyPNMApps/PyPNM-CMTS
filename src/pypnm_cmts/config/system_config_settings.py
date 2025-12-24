@@ -53,6 +53,8 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
     @classmethod
     def _cmts_entry(cls, index: int) -> dict[str, object]:
         entries = cls._cmts_entries()
+        if not entries:
+            return {}
         if index < 0 or index >= len(entries):
             cls._logger.error(
                 "CMTS entry index %d out of range (entries=%d)",

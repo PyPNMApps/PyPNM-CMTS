@@ -28,39 +28,40 @@ class SystemCmtsSnmpService:
         Retrieve sysDescr for a CMTS using SNMP.
         """
         hostname_value = request.cmts.hostname
-        ip_value = request.cmts.ip_address
-
-        if hostname_value == "" and ip_value == "":
+        if hostname_value == "":
             return CmtsSysDescrResponse(
                 hostname=hostname_value,
-                ip_address=ip_value,
+                ip_address=InetAddressStr(""),
                 status=ServiceStatusCode.FAILURE,
-                message="CMTS hostname or IP address is required.",
+                message="CMTS hostname is required.",
                 results=CmtsSysDescrModel.empty(),
             )
 
-        resolved_ip = ip_value
-        if resolved_ip == "":
+        resolved_ip = InetAddressStr("")
+        inet: Inet
+        try:
+            inet = Inet(hostname_value)
+            resolved_ip = InetAddressStr(hostname_value)
+        except ValueError:
             resolved_ip = SystemCmtsSnmpService._resolve_hostname(hostname_value)
             if resolved_ip == "":
                 return CmtsSysDescrResponse(
                     hostname=hostname_value,
-                    ip_address=ip_value,
+                    ip_address=resolved_ip,
                     status=ServiceStatusCode.FAILURE,
                     message=f"Failed to resolve hostname: {hostname_value}",
                     results=CmtsSysDescrModel.empty(),
                 )
-
-        try:
-            inet = Inet(resolved_ip)
-        except ValueError as exc:
-            return CmtsSysDescrResponse(
-                hostname=hostname_value,
-                ip_address=resolved_ip,
-                status=ServiceStatusCode.FAILURE,
-                message=f"Invalid CMTS IP address: {exc}",
-                results=CmtsSysDescrModel.empty(),
-            )
+            try:
+                inet = Inet(resolved_ip)
+            except ValueError as exc:
+                return CmtsSysDescrResponse(
+                    hostname=hostname_value,
+                    ip_address=resolved_ip,
+                    status=ServiceStatusCode.FAILURE,
+                    message=f"Invalid CMTS IP address: {exc}",
+                    results=CmtsSysDescrModel.empty(),
+                )
 
         try:
             operation = CmtsOperation(
