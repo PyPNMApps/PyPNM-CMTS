@@ -66,6 +66,12 @@ Run the installer:
   ./install.sh
   ```
 
+Optional: upgrade `pypnm-docsis` during install:
+
+  ```bash
+  ./install.sh --update-pypnm-docsis
+  ```
+
 ### 3) Activate the virtual environment
 
 If you used the installer defaults, activate the `.env` environment:

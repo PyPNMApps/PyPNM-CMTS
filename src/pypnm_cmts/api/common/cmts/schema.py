@@ -3,23 +3,33 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import SNMPConfig
-from pypnm.lib.types import HostNameStr, InetAddressStr
+from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import SNMPConfig, SNMPv2c, SNMPv3, to_camel
+from pypnm.lib.types import HostNameStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 
-class CmtsSnmpConfig(SNMPConfig):
+
+class CmtsSnmpConfig(BaseModel):
     """
-    SNMP configuration settings for CMTS requests.
+    SNMP configuration model supporting both v2c and optional v3 settings.
     """
-    port: int = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
+    model_config        = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    port: int           = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
+
+    if CmtsSystemConfigSettings.cmts_snmp_v2c_enabled(0):
+        snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
+
+    if CmtsSystemConfigSettings.cmts_snmp_v3_enabled(0):
+        snmp_v3: SNMPv3     = Field(default_factory=SNMPv3, description="SNMP v3 settings")
+
+
 class CmtsTarget(BaseModel):
     """
     CMTS connection target details.
     """
-    hostname: HostNameStr = Field(..., description="CMTS hostname or label.")
-    ip_address: InetAddressStr = Field(..., description="CMTS IP address.")
+    hostname: HostNameStr = Field(default=CmtsSystemConfigSettings.cmts_device_hostname(0), description="CMTS hostname or label.")
 
 class CommonCmtsRequest(BaseModel):
     """

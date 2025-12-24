@@ -2,6 +2,7 @@
 set -euo pipefail
 
 VENV_DIR="${1:-.env}"
+UPDATE_PYPNM_DOCSIS="${2:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -15,6 +16,9 @@ fi
 source "${VENV_DIR}/bin/activate"
 
 python -m pip install --upgrade pip setuptools wheel
+if [[ "${UPDATE_PYPNM_DOCSIS}" == "true" ]]; then
+  python -m pip install --upgrade --no-cache-dir pypnm-docsis
+fi
 python -m pip install -e "${PROJECT_ROOT}[dev]"
 
 if [[ -x "${PROJECT_ROOT}/scripts/install_aliases.sh" ]]; then
