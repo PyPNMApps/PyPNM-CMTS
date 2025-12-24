@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import re
-from typing import ClassVar, Pattern
+from re import Pattern
+from typing import ClassVar
 
 from pydantic import BaseModel, Field
 

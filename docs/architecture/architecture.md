@@ -54,12 +54,12 @@ An append-only JSONL index is maintained per SG/day:
 ## Implementation Checklist / Burndown
 
 ### Phase 0 — Contracts & Wiring
-- [ ] CmtsOrchestratorSettings model implemented
-- [ ] CLI mode selection added
-- [ ] Adapter interface defined
-- [ ] Launcher interface defined
-- [ ] Coordination interfaces defined
-- [ ] Docs updated (system + CLI)
+- [✅] CmtsOrchestratorSettings model implemented
+- [✅] CLI mode selection added
+- [✅] Adapter interface defined
+- [✅] Launcher interface defined
+- [✅] Coordination interfaces defined
+- [✅] Docs updated (system + CLI)
 
 ### Phase 1 — Storage & Index
 - [ ] Storage layout builder

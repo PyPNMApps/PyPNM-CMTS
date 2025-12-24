@@ -6,8 +6,8 @@ from __future__ import annotations
 import logging
 
 from pypnm.config.pnm_config_manager import PnmConfigManager
-from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.host_endpoint import HostEndpoint
+from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr

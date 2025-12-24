@@ -9,11 +9,11 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from pypnm.api.main import app as pypnm_app
 
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
 from pypnm_cmts.startup.startup import StartUp
 from pypnm_cmts.version import __version__
-from pypnm.api.main import app as pypnm_app
 
 GZIP_MIN_SIZE_BYTES = 100_000
 

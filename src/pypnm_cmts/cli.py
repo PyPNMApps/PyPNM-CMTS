@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 import uvicorn
 
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
 
 SUCCESS_EXIT_CODE = 0
@@ -26,6 +28,13 @@ def main() -> int:
     Returns:
         int: Process exit code.
     """
+    return _run_cli()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """
+    Build the CLI argument parser.
+    """
     parser = argparse.ArgumentParser(
         description="Launch the PyPNM-CMTS FastAPI service with optional HTTPS support."
     )
@@ -36,6 +45,25 @@ def main() -> int:
         action="version",
         version=f"{__version__}",
         help="Show PyPNM-CMTS version and exit.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+    run_parser = subparsers.add_parser("run", help="Select orchestrator execution mode.")
+    run_parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in OrchestratorMode],
+        required=True,
+        help="Execution mode: standalone, controller, or worker.",
+    )
+    run_parser.add_argument(
+        "--config",
+        default="",
+        help="Optional path to system.json configuration file.",
+    )
+    run_parser.add_argument(
+        "--sg-id",
+        default="",
+        help="Service group identifier (required for worker mode).",
     )
 
     parser.add_argument("--host", default=HOST_DEFAULT, help=f"Host to bind (default: {HOST_DEFAULT})")
@@ -93,8 +121,28 @@ def main() -> int:
         default=["*.pyc", "*__pycache__*", "*.tmp", "*.log"],
         help="Glob pattern(s) to exclude from reload. Can be passed multiple times.",
     )
+    return parser
 
+
+def _run_cli() -> int:
+    """
+    Execute the CLI with Phase-0 run-mode parsing.
+    """
+    parser = _build_parser()
     args = parser.parse_args()
+
+    if args.command == "run":
+        mode_value = OrchestratorMode(args.mode)
+        if mode_value == OrchestratorMode.WORKER and args.sg_id == "":
+            print("ERROR: --sg-id is required when mode=worker.", file=sys.stderr)
+            return 2
+        if mode_value == OrchestratorMode.STANDALONE:
+            print("Mode standalone is wired but not implemented (Phase-1).")
+        elif mode_value == OrchestratorMode.CONTROLLER:
+            print("Mode controller is wired but not implemented (Phase-1).")
+        elif mode_value == OrchestratorMode.WORKER:
+            print("Mode worker is wired but not implemented (Phase-1).")
+        return SUCCESS_EXIT_CODE
 
     if args.ssl:
         print(f"🔒 Launching FastAPI with HTTPS on https://{args.host}:{args.port}")

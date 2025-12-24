@@ -10,7 +10,10 @@ from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.inet import Inet
 from pypnm.lib.types import HostNameStr, InetAddressStr
 
-from pypnm_cmts.api.routes.system.schemas import CmtsSysDescrRequest, CmtsSysDescrResponse
+from pypnm_cmts.api.routes.system.schemas import (
+    CmtsSysDescrRequest,
+    CmtsSysDescrResponse,
+)
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 

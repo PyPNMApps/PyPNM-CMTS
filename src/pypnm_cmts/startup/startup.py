@@ -102,9 +102,8 @@ class StartUp:
                 updated = True
                 continue
             target_value = target[key]
-            if isinstance(target_value, dict) and isinstance(value, dict):
-                if StartUp._merge_missing(target_value, value):
-                    updated = True
+            if isinstance(target_value, dict) and isinstance(value, dict) and StartUp._merge_missing(target_value, value):
+                updated = True
         return updated
 
     @staticmethod
@@ -122,6 +121,7 @@ class StartUp:
         """
         try:
             import sys
+
             import pypnm
         except Exception:
             return None
@@ -139,6 +139,7 @@ class StartUp:
         """
         try:
             import sys
+
             import pypnm
             from pypnm.config.system_config_settings import SystemConfigSettings
         except Exception:

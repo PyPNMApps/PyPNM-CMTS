@@ -44,11 +44,7 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
                 cls._CMTS_LIST_KEY,
             )
             return []
-        filtered: list[dict[str, object]] = []
-        for entry in entries:
-            if isinstance(entry, dict):
-                filtered.append(entry)
-        return filtered
+        return [entry for entry in entries if isinstance(entry, dict)]
 
     @classmethod
     def _cmts_entry(cls, index: int) -> dict[str, object]:

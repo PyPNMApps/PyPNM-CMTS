@@ -54,3 +54,23 @@ python example/cli/get_sysdescr.py $env:CMTS_HOST -c $env:SNMP_COMMUNITY --json
 
 - Update the Python API docs when new parsers or data models are added.
 - Update the FastAPI docs when endpoints are introduced.
+
+## Orchestrator run modes (Phase-0 wiring)
+
+Standalone mode:
+
+```bash
+pypnm-cmts run --mode standalone
+```
+
+Controller mode:
+
+```bash
+pypnm-cmts run --mode controller
+```
+
+Worker mode (requires service group id):
+
+```bash
+pypnm-cmts run --mode worker --sg-id sg-001
+```

@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import HostNameStr, InetAddressStr
 
 from pypnm_cmts.api.common.cmts.schema import CommonCmtsRequest
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+
 
 class CmtsSysDescrRequest(CommonCmtsRequest):
     """

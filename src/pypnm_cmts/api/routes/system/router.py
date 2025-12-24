@@ -8,10 +8,12 @@ from enum import Enum
 from http import HTTPStatus
 
 from fastapi import APIRouter, HTTPException
-
 from pypnm.lib.fastapi_constants import FAST_API_RESPONSE
 
-from pypnm_cmts.api.routes.system.schemas import CmtsSysDescrRequest, CmtsSysDescrResponse
+from pypnm_cmts.api.routes.system.schemas import (
+    CmtsSysDescrRequest,
+    CmtsSysDescrResponse,
+)
 from pypnm_cmts.api.routes.system.service import SystemCmtsSnmpService
 
 

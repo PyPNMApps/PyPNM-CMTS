@@ -37,6 +37,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+  "ruff>=0.6.9",
 ]
 docs = [
   "mkdocs>=1.5.0",
@@ -67,6 +68,26 @@ minversion   = "8.0"
 pythonpath   = ["src"]
 testpaths    = ["tests"]
 addopts      = "-ra -q --strict-markers --tb=short"
+asyncio_mode = "auto"
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(levelname)s %(name)s:%(lineno)d | %(message)s"
+log_cli_date_format = "%H:%M:%S"
+markers = [
+  "asyncio: mark test as asyncio-based (requires pytest-asyncio)",
+  "cm_it: cable modem integration tests (enable with -m cm_it)",
+  "slow: slow tests",
+  "net: network-required tests",
+  "pnm: PNM file parsing tests",
+]
+filterwarnings = [
+  "ignore:getReadersFromUrls is deprecated:DeprecationWarning:pysnmp",
+  "ignore:smiV1Relaxed is deprecated:DeprecationWarning:pysnmp",
+  "ignore:.*getReadersFromUrls.*:DeprecationWarning:pysmi.reader.url",
+  "ignore:.*addSources.*:DeprecationWarning:pysnmp.smi.compiler",
+  "ignore:.*addSearchers.*:DeprecationWarning:pysnmp.smi.compiler",
+  "ignore:.*addBorrowers.*:DeprecationWarning:pysnmp.smi.compiler",
+]
 
 [tool.black]
 line-length = 100
