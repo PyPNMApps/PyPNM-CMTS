@@ -37,20 +37,47 @@ class CmtsOperation:
         self.logger = logging.getLogger(self.__class__.__name__)
 
         if not isinstance(inet, Inet):
-            raise TypeError(
-                f"CmtsOperation inet must be Inet, got {type(inet).__name__}"
-            )
+            raise TypeError(f"CmtsOperation inet must be Inet, got {type(inet).__name__}")
 
         self._inet: Inet = inet
         self._community: str = write_community
         self._port: int = port
-        if snmp is None:
-            self._snmp = self.__load_snmp_version()
-        else:
-            self._snmp = snmp
+        self._snmp = self.__load_snmp_version() if snmp is None else snmp
 
     def __load_snmp_version(self) -> Snmp_v2c:
         return Snmp_v2c(host=self._inet, community=self._community, port=self._port)
+
+    @staticmethod
+    def __oid0(oid: str) -> str:
+        if oid.endswith(".0"):
+            return oid
+        return f"{oid}.0"
+
+    async def __snmp_get_str(self, oid: str) -> str:
+        oid0 = self.__oid0(oid)
+        try:
+            result = await self._snmp.get(oid0)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid0}: {exc}")
+            return ""
+
+        if not result:
+            return ""
+
+        raw_value = Snmp_v2c.get_result_value(result)
+        if not raw_value:
+            return ""
+
+        return str(raw_value)
+
+    async def __snmp_get_int(self, oid: str) -> int:
+        raw_value = await self.__snmp_get_str(oid)
+        if raw_value == "":
+            return 0
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return 0
 
     async def getSysDescr(self) -> CmtsSysDescrModel:
         """
@@ -59,23 +86,38 @@ class CmtsOperation:
         Returns:
             CmtsSysDescrModel: Parsed sysDescr or empty model on failure.
         """
-        try:
-            result = await self._snmp.get(f'{"sysDescr"}.0')
-        except Exception as exc:
-            self.logger.error(f"SNMP get failed for sysDescr: {exc}")
+        oid: str = "sysDescr"
+        raw_value = await self.__snmp_get_str(oid)
+        if raw_value == "":
             return CmtsSysDescrModel.empty()
-
-        if not result:
-            return CmtsSysDescrModel.empty()
-
-        raw_value = Snmp_v2c.get_result_value(result)
-        if not raw_value:
-            return CmtsSysDescrModel.empty()
-
         return CmtsSysDescrModel.parse(raw_value)
 
-    async def get_sysdescr(self) -> CmtsSysDescrModel:
+    async def getSysName(self) -> str:
         """
-        Fetch and parse sysDescr for the CMTS (snake_case alias).
+        Fetch sysName for the CMTS.
+
+        Returns:
+            str: sysName string.
         """
-        return await self.getSysDescr()
+        oid: str = "sysName"
+        return await self.__snmp_get_str(oid)
+
+    async def getSysObjectId(self) -> str:
+        """
+        Fetch sysObjectID for the CMTS.
+
+        Returns:
+            str: sysObjectID string.
+        """
+        oid: str = "sysObjectID"
+        return await self.__snmp_get_str(oid)
+
+    async def getSysUpTime(self) -> int:
+        """
+        Fetch sysUpTime for the CMTS.
+
+        Returns:
+            int: sysUpTime in timeticks.
+        """
+        oid: str = "sysUpTime"
+        return await self.__snmp_get_int(oid)
