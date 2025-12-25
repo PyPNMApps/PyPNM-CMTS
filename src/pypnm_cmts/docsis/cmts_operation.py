@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import logging
 
-from pypnm.lib.inet import Inet
+from pypnm.lib.inet import Inet, InetAddressStr
+from pypnm.lib.types import HostNameStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
+from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
 
@@ -121,3 +123,32 @@ class CmtsOperation:
         """
         oid: str = "sysUpTime"
         return await self.__snmp_get_int(oid)
+
+    async def getIdentity(self, hostname: HostNameStr = "") -> CmtsIdentityModel:
+        """
+        Fetch CMTS identity fields via SNMP.
+
+        Returns:
+            CmtsIdentityModel: CMTS identity model with empty/default values on failures.
+        """
+        sys_descr = await self.getSysDescr()
+        sys_name = await self.getSysName()
+        sys_object_id = await self.getSysObjectId()
+        sys_uptime = await self.getSysUpTime()
+
+        is_empty = (
+            sys_descr.is_empty
+            and sys_name == ""
+            and sys_object_id == ""
+            and sys_uptime == 0
+        )
+
+        return CmtsIdentityModel(
+            hostname        =   hostname,
+            inet            =   InetAddressStr(str(self._inet)),
+            sys_descr       =   sys_descr,
+            sys_name        =   sys_name,
+            sys_object_id   =   sys_object_id,
+            sys_uptime      =   sys_uptime,
+            is_empty        =   is_empty,
+        )

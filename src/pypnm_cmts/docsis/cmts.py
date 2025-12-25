@@ -11,7 +11,8 @@ from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr
 
-from pypnm_cmts.docsis.cmts_operation import CmtsOperation
+from pypnm_cmts.docsis.cmts_operation import CmtsIdentityModel, CmtsOperation
+from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
 
 
 class Cmts(CmtsOperation):
