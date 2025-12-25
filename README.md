@@ -97,6 +97,19 @@ If you used the installer defaults, activate the `.env` environment:
 - Docs are being assembled; see `docs/` as the starting point.
 - [CLI examples](docs/examples/cli.md)
 
+## SNMP notes
+
+- SNMPv2c is supported  
+- SNMPv3 is currently stubbed and not yet supported
+
+## CableLabs specifications & MIBs
+
+- [CM-SP-MULPIv3.1](https://www.cablelabs.com/specifications/CM-SP-MULPIv3.1)  
+- [CM-SP-CCAP-OSSIv3.1](https://www.cablelabs.com/specifications/CM-SP-CCAP-OSSIv3.1)  
+- [CM-SP-MULPIv4.0](https://www.cablelabs.com/specifications/CM-SP-MULPIv4.0)  
+- [CM-SP-CCAP-OSSIv4.0](https://www.cablelabs.com/specifications/CM-SP-CCAP-OSSIv4.0)  
+- [DOCSIS MIBs](https://mibs.cablelabs.com/MIBs/DOCSIS/)
+
 ## License
 
 [`Apache License 2.0`](./LICENSE) and [`NOTICE`](./NOTICE)
