@@ -84,11 +84,11 @@ class SysDescrCli:
 
         try:
             return Inet(host_value)
-        except ValueError:
+        except ValueError as exc:
             endpoint = HostEndpoint(host_value)
             addresses = endpoint.resolve()
             if not addresses:
-                raise ValueError(f"Failed to resolve hostname: {host_value}")
+                raise ValueError(f"Failed to resolve hostname: {host_value}") from exc
             return Inet(addresses[0])
 
     @staticmethod

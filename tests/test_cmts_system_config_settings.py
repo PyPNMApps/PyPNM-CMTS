@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from pypnm.config.config_manager import ConfigManager
+
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 
 

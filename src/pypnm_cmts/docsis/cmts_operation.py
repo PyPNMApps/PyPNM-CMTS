@@ -18,7 +18,13 @@ class CmtsOperation:
     Provides initialization and sysDescr lookup used by Cmts.
     """
 
-    def __init__(self, inet: Inet, write_community: str, port: int = Snmp_v2c.SNMP_PORT) -> None:
+    def __init__(
+        self,
+        inet: Inet,
+        write_community: str,
+        port: int = Snmp_v2c.SNMP_PORT,
+        snmp: Snmp_v2c | None = None,
+    ) -> None:
         """
         Initialize the CMTS SNMP operation handler.
 
@@ -26,17 +32,22 @@ class CmtsOperation:
             inet (Inet): CMTS IP address.
             write_community (str): SNMP write community string.
             port (int, optional): SNMP port. Defaults to Snmp_v2c.SNMP_PORT.
+            snmp (Snmp_v2c | None, optional): Injected SNMP client for testing. Defaults to None.
         """
         self.logger = logging.getLogger(self.__class__.__name__)
 
         if not isinstance(inet, Inet):
-            self.logger.error(f"CmtsOperation() inet is of an Invalid Type: {type(inet)} , expecting Inet")
-            exit(1)
+            raise TypeError(
+                f"CmtsOperation inet must be Inet, got {type(inet).__name__}"
+            )
 
         self._inet: Inet = inet
         self._community: str = write_community
         self._port: int = port
-        self._snmp: Snmp_v2c = self.__load_snmp_version()
+        if snmp is None:
+            self._snmp = self.__load_snmp_version()
+        else:
+            self._snmp = snmp
 
     def __load_snmp_version(self) -> Snmp_v2c:
         return Snmp_v2c(host=self._inet, community=self._community, port=self._port)
@@ -62,3 +73,9 @@ class CmtsOperation:
             return CmtsSysDescrModel.empty()
 
         return CmtsSysDescrModel.parse(raw_value)
+
+    async def get_sysdescr(self) -> CmtsSysDescrModel:
+        """
+        Fetch and parse sysDescr for the CMTS (snake_case alias).
+        """
+        return await self.getSysDescr()

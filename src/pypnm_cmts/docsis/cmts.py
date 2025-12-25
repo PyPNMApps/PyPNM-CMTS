@@ -8,7 +8,6 @@ import logging
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.inet import Inet, InetAddressStr
-from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr
 
@@ -28,7 +27,7 @@ class Cmts(CmtsOperation):
     def __init__(
         self,
         hostname: HostNameStr,
-        inet: Inet,
+        inet: Inet | None = None,
         write_community: str = PnmConfigManager.get_write_community(),
     ) -> None:
         """
@@ -36,8 +35,7 @@ class Cmts(CmtsOperation):
 
         Args:
             hostname (HostNameStr): Hostname or identifier for the CMTS.
-            mac_address (MacAddress): The CMTS MAC address.
-            inet (Inet): The IP address of the CMTS.
+            inet (Inet | None): Optional IP address of the CMTS.
             write_community (str, optional): SNMP write community string. Defaults to the configured value.
         """
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -51,25 +49,23 @@ class Cmts(CmtsOperation):
                 try:
                     resolved_inet = Inet(addresses[0])
                 except ValueError as exc:
-                    self.logger.warning(f"Invalid inet from hostname {hostname_value}: {exc}")
+                    raise ValueError(f"Resolved inet from hostname '{hostname_value}' is invalid: {exc}") from exc
             else:
-                self.logger.warning(f"Hostname resolution failed for {hostname_value}")
+                raise ValueError(f"Hostname resolution failed for '{hostname_value}'")
 
         inet_candidate: Inet | None = None
-        if resolved_inet is None:
-            if isinstance(inet, Inet):
-                inet_candidate = inet
-            else:
-                self.logger.warning(f"Invalid inet provided: {type(inet).__name__}")
+        if resolved_inet is None and inet is not None:
+            if not isinstance(inet, Inet):
+                raise TypeError(f"Invalid inet provided: expected Inet, got {type(inet).__name__}")
+            inet_candidate = inet
 
         if resolved_inet is None and inet_candidate is None:
-            self.logger.error(f"Failed to resolve hostname or inet for {hostname_value}")
-            exit(1)
+            raise ValueError(f"Failed to resolve hostname or inet for '{hostname_value}'")
 
         inet_to_use = resolved_inet if resolved_inet is not None else inet_candidate
+        assert inet_to_use is not None
         super().__init__(inet=inet_to_use, write_community=write_community)
         self._hostname: HostNameStr = hostname
-
 
     @property
     def get_hostname(self) -> HostNameStr:
@@ -132,34 +128,15 @@ class Cmts(CmtsOperation):
         String representation of the CMTS.
 
         Returns:
-            str: Hostname and MAC address representation.
+            str: Hostname and IP address representation.
         """
-        return f"{self.get_hostname} ({self.get_mac_address})"
+        return f"{self.get_hostname} ({self.get_inet_address})"
 
     def __repr__(self) -> str:
         """
         String representation of the CMTS.
 
         Returns:
-            str: Hostname, MAC, and IP address representation.
+            str: Hostname and IP address representation.
         """
-        return f"Host: {self.get_hostname} - Mac: {self.get_mac_address} - Inet: {self.get_inet_address}"
-
-    def __hash__(self) -> int:
-        """
-        Hash based on the normalized raw MAC address string (12 lowercase hex chars).
-
-        This ensures that any MacAddress instance with the same underlying
-        normalized MAC value will be treated as equal in sets and dicts.
-        """
-        return hash(self._mac_address.mac_address)
-
-    def __eq__(self, other: object) -> bool:
-        """
-        Equality check based on the MAC address.
-        """
-        if isinstance(other, Cmts):
-            return self._mac_address == other._mac_address
-        if isinstance(other, MacAddress):
-            return self._mac_address == other
-        return False
+        return f"Host: {self.get_hostname} - Inet: {self.get_inet_address}"

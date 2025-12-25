@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.cli import _run_cli
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 
 
 def test_default_tests_fallback_when_missing() -> None:
