@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-
 from pypnm.lib.inet import InetAddressStr
 from pypnm.lib.types import HostNameStr
+
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
 
@@ -20,7 +20,15 @@ class CmtsIdentityModel(BaseModel):
     is_empty: bool                  = Field(default=True, description="True when identity contains no SNMP information.")
 
     @classmethod
-    def empty(cls, hostname: HostNameStr = HostNameStr(""), inet: InetAddressStr = InetAddressStr("")) -> CmtsIdentityModel:
+    def empty(
+        cls,
+        hostname: HostNameStr | None = None,
+        inet: InetAddressStr | None = None,
+    ) -> CmtsIdentityModel:
+        if hostname is None:
+            hostname = HostNameStr("")
+        if inet is None:
+            inet = InetAddressStr("")
         return cls(
             hostname        =   hostname,
             inet            =   inet,

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 
 from pypnm.lib.host_endpoint import HostEndpoint
@@ -57,9 +58,9 @@ class SysDescrCli:
             help=f"SNMP port (default: {SysDescrCli.DEFAULT_PORT}).",
         )
         parser.add_argument(
-            "--json",
+            "--text",
             action="store_true",
-            help="Output sysDescr as JSON.",
+            help="Output sysDescr as text instead of JSON.",
         )
 
         return parser
@@ -108,7 +109,7 @@ class SysDescrCli:
         return await operation.getSysDescr()
 
     @staticmethod
-    def render_output(system_description: CmtsSysDescrModel, as_json: bool) -> str:
+    def render_output(system_description: CmtsSysDescrModel, as_text: bool) -> str:
         """
         Render the sysDescr output string based on the chosen format.
 
@@ -119,9 +120,10 @@ class SysDescrCli:
         Returns:
             str: Rendered sysDescr output.
         """
-        if as_json:
-            return system_description.to_json()
-        return str(system_description)
+        if as_text:
+            return str(system_description)
+        payload = json.loads(system_description.to_json())
+        return json.dumps(payload)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -160,7 +162,7 @@ class SysDescrCli:
             SysDescrCli._emit_error(f"SNMP request failed: {exc}")
             return SysDescrCli.EXIT_FAILURE
 
-        print(SysDescrCli.render_output(system_description, args.json))
+        print(SysDescrCli.render_output(system_description, args.text))
 
         if system_description.is_empty:
             return SysDescrCli.EXIT_FAILURE

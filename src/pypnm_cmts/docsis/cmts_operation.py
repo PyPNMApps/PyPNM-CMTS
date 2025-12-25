@@ -6,11 +6,38 @@ from __future__ import annotations
 import logging
 
 from pypnm.lib.inet import Inet, InetAddressStr
-from pypnm.lib.types import HostNameStr
+from pypnm.lib.mac_address import MacAddress
+from pypnm.lib.types import HostNameStr, InterfaceIndex, MacAddressStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
+from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
+    DocsIf3CmtsCmRegStatusEntry,
+    DocsIf3CmtsCmRegStatusIdEntry,
+)
 from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+from pypnm_cmts.lib.types import (
+    CableModemIndex,
+    CmtsCmRegStatusId,
+    CmtsCmRegStatusMacAddr,
+    IPv4Str,
+    IPv6LinkLocalStr,
+    IPv6Str,
+    MacAddressExist,
+    MdCmSgId,
+    MdNodeStatus,
+    NodeName,
+    RegisterCmInetAddress,
+    RegisterCmMacInetAddress,
+)
+
+DEFAULT_MD_CM_SG_ID: MdCmSgId = MdCmSgId(0)
+DEFAULT_MAC_ADDRESS_EXIST: MacAddressExist = MacAddressExist(False)
+EMPTY_REGISTER_CM_INET_ADDRESS: RegisterCmInetAddress = (
+    IPv4Str(""),
+    IPv6Str(""),
+    IPv6LinkLocalStr(IPv6Str("")),
+)
 
 
 class CmtsOperation:
@@ -152,3 +179,497 @@ class CmtsOperation:
             sys_uptime      =   sys_uptime,
             is_empty        =   is_empty,
         )
+
+    async def getDocsIf3MdNodeStatusMdDsSgId(self) -> list[MdNodeStatus]:
+        """
+        Fetch DocsIf3MdNodeStatusMdDsSgId for all nodes.
+
+        Returns:
+            list[MdNodeStatus]: List of tuples containing InterfaceIndex, NodeName, MdCmSgId.
+        """
+        oid_base: str = "docsIf3MdNodeStatusMdDsSgId"
+        return await self.__collect_md_node_status(oid_base)
+
+    async def getDocsIf3MdNodeStatusMdUsSgId(self) -> list[MdNodeStatus]:
+        """
+        Fetch docsIf3MdNodeStatusMdUsSgId  for all nodes.
+
+        Returns:
+            list[MdNodeStatus]: List of tuples containing InterfaceIndex, NodeName, MdCmSgId.
+        """
+        oid_base: str = "docsIf3MdNodeStatusMdUsSgId"
+        return await self.__collect_md_node_status(oid_base)
+
+    async def __collect_md_node_status(self, oid_base: str) -> list[MdNodeStatus]:
+        """
+        Collect node status entries from the provided OID base.
+        """
+        results: list[MdNodeStatus] = []
+        try:
+            result = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+        if not result:
+            return results
+
+        values = Snmp_v2c.snmp_get_result_value(result)
+
+        if not values:
+            return results
+
+        limit = len(result)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            parsed = self.__parse_md_node_status_oid(oid_base, result[idx][0])
+            if parsed is None:
+                continue
+            interface_index, node_name = parsed
+            try:
+                sg_id_value = int(values[idx])
+            except (TypeError, ValueError):
+                continue
+
+            results.append((interface_index, node_name, MdCmSgId(sg_id_value)))
+
+        return results
+
+    def __parse_md_node_status_oid(
+        self, oid_base: str, oid_value: object
+    ) -> tuple[InterfaceIndex, NodeName] | None:
+        """
+        Parse the OID suffix for docsIf3MdNodeStatus entries.
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 3:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        if len(suffix) < 2 + name_len + 1:
+            return None
+
+        name_bytes = bytes(suffix[2:2 + name_len])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        return (InterfaceIndex(int(interface_index)), node_name)
+
+    async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
+        """
+        Fetch docsIf3CmtsCmRegStatusMdCmSgId for a matching MAC address.
+
+        Returns:
+           tuple[MacAddressExist, MdCmSgId]: Tuple indicating if MAC exists and the MdCmSgId value.
+        """
+        if not isinstance(mac, MacAddress):
+            raise TypeError(f"mac must be MacAddress, got {type(mac).__name__}")
+        mac_oid: str = "docsIf3CmtsCmRegStatusMacAddr"
+        try:
+            mac_results = await self._snmp.walk(mac_oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {mac_oid}: {exc}")
+            return (DEFAULT_MAC_ADDRESS_EXIST, DEFAULT_MD_CM_SG_ID)
+        if not mac_results:
+            return (DEFAULT_MAC_ADDRESS_EXIST, DEFAULT_MD_CM_SG_ID)
+
+        mac_indices = Snmp_v2c.extract_last_oid_index(mac_results)
+        mac_values = Snmp_v2c.snmp_get_result_bytes(mac_results)
+        if not mac_indices or not mac_values:
+            return (DEFAULT_MAC_ADDRESS_EXIST, DEFAULT_MD_CM_SG_ID)
+
+        found_index: int | None = None
+        limit = len(mac_indices)
+        if len(mac_values) < limit:
+            limit = len(mac_values)
+
+        for idx in range(limit):
+            try:
+                candidate = MacAddress(mac_values[idx])
+            except (TypeError, ValueError):
+                continue
+            if candidate.is_equal(mac):
+                found_index = int(mac_indices[idx])
+                break
+
+        if found_index is None:
+            return (DEFAULT_MAC_ADDRESS_EXIST, DEFAULT_MD_CM_SG_ID)
+
+        sg_oid: str = "docsIf3CmtsCmRegStatusMdCmSgId"
+        try:
+            sg_results = await self._snmp.walk(sg_oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {sg_oid}: {exc}")
+            return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
+        if not sg_results:
+            return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
+
+        sg_indices = Snmp_v2c.extract_last_oid_index(sg_results)
+        sg_values = Snmp_v2c.snmp_get_result_value(sg_results)
+        if not sg_indices or not sg_values:
+            return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
+
+        sg_limit = len(sg_indices)
+        if len(sg_values) < sg_limit:
+            sg_limit = len(sg_values)
+
+        for idx in range(sg_limit):
+            try:
+                if int(sg_indices[idx]) != found_index:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                sg_id_value = int(sg_values[idx])
+            except (TypeError, ValueError):
+                return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
+
+            return (MacAddressExist(True), MdCmSgId(sg_id_value))
+
+        return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
+
+    async def getDocsIf3CmtsCmRegStatusMacAddr(self) -> list[CmtsCmRegStatusMacAddr]:
+        """
+        Fetch docsIf3CmtsCmRegStatusMacAddr for all nodes.
+
+        Returns:
+            list[CmtsCmRegStatusMacAddr]: List of tuples containing CmtsCmRegStatusId, MacAddressStr.
+        """
+        indices: list[int]
+        results: list[CmtsCmRegStatusMacAddr] = []
+        oid_base: str = "docsIf3CmtsCmRegStatusMacAddr"
+        try:
+            result = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+        if not result:
+            return results
+
+        indices = Snmp_v2c.extract_last_oid_index(result)
+        values = Snmp_v2c.snmp_get_result_bytes(result)
+
+        if not indices or not values:
+            return results
+
+        limit = len(indices)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            try:
+                reg_status_id = CmtsCmRegStatusId(int(indices[idx]))
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                mac_value = MacAddress(values[idx])
+            except (TypeError, ValueError):
+                continue
+
+            results.append((reg_status_id, MacAddressStr(str(mac_value))))
+
+        return results
+
+    async def getAllRegisterCm(self, serving_group_id: MdCmSgId) -> list[DocsIf3CmtsCmRegStatusEntry]:
+        """
+        Fetch all registered CM entries for a given serving group ID.
+
+        Args:
+            serving_group_id (MdCmSgId): The serving group ID to filter by.
+        Returns:
+            list[DocsIf3CmtsCmRegStatusEntry]: List of registered CM entries for the given serving group ID.
+        """
+        if not isinstance(serving_group_id, int) or isinstance(serving_group_id, bool):
+            raise TypeError(
+                f"serving_group_id must be MdCmSgId, got {type(serving_group_id).__name__}"
+            )
+
+        results: list[DocsIf3CmtsCmRegStatusEntry] = []
+        oid_base: str = "docsIf3CmtsCmRegStatusMdCmSgId"
+        try:
+            sg_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+        if not sg_results:
+            return results
+
+        indices = Snmp_v2c.extract_last_oid_index(sg_results)
+        values = Snmp_v2c.snmp_get_result_value(sg_results)
+        if not indices or not values:
+            return results
+
+        target = int(serving_group_id)
+        matched_indices: list[int] = []
+        limit = len(indices)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            try:
+                if int(values[idx]) != target:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            matched_indices.append(int(indices[idx]))
+
+        if not matched_indices:
+            return results
+
+        try:
+            results = await DocsIf3CmtsCmRegStatusIdEntry.get_entries(
+                self._snmp, matched_indices
+            )
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch CM registration entries: {exc}")
+            return []
+
+        return results
+
+    async def getAllRegisterCmMacInetAddress(
+        self, serving_group_id: MdCmSgId
+    ) -> list[RegisterCmMacInetAddress]:
+        """
+        Fetch all registered CM entries for a given serving group ID.
+
+        Args:
+            serving_group_id (MdCmSgId): The serving group ID to filter by.
+        Returns:
+            list[RegisterCmMacInetAddress]: Tuples containing CableModemIndex, MacAddressStr, IPv4Str, IPv6Str, IPv6LinkLocalStr.
+
+        DOCS-IF3-MIB::docsIf3CmtsCmRegStatusMacAddr.786433 = STRING: fc:77:7b:cc:4:20
+        DOCS-IF3-MIB::docsIf3CmtsCmRegStatusIPv6Addr.786433 = STRING: 0:0:0:0:0:0:0:0
+        DOCS-IF3-MIB::docsIf3CmtsCmRegStatusIPv6LinkLocal.786433 = STRING: 0:0:0:0:0:0:0:0
+        DOCS-IF3-MIB::docsIf3CmtsCmRegStatusIPv4Addr.786433 = STRING: 172.19.16.247
+
+        Do not use getAllRegisterCm(), this should be faster, you need only 4 gets.
+        """
+        if not isinstance(serving_group_id, int) or isinstance(serving_group_id, bool):
+            raise TypeError(
+                f"serving_group_id must be MdCmSgId, got {type(serving_group_id).__name__}"
+            )
+
+        results: list[RegisterCmMacInetAddress] = []
+        oid_base: str = "docsIf3CmtsCmRegStatusMdCmSgId"
+        try:
+            sg_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+        if not sg_results:
+            return results
+
+        indices = Snmp_v2c.extract_last_oid_index(sg_results)
+        values = Snmp_v2c.snmp_get_result_value(sg_results)
+        if not indices or not values:
+            return results
+
+        target = int(serving_group_id)
+        limit = len(indices)
+        if len(values) < limit:
+            limit = len(values)
+
+        matched_indices: list[int] = []
+        for idx in range(limit):
+            try:
+                if int(values[idx]) != target:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            matched_indices.append(int(indices[idx]))
+
+        async def fetch_field(oid: str) -> str:
+            try:
+                raw = await self._snmp.get(oid)
+            except Exception as exc:
+                self.logger.error(f"SNMP get failed for {oid}: {exc}")
+                return ""
+            if not raw:
+                return ""
+            value = Snmp_v2c.get_result_value(raw)
+            if value is None:
+                return ""
+            return str(value)
+
+        for cm_index in matched_indices:
+            mac = await fetch_field(f"docsIf3CmtsCmRegStatusMacAddr.{cm_index}")
+            ipv4 = await fetch_field(f"docsIf3CmtsCmRegStatusIPv4Addr.{cm_index}")
+            ipv6 = await fetch_field(f"docsIf3CmtsCmRegStatusIPv6Addr.{cm_index}")
+            ipv6_ll = await fetch_field(f"docsIf3CmtsCmRegStatusIPv6LinkLocal.{cm_index}")
+
+            if mac == "" and ipv4 == "" and ipv6 == "" and ipv6_ll == "":
+                continue
+
+            try:
+                mac_value = MacAddress(mac)
+            except (TypeError, ValueError):
+                continue
+
+            results.append(
+                (
+                    CableModemIndex(cm_index),
+                    MacAddressStr(str(mac_value)),
+                    IPv4Str(ipv4),
+                    IPv6Str(ipv6),
+                    IPv6LinkLocalStr(IPv6Str(ipv6_ll)),
+                )
+            )
+
+        return results
+
+    async def getCmInetAddress(
+        self, mac: MacAddress
+    ) -> tuple[MacAddressExist, RegisterCmInetAddress]:
+        """
+        Fetch CM inet addresses for a specific MAC address.
+        """
+        if not isinstance(mac, MacAddress):
+            raise TypeError(f"mac must be MacAddress, got {type(mac).__name__}")
+
+        mac_oid: str = "docsIf3CmtsCmRegStatusMacAddr"
+        try:
+            mac_results = await self._snmp.walk(mac_oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {mac_oid}: {exc}")
+            return (DEFAULT_MAC_ADDRESS_EXIST, EMPTY_REGISTER_CM_INET_ADDRESS)
+        if not mac_results:
+            return (DEFAULT_MAC_ADDRESS_EXIST, EMPTY_REGISTER_CM_INET_ADDRESS)
+
+        mac_indices = Snmp_v2c.extract_last_oid_index(mac_results)
+        mac_values = Snmp_v2c.snmp_get_result_bytes(mac_results)
+        if not mac_indices or not mac_values:
+            return (DEFAULT_MAC_ADDRESS_EXIST, EMPTY_REGISTER_CM_INET_ADDRESS)
+
+        found_index: int | None = None
+        limit = len(mac_indices)
+        if len(mac_values) < limit:
+            limit = len(mac_values)
+
+        for idx in range(limit):
+            try:
+                candidate = MacAddress(mac_values[idx])
+            except (TypeError, ValueError):
+                continue
+            if candidate.is_equal(mac):
+                found_index = int(mac_indices[idx])
+                break
+
+        if found_index is None:
+            return (DEFAULT_MAC_ADDRESS_EXIST, EMPTY_REGISTER_CM_INET_ADDRESS)
+
+        async def fetch_field(oid: str) -> str:
+            try:
+                raw = await self._snmp.get(oid)
+            except Exception as exc:
+                self.logger.error(f"SNMP get failed for {oid}: {exc}")
+                return ""
+            if not raw:
+                return ""
+            value = Snmp_v2c.get_result_value(raw)
+            if value is None:
+                return ""
+            return str(value)
+
+        ipv4_raw = await fetch_field(f"docsIf3CmtsCmRegStatusIPv4Addr.{found_index}")
+        ipv6_raw = await fetch_field(f"docsIf3CmtsCmRegStatusIPv6Addr.{found_index}")
+        ipv6_ll_raw = await fetch_field(
+            f"docsIf3CmtsCmRegStatusIPv6LinkLocal.{found_index}"
+        )
+        if ipv4_raw == "" and ipv6_raw == "" and ipv6_ll_raw == "":
+            async def fetch_field_walk(oid_base: str) -> str:
+                try:
+                    walk_results = await self._snmp.walk(oid_base)
+                except Exception as exc:
+                    self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+                    return ""
+                if not walk_results:
+                    return ""
+
+                walk_indices = Snmp_v2c.extract_last_oid_index(walk_results)
+                walk_values = Snmp_v2c.snmp_get_result_value(walk_results)
+                if not walk_indices or not walk_values:
+                    return ""
+
+                limit = len(walk_indices)
+                if len(walk_values) < limit:
+                    limit = len(walk_values)
+
+                for idx in range(limit):
+                    try:
+                        if int(walk_indices[idx]) != found_index:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                    return str(walk_values[idx])
+                return ""
+
+            ipv4_raw = await fetch_field_walk("docsIf3CmtsCmRegStatusIPv4Addr")
+            ipv6_raw = await fetch_field_walk("docsIf3CmtsCmRegStatusIPv6Addr")
+            ipv6_ll_raw = await fetch_field_walk("docsIf3CmtsCmRegStatusIPv6LinkLocal")
+
+        def normalize_hex_inet(value: str) -> str:
+            if not value.startswith("0x"):
+                return value
+            hex_str = value[2:]
+            if len(hex_str) % 2 != 0:
+                return value
+            try:
+                raw_bytes = bytes.fromhex(hex_str)
+            except ValueError:
+                return value
+            if len(raw_bytes) == 4:
+                return ".".join(str(byte) for byte in raw_bytes)
+            if len(raw_bytes) == 16:
+                parts = [
+                    f"{raw_bytes[i] << 8 | raw_bytes[i + 1]:x}"
+                    for i in range(0, 16, 2)
+                ]
+                return ":".join(parts)
+            return value
+
+        def validate_inet(value: str) -> IPv4Str | IPv6Str | IPv6LinkLocalStr:
+            if value == "":
+                return ""
+            normalized = normalize_hex_inet(value)
+            try:
+                Inet(InetAddressStr(normalized))
+            except ValueError:
+                return ""
+            return normalized
+
+        ipv4_value = IPv4Str(validate_inet(ipv4_raw))
+        ipv6_value = IPv6Str(validate_inet(ipv6_raw))
+        ipv6_ll_value = IPv6LinkLocalStr(IPv6Str(validate_inet(ipv6_ll_raw)))
+
+        return (
+            MacAddressExist(True),
+            (ipv4_value, ipv6_value, ipv6_ll_value),
+        )
+
+__all__ = [
+    "CmtsOperation",
+]

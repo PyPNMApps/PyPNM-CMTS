@@ -4,6 +4,12 @@
 """PyPNM-CMTS docsis data_type package."""
 from __future__ import annotations
 
+from .cmts_cm_reg_status_entry import DocsIf3CmtsCmRegStatusEntry
+from .cmts_cm_reg_status_entry import DocsIf3CmtsCmRegStatusIdEntry
 from .cmts_sysdescr import CmtsSysDescrModel
 
-__all__ = ["CmtsSysDescrModel"]
+__all__ = [
+    "CmtsSysDescrModel",
+    "DocsIf3CmtsCmRegStatusEntry",
+    "DocsIf3CmtsCmRegStatusIdEntry",
+]
