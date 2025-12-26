@@ -22,6 +22,11 @@ RegisterCmInetAddress   = tuple[IPv4Str, IPv6Str, IPv6LinkLocalStr]
 
 MacAddressExist = NewType("MacAddressExist", bool)
 
+CoordinationElectionName = NewType("CoordinationElectionName", str)
+LeaderId                 = NewType("LeaderId", str)
+OwnerId                  = NewType("OwnerId", str)
+ServiceGroupId           = NewType("ServiceGroupId", int)
+
 NodeName        = NewType("NodeName", str)
 MdCmSgId        = NewType("MdCmSgId", int)
 MdDsSgId        = NewType("MdDsSgId", int)
@@ -46,6 +51,10 @@ __all__ = [
     "IPv6LinkLocalStr",
     "CableModemIndex",
     "CmRegSgId",
+    "CoordinationElectionName",
+    "LeaderId",
+    "OwnerId",
+    "ServiceGroupId",
     "NodeName",
     "MdCmSgId",
     "MdDsSgId",

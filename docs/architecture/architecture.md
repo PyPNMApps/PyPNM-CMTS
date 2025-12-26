@@ -70,11 +70,13 @@ An append-only JSONL index is maintained per SG/day:
 - [✅] Docs updated (storage)
 
 ### Phase 2 — Coordination
-- [ ] File-based leader election
-- [ ] File-based SG lease with TTL
+- [✅] File-based leader election
+- [✅] File-based SG lease with TTL
+- [ ] CoordinationManager (tick-loop / heartbeat + SG partitioning across replicas)
 - [ ] Redis placeholder
 - [ ] K8 lease placeholder
-- [ ] Pytest coverage
+- [✅] Pytest coverage
+- [ ] Pytest coverage (CoordinationManager)
 - [ ] Docs updated (coordination)
 
 ### Phase 3 — Orchestrator Skeleton
