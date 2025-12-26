@@ -58,7 +58,9 @@ def test_not_leader_can_acquire_leases(tmp_path: Path) -> None:
 
     assert status_a.is_leader is True
     assert status_b.is_leader is False
-    assert len(status_b.held_sg_ids) <= 1
+    assert len(status_a.held_sg_ids) == 1
+    assert len(status_b.held_sg_ids) == 1
+    assert set(status_a.held_sg_ids).intersection(set(status_b.held_sg_ids)) == set()
 
 
 def test_leader_acquires_leases(tmp_path: Path) -> None:
@@ -199,13 +201,75 @@ def test_managers_converge_to_disjoint_leases(tmp_path: Path) -> None:
 
     service_groups = [SG_1, SG_2, ServiceGroupId(3), ServiceGroupId(4)]
 
-    for _ in range(4):
+    for _ in range(6):
         manager_a.tick(service_groups)
         manager_b.tick(service_groups)
+
+        held_a = set(manager_a.status().held_sg_ids)
+        held_b = set(manager_b.status().held_sg_ids)
+        if len(held_a) == 2 and len(held_b) == 2 and held_a.intersection(held_b) == set():
+            break
 
     held_a = set(manager_a.status().held_sg_ids)
     held_b = set(manager_b.status().held_sg_ids)
 
+    assert len(held_a) == 2
+    assert len(held_b) == 2
+    assert held_a.intersection(held_b) == set()
+
+
+def test_score_shard_converges_to_disjoint_leases(tmp_path: Path) -> None:
+    clock = [650.0]
+
+    def now() -> float:
+        return clock[0]
+
+    manager_a = CoordinationManager(
+        state_dir=tmp_path,
+        election_name=ELECTION_NAME,
+        leader_id=LEADER_A,
+        owner_id=OWNER_A,
+        leader_ttl_seconds=LEADER_TTL,
+        lease_ttl_seconds=LEASE_TTL,
+        target_service_groups=2,
+        shard_mode=CoordinationManager.SHARD_MODE_SCORE,
+        now=now,
+    )
+    manager_b = CoordinationManager(
+        state_dir=tmp_path,
+        election_name=ELECTION_NAME,
+        leader_id=LEADER_B,
+        owner_id=OWNER_B,
+        leader_ttl_seconds=LEADER_TTL,
+        lease_ttl_seconds=LEASE_TTL,
+        target_service_groups=2,
+        shard_mode=CoordinationManager.SHARD_MODE_SCORE,
+        now=now,
+    )
+
+    service_groups = [
+        SG_1,
+        SG_2,
+        ServiceGroupId(3),
+        ServiceGroupId(4),
+        ServiceGroupId(5),
+        ServiceGroupId(6),
+    ]
+
+    for _ in range(8):
+        manager_a.tick(service_groups)
+        manager_b.tick(service_groups)
+
+        held_a = set(manager_a.status().held_sg_ids)
+        held_b = set(manager_b.status().held_sg_ids)
+        if len(held_a) == 2 and len(held_b) == 2 and held_a.intersection(held_b) == set():
+            break
+
+    held_a = set(manager_a.status().held_sg_ids)
+    held_b = set(manager_b.status().held_sg_ids)
+
+    assert len(held_a) == 2
+    assert len(held_b) == 2
     assert held_a.intersection(held_b) == set()
 
 
@@ -244,10 +308,10 @@ def test_leader_uniqueness_and_renewal(tmp_path: Path) -> None:
     assert (status_a.is_leader and status_b.is_leader) is False
 
     leader_manager = manager_a if status_a.is_leader else manager_b
-    before = leader_manager._leader_election.status().expires_at
+    before = leader_manager.leader_status().expires_at
 
     clock[0] = 702.0
     leader_manager.tick([SG_1])
-    after = leader_manager._leader_election.status().expires_at
+    after = leader_manager.leader_status().expires_at
 
     assert after > before

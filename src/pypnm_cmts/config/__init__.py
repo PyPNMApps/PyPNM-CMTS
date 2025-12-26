@@ -9,9 +9,11 @@ from pypnm_cmts.config.orchestrator_config import (
     CmtsOrchestratorSettings,
     ServiceGroupDescriptor,
 )
+from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
 
 __all__ = [
     "CmtsAdapterConfig",
     "CmtsOrchestratorSettings",
+    "OwnerIdResolver",
     "ServiceGroupDescriptor",
 ]

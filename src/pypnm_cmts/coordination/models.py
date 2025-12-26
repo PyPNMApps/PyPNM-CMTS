@@ -114,7 +114,7 @@ class CoordinationTickResultModel(BaseModel):
     acquired_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups acquired during the tick.")
     renewed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups renewed during the tick.")
     released_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups released during the tick.")
-    failed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups that failed to acquire or renew.")
+    failed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups that failed to acquire, renew, or release.")
     message: str = Field(default="", description="Summary message for the tick operation.")
 
 

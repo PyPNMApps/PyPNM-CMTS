@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pypnm_cmts.coordination.models import (
     CoordinationReleaseAllResultModel,
     CoordinationStatusModel,
     CoordinationTickResultModel,
+    LeaderElectionStatusModel,
 )
 from pypnm_cmts.coordination.service_group_lease import FileServiceGroupLease
 from pypnm_cmts.lib.types import (
@@ -26,10 +28,14 @@ class CoordinationManager:
     Coordination manager that wires leader election and service group leases.
     """
 
-    MESSAGE_NOT_LEADER = "Leader not held; leases not acquired."
+    MESSAGE_NOT_LEADER = "Leader not held; lease operations complete."
     MESSAGE_LEADER_ACTIVE = "Leader active; lease operations complete."
     MESSAGE_RELEASED = "Leader and leases released."
     MIN_TARGET_SERVICE_GROUPS = 0
+    SHARD_MODE_SEQUENTIAL = "sequential"
+    SHARD_MODE_SCORE = "score"
+    SHARD_MODE_DEFAULT = SHARD_MODE_SEQUENTIAL
+    SCORE_DIGEST_BYTES = 8
 
     def __init__(
         self,
@@ -40,6 +46,7 @@ class CoordinationManager:
         leader_ttl_seconds: int,
         lease_ttl_seconds: int,
         target_service_groups: int,
+        shard_mode: str = SHARD_MODE_DEFAULT,
         now: Callable[[], float] | None = None,
     ) -> None:
         """
@@ -53,10 +60,13 @@ class CoordinationManager:
             leader_ttl_seconds (int): TTL in seconds for leader election.
             lease_ttl_seconds (int): TTL in seconds for service group leases.
             target_service_groups (int): Target number of service groups to hold.
+            shard_mode (str): Sharding mode for candidate ordering.
             now (Callable[[], float] | None): Optional time provider for testing.
         """
         if int(target_service_groups) < self.MIN_TARGET_SERVICE_GROUPS:
             raise ValueError("target_service_groups must be non-negative.")
+        if shard_mode not in (self.SHARD_MODE_SEQUENTIAL, self.SHARD_MODE_SCORE):
+            raise ValueError("shard_mode must be 'sequential' or 'score'.")
         self._state_dir = state_dir
         self._election_name = election_name
         self._leader_id = leader_id
@@ -64,6 +74,7 @@ class CoordinationManager:
         self._leader_ttl_seconds = int(leader_ttl_seconds)
         self._lease_ttl_seconds = int(lease_ttl_seconds)
         self._target_service_groups = int(target_service_groups)
+        self._shard_mode = shard_mode
         self._now = now
         self._held_leases: set[ServiceGroupId] = set()
 
@@ -79,9 +90,10 @@ class CoordinationManager:
         """
         Execute one deterministic coordination step.
 
-        Leader election is acquired or renewed first. If the manager is not leader,
-        no leases are acquired and any held leases are released. If leader, leases
-        are acquired or renewed for each service group.
+        Leader election is acquired or renewed each tick. Service group lease
+        operations occur regardless of leader state. The manager maintains up to
+        target_service_groups leases using deterministic renew, release, and
+        acquire ordering.
 
         Args:
             service_groups (list[ServiceGroupId]): Service groups to coordinate.
@@ -95,7 +107,7 @@ class CoordinationManager:
         failed_sg_ids: list[ServiceGroupId] = []
 
         leader_result = self._leader_election.try_acquire()
-        if leader_result.is_leader:
+        if leader_result.is_leader and not leader_result.acquired:
             renew_result = self._leader_election.renew()
             if renew_result.renewed:
                 leader_result = renew_result
@@ -124,11 +136,13 @@ class CoordinationManager:
                     failed_sg_ids.append(sg_id)
 
         if len(self._held_leases) < target_count:
-            for sg_id in self._sorted_service_groups(service_groups):
+            attempted: set[ServiceGroupId] = set()
+            for sg_id in self._candidate_service_groups(service_groups):
                 if len(self._held_leases) >= target_count:
                     break
                 if sg_id in self._held_leases:
                     continue
+                attempted.add(sg_id)
                 lease = self._lease_for_sg(sg_id)
                 acquire_result = lease.try_acquire()
                 if acquire_result.acquired:
@@ -136,6 +150,22 @@ class CoordinationManager:
                     acquired_sg_ids.append(sg_id)
                 else:
                     failed_sg_ids.append(sg_id)
+
+            if len(self._held_leases) < target_count:
+                for sg_id in self._sorted_service_groups(service_groups):
+                    if len(self._held_leases) >= target_count:
+                        break
+                    if sg_id in self._held_leases:
+                        continue
+                    if sg_id in attempted:
+                        continue
+                    lease = self._lease_for_sg(sg_id)
+                    acquire_result = lease.try_acquire()
+                    if acquire_result.acquired:
+                        self._held_leases.add(sg_id)
+                        acquired_sg_ids.append(sg_id)
+                    else:
+                        failed_sg_ids.append(sg_id)
 
         return CoordinationTickResultModel(
             is_leader=leader_result.is_leader,
@@ -190,6 +220,15 @@ class CoordinationManager:
             message=leader_status.message,
         )
 
+    def leader_status(self) -> LeaderElectionStatusModel:
+        """
+        Return the current leader election status.
+
+        Returns:
+            LeaderElectionStatusModel: Snapshot of the leader election record.
+        """
+        return self._leader_election.status()
+
     def _lease_for_sg(self, sg_id: ServiceGroupId) -> FileServiceGroupLease:
         return FileServiceGroupLease(
             state_dir=self._state_dir,
@@ -202,6 +241,25 @@ class CoordinationManager:
 
     def _sorted_held_leases(self, reverse: bool = False) -> list[ServiceGroupId]:
         return sorted(self._held_leases, key=int, reverse=reverse)
+
+    def _candidate_service_groups(self, service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        if self._shard_mode == self.SHARD_MODE_SCORE:
+            return self._score_ordered_service_groups(service_groups)
+        return self._sorted_service_groups(service_groups)
+
+    def _score_ordered_service_groups(self, service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        scored: list[tuple[int, int, ServiceGroupId]] = []
+        for sg_id in service_groups:
+            score = self._score_for_sg(sg_id)
+            scored.append((-score, int(sg_id), sg_id))
+        scored.sort()
+        return [item[2] for item in scored]
+
+    def _score_for_sg(self, sg_id: ServiceGroupId) -> int:
+        payload = f"{self._owner_id}:{int(sg_id)}".encode()
+        digest = hashlib.sha256(payload).digest()
+        slice_bytes = digest[: self.SCORE_DIGEST_BYTES]
+        return int.from_bytes(slice_bytes, byteorder="big", signed=False)
 
     @staticmethod
     def _sorted_service_groups(service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:

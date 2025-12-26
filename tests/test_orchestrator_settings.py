@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from pypnm_cmts.cli import _run_cli
+import pytest
+
+from pypnm_cmts.cli import EXIT_CODE_USAGE, _run_cli
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 
 
@@ -40,4 +42,19 @@ def test_worker_mode_requires_sg_id(monkeypatch: object) -> None:
     )
 
     exit_code = _run_cli()
-    assert exit_code == 2
+    assert exit_code == EXIT_CODE_USAGE
+
+
+def test_orchestrator_settings_invalid_shard_mode_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings(shard_mode="invalid")
+
+
+def test_orchestrator_settings_negative_target_service_groups_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings(target_service_groups=-1)
+
+
+def test_orchestrator_settings_negative_worker_cap_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings(worker_cap=-1)

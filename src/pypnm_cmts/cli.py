@@ -14,6 +14,7 @@ from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
 
 SUCCESS_EXIT_CODE = 0
+EXIT_CODE_USAGE = 2
 HOST_DEFAULT = "127.0.0.1"
 PORT_DEFAULT = 8000
 LOG_LEVEL_DEFAULT = "info"
@@ -135,7 +136,7 @@ def _run_cli() -> int:
         mode_value = OrchestratorMode(args.mode)
         if mode_value == OrchestratorMode.WORKER and args.sg_id == "":
             print("ERROR: --sg-id is required when mode=worker.", file=sys.stderr)
-            return 2
+            return EXIT_CODE_USAGE
         if mode_value == OrchestratorMode.STANDALONE:
             print("Mode standalone is wired but not implemented (Phase-1).")
         elif mode_value == OrchestratorMode.CONTROLLER:

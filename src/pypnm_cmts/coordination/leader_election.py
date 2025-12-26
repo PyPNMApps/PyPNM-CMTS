@@ -77,7 +77,7 @@ class FileLeaderElection:
                 if record.leader_id == self._leader_id:
                     remaining = self._remaining_seconds(record, now)
                     return LeaderElectionAcquireResultModel(
-                        acquired=True,
+                        acquired=False,
                         is_leader=True,
                         leader_id=record.leader_id,
                         acquired_at=record.acquired_at,

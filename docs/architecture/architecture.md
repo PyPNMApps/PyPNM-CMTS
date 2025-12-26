@@ -28,6 +28,7 @@ No database is used.
 - Controller + SG workers + API
 - In-process concurrency
 - File-based coordination
+- SG workers scale with Service Groups; worker pool size should be configurable (min(num_sgs, cap)).
 
 ### Controller Mode
 - Discovery + reconciliation only
@@ -72,11 +73,12 @@ An append-only JSONL index is maintained per SG/day:
 ### Phase 2 — Coordination
 - [✅] File-based leader election
 - [✅] File-based SG lease with TTL
-- [ ] CoordinationManager (tick-loop / heartbeat + SG partitioning across replicas)
+- [✅] CoordinationManager (tick-loop / heartbeat + SG partitioning across replicas)
 - [ ] Redis placeholder
 - [ ] K8 lease placeholder
 - [✅] Pytest coverage
-- [ ] Pytest coverage (CoordinationManager)
+- [✅] Pytest coverage (CoordinationManager)
+- [✅] MkDocs Mermaid support
 - [ ] Docs updated (coordination)
 
 ### Phase 3 — Orchestrator Skeleton

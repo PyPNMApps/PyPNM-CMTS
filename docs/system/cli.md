@@ -39,6 +39,21 @@ pypnm-cmts --reload --reload-dir src --reload-dir tools
 pypnm-cmts --ssl --cert ./certs/cert.pem --key ./certs/key.pem
 ```
 
+## Planned coordination flags
+
+These flags are documented for coordination wiring and are not yet exposed in the CLI.
+
+Example (planned):
+
+```bash
+pypnm-cmts run --mode standalone --owner-id replica-1 --target-service-groups 2 --shard-mode score
+```
+
+Planned flags:
+- --owner-id <str>
+- --target-service-groups <int>
+- --shard-mode sequential|score
+
 ## Options
 
 ```text
