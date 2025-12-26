@@ -6,7 +6,14 @@ from __future__ import annotations
 
 from typing import NewType
 
-from pypnm.lib.types import InterfaceIndex, IPv4Str, IPv6Str, MacAddressStr
+from pypnm.lib.types import InterfaceIndex, IPv4Str, IPv6Str, MacAddressStr, SnmpIndex
+
+
+IPv6LinkLocalStr = NewType("IPv6LinkLocalStr", IPv6Str)
+CableModemIndex = NewType("CableModemIndex", SnmpIndex)
+CmRegSgId = NewType("CmRegSgId", int)
+RegisterCmMacInetAddress = tuple[CableModemIndex, MacAddressStr, IPv4Str, IPv6Str, IPv6LinkLocalStr]
+RegisterCmInetAddress = tuple[IPv4Str, IPv6Str, IPv6LinkLocalStr]
 
 MacAddressExist = NewType("MacAddressExist", bool)
 
@@ -16,21 +23,6 @@ MdNodeStatus    = tuple[InterfaceIndex, NodeName, MdCmSgId]
 
 CmtsCmRegStatusId       = NewType("CmtsCmRegStatusId", int)
 CmtsCmRegStatusMacAddr  = tuple[CmtsCmRegStatusId, MacAddressStr]
-CableModemIndex         = NewType("CableModemIndex", int)
-IPv6LinkLocalStr        = NewType("IPv6LinkLocalStr", IPv6Str)
-CmRegSgId               = NewType("CmRegSgId", int)
-RegisterCmMacInetAddress = tuple[
-    CableModemIndex,
-    MacAddressStr,
-    IPv4Str,
-    IPv6Str,
-    IPv6LinkLocalStr,
-]
-RegisterCmInetAddress = tuple[
-    IPv4Str,
-    IPv6Str,
-    IPv6LinkLocalStr,
-]
 CmtsCmRegState          = NewType("CmtsCmRegState", int)
 InterfaceIndexOrZero    = NewType("InterfaceIndexOrZero", int)
 MdIfIndex               = InterfaceIndexOrZero
@@ -44,16 +36,14 @@ InetAddressIPv6         = IPv6Str
 
 __all__ = [
     "MacAddressExist",
+    "IPv6LinkLocalStr",
+    "CableModemIndex",
+    "CmRegSgId",
     "NodeName",
     "MdCmSgId",
     "MdNodeStatus",
     "CmtsCmRegStatusId",
     "CmtsCmRegStatusMacAddr",
-    "CableModemIndex",
-    "IPv6LinkLocalStr",
-    "CmRegSgId",
-    "RegisterCmMacInetAddress",
-    "RegisterCmInetAddress",
     "CmtsCmRegState",
     "InterfaceIndexOrZero",
     "MdIfIndex",
@@ -64,4 +54,6 @@ __all__ = [
     "EnergyMgtBits",
     "InetAddressIPv4",
     "InetAddressIPv6",
+    "RegisterCmMacInetAddress",
+    "RegisterCmInetAddress",
 ]

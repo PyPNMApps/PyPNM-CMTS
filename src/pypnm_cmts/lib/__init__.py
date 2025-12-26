@@ -4,3 +4,6 @@
 """PyPNM-CMTS lib package."""
 from __future__ import annotations
 
+from .types import CmRegSgId
+
+__all__ = ["CmRegSgId"]
