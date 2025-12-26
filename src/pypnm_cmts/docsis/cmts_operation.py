@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.mac_address import MacAddress
-from pypnm.lib.types import HostNameStr, InterfaceIndex, MacAddressStr
+from pypnm.lib.types import ChannelId, HostNameStr, InterfaceIndex, MacAddressStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
 from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
@@ -16,9 +17,13 @@ from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
 )
 from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
 from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
+from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
+    CmtsServiceGroupTopologyModel,
+)
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 from pypnm_cmts.lib.types import (
     CableModemIndex,
+    ChSetId,
     CmRegSgId,
     CmtsCmRegStatusId,
     CmtsCmRegStatusMacAddr,
@@ -38,11 +43,25 @@ from pypnm_cmts.lib.types import (
 DEFAULT_MD_CM_SG_ID: MdCmSgId = MdCmSgId(0)
 DEFAULT_CM_REG_SG_ID: CmRegSgId = CmRegSgId(0)
 DEFAULT_MAC_ADDRESS_EXIST: MacAddressExist = MacAddressExist(False)
+DEFAULT_CH_SET_ID: ChSetId = ChSetId(0)
 EMPTY_REGISTER_CM_INET_ADDRESS: RegisterCmInetAddress = (
-    IPv4Str(""),
-    IPv6Str(""),
-    IPv6LinkLocalStr(IPv6Str("")),
+    IPv4Str(InetAddressStr('')),
+    IPv6Str(InetAddressStr('')),
+    IPv6LinkLocalStr(IPv6Str(InetAddressStr(''))),
 )
+
+
+@dataclass(frozen=True)
+class _ServiceGroupKey:
+    if_index: int
+    node_name: str
+    md_cm_sg_id: int
+
+
+@dataclass(frozen=True)
+class _ServiceGroupChSetKey:
+    if_index: int
+    sg_id: int
 
 
 class CmtsOperation:
@@ -266,13 +285,7 @@ class CmtsOperation:
         if not result:
             return (False, DEFAULT_CM_REG_SG_ID)
 
-        values = Snmp_v2c.snmp_get_result_value(result)
-        if not values:
-            return (False, DEFAULT_CM_REG_SG_ID)
-
         limit = len(result)
-        if len(values) < limit:
-            limit = len(values)
 
         for idx in range(limit):
             parsed = self.__parse_md_node_status_oid_with_sg_id(oid_base, result[idx][0])
@@ -314,10 +327,13 @@ class CmtsOperation:
             limit = len(values)
 
         for idx in range(limit):
+            if not isinstance(values[idx], (int, str)):
+                continue
             try:
-                if int(values[idx]) != target:
-                    continue
+                value_int = int(values[idx])
             except (TypeError, ValueError):
+                continue
+            if value_int != target:
                 continue
 
             parsed = self.__parse_md_node_status_oid_with_sg_id(oid_base, result[idx][0])
@@ -534,6 +550,8 @@ class CmtsOperation:
             parsed_key = self.__parse_md_node_status_key(oid_base, walk_results[idx][0])
             if parsed_key is None:
                 continue
+            if not isinstance(values[idx], (int, str)):
+                continue
             try:
                 col_value = int(values[idx])
             except (TypeError, ValueError):
@@ -555,12 +573,16 @@ class CmtsOperation:
         ds_oid = "docsIf3MdNodeStatusMdDsSgId"
         us_oid = "docsIf3MdNodeStatusMdUsSgId"
 
-        merged: dict[tuple[int, str, int], CmtsServiceGroupModel] = {}
+        merged: dict[_ServiceGroupKey, CmtsServiceGroupModel] = {}
 
         ds_rows = await self.__collect_md_node_status_value(ds_oid)
         for key, ds_value in ds_rows:
             if_index, node_name, md_cm_sg_id = key
-            dict_key = (int(if_index), str(node_name), int(md_cm_sg_id))
+            dict_key = _ServiceGroupKey(
+                int(if_index),
+                str(node_name),
+                int(md_cm_sg_id),
+            )
             merged[dict_key] = CmtsServiceGroupModel(
                 if_index    =   if_index,
                 node_name   =   node_name,
@@ -572,7 +594,11 @@ class CmtsOperation:
         us_rows = await self.__collect_md_node_status_value(us_oid)
         for key, us_value in us_rows:
             if_index, node_name, md_cm_sg_id = key
-            dict_key = (int(if_index), str(node_name), int(md_cm_sg_id))
+            dict_key = _ServiceGroupKey(
+                int(if_index),
+                str(node_name),
+                int(md_cm_sg_id),
+            )
             if dict_key not in merged:
                 merged[dict_key] = CmtsServiceGroupModel(
                     if_index    =   if_index,
@@ -584,7 +610,380 @@ class CmtsOperation:
             else:
                 merged[dict_key].md_us_sg_id = MdUsSgId(us_value)
 
-        return [merged[k] for k in sorted(merged.keys())]
+        sorted_keys = sorted(
+            merged.keys(),
+            key=lambda key: (key.if_index, key.node_name, key.md_cm_sg_id),
+        )
+        return [merged[k] for k in sorted_keys]
+
+    @staticmethod
+    def __parse_channel_list(raw_value: str) -> list[ChannelId]:
+        tokens = raw_value.replace(",", " ").split()
+        channels: list[ChannelId] = []
+        for token in tokens:
+            if not token.isdigit():
+                continue
+            channels.append(ChannelId(int(token)))
+        return channels
+
+    async def __collect_ch_set_id_map(
+        self, oid_base: str
+    ) -> dict[_ServiceGroupChSetKey, ChSetId]:
+        ch_set_map: dict[_ServiceGroupChSetKey, ChSetId] = {}
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return ch_set_map
+
+        if not walk_results:
+            return ch_set_map
+
+        values = Snmp_v2c.snmp_get_result_value(walk_results)
+        if not values:
+            return ch_set_map
+
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID base for {oid_base}: {exc}")
+            return ch_set_map
+
+        limit = len(walk_results)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            try:
+                oid_tuple = tuple(walk_results[idx][0])
+            except (TypeError, ValueError):
+                continue
+
+            if len(oid_tuple) <= len(base_tuple) + 1:
+                continue
+
+            suffix = oid_tuple[len(base_tuple):]
+            if len(suffix) < 2:
+                continue
+
+            if_index = suffix[0]
+            sg_id = suffix[1]
+            if not isinstance(if_index, int) or not isinstance(sg_id, int):
+                continue
+
+            try:
+                ch_set_id = int(values[idx])
+            except (TypeError, ValueError):
+                continue
+
+            ch_set_map[_ServiceGroupChSetKey(int(if_index), int(sg_id))] = ChSetId(
+                ch_set_id
+            )
+
+        return ch_set_map
+
+    async def __collect_channel_list_map(
+        self, oid_base: str
+    ) -> dict[int, list[ChannelId]]:
+        channel_map: dict[int, list[ChannelId]] = {}
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return channel_map
+
+        if not walk_results:
+            return channel_map
+
+        values = Snmp_v2c.snmp_get_result_value(walk_results)
+        if not values:
+            return channel_map
+
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID base for {oid_base}: {exc}")
+            return channel_map
+
+        limit = len(walk_results)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            try:
+                oid_tuple = tuple(walk_results[idx][0])
+            except (TypeError, ValueError):
+                continue
+
+            if len(oid_tuple) <= len(base_tuple):
+                continue
+
+            suffix = oid_tuple[len(base_tuple):]
+            if len(suffix) < 1:
+                continue
+
+            ch_set_id = suffix[0]
+            if not isinstance(ch_set_id, int):
+                continue
+
+            channel_map[int(ch_set_id)] = self.__parse_channel_list(str(values[idx]))
+
+        return channel_map
+
+    async def getDocsIf3MdDsSgStatusChSetId(
+        self,
+        if_index: InterfaceIndex,
+        md_ds_sg_id: MdDsSgId,
+    ) -> tuple[bool, ChSetId]:
+        """
+        Fetch ChSetId for a MAC Domain downstream service group.
+
+        OID:
+            docsIf3MdDsSgStatusChSetId
+
+        Index:
+            ifIndex,
+            docsIf3MdDsSgStatusMdDsSgId
+        """
+        if not isinstance(if_index, int) or isinstance(if_index, bool):
+            raise TypeError(
+                f"if_index must be InterfaceIndex, got {type(if_index).__name__}"
+            )
+        if not isinstance(md_ds_sg_id, int) or isinstance(md_ds_sg_id, bool):
+            raise TypeError(
+                f"md_ds_sg_id must be MdDsSgId, got {type(md_ds_sg_id).__name__}"
+            )
+
+        oid_base: str = "docsIf3MdDsSgStatusChSetId"
+        oid = f"{oid_base}.{int(if_index)}.{int(md_ds_sg_id)}"
+
+        try:
+            result = await self._snmp.get(oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid}: {exc}")
+            return (False, DEFAULT_CH_SET_ID)
+        if not result:
+            return (False, DEFAULT_CH_SET_ID)
+
+        raw_value = Snmp_v2c.get_result_value(result)
+        if raw_value is None:
+            return (False, DEFAULT_CH_SET_ID)
+
+        try:
+            ch_set_id = int(str(raw_value))
+        except (TypeError, ValueError):
+            return (False, DEFAULT_CH_SET_ID)
+
+        return (True, ChSetId(ch_set_id))
+
+    async def getDocsIf3MdUsSgStatusChSetId(
+        self,
+        if_index: InterfaceIndex,
+        md_us_sg_id: MdUsSgId,
+    ) -> tuple[bool, ChSetId]:
+        """
+        Fetch ChSetId for a MAC Domain upstream service group.
+
+        OID:
+            docsIf3MdUsSgStatusChSetId
+
+        Index:
+            ifIndex,
+            docsIf3MdUsSgStatusMdUsSgId
+        """
+        if not isinstance(if_index, int) or isinstance(if_index, bool):
+            raise TypeError(
+                f"if_index must be InterfaceIndex, got {type(if_index).__name__}"
+            )
+        if not isinstance(md_us_sg_id, int) or isinstance(md_us_sg_id, bool):
+            raise TypeError(
+                f"md_us_sg_id must be MdUsSgId, got {type(md_us_sg_id).__name__}"
+            )
+
+        oid_base: str = "docsIf3MdUsSgStatusChSetId"
+        oid = f"{oid_base}.{int(if_index)}.{int(md_us_sg_id)}"
+
+        try:
+            result = await self._snmp.get(oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid}: {exc}")
+            return (False, DEFAULT_CH_SET_ID)
+        if not result:
+            return (False, DEFAULT_CH_SET_ID)
+
+        raw_value = Snmp_v2c.get_result_value(result)
+        if raw_value is None:
+            return (False, DEFAULT_CH_SET_ID)
+
+        try:
+            ch_set_id = int(str(raw_value))
+        except (TypeError, ValueError):
+            return (False, DEFAULT_CH_SET_ID)
+
+        return (True, ChSetId(ch_set_id))
+
+    async def getDocsIf3DsChSetChList(
+        self,
+        ch_set_id: ChSetId,
+    ) -> list[ChannelId]:
+        """
+        Fetch downstream channel list for a given ChSetId.
+
+        OID:
+            docsIf3DsChSetChList
+
+        Index:
+            docsIf3DsChSetId
+        """
+        if not isinstance(ch_set_id, int) or isinstance(ch_set_id, bool):
+            raise TypeError(
+                f"ch_set_id must be ChSetId, got {type(ch_set_id).__name__}"
+            )
+
+        oid_base: str = "docsIf3DsChSetChList"
+        oid = f"{oid_base}.{int(ch_set_id)}"
+
+        try:
+            result = await self._snmp.get(oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid}: {exc}")
+            return []
+        if not result:
+            return []
+
+        raw_value = Snmp_v2c.get_result_value(result)
+        if raw_value is None:
+            return []
+
+        return self.__parse_channel_list(str(raw_value))
+
+    async def getDocsIf3UsChSetChList(
+        self,
+        ch_set_id: ChSetId,
+    ) -> list[ChannelId]:
+        """
+        Fetch upstream channel list for a given ChSetId.
+
+        OID:
+            docsIf3UsChSetChList
+
+        Index:
+            docsIf3UsChSetId
+        """
+        if not isinstance(ch_set_id, int) or isinstance(ch_set_id, bool):
+            raise TypeError(
+                f"ch_set_id must be ChSetId, got {type(ch_set_id).__name__}"
+            )
+
+        oid_base: str = "docsIf3UsChSetChList"
+        oid = f"{oid_base}.{int(ch_set_id)}"
+
+        try:
+            result = await self._snmp.get(oid)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid}: {exc}")
+            return []
+        if not result:
+            return []
+
+        raw_value = Snmp_v2c.get_result_value(result)
+        if raw_value is None:
+            return []
+
+        return self.__parse_channel_list(str(raw_value))
+
+    async def getServiceGroupTopology(self) -> list[CmtsServiceGroupTopologyModel]:
+        """
+        Build a service-group topology view by joining:
+
+        Inputs:
+            listServiceGroups()
+
+        Joins:
+            docsIf3MdDsSgStatusChSetId   -> DS ChSetId
+            docsIf3MdUsSgStatusChSetId   -> US ChSetId
+            docsIf3DsChSetChList         -> DS channel list
+            docsIf3UsChSetChList         -> US channel list
+        """
+        results: list[CmtsServiceGroupTopologyModel] = []
+        service_groups = await self.listServiceGroups()
+        ds_ch_set_map = await self.__collect_ch_set_id_map(
+            "docsIf3MdDsSgStatusChSetId"
+        )
+        us_ch_set_map = await self.__collect_ch_set_id_map(
+            "docsIf3MdUsSgStatusChSetId"
+        )
+        ds_channel_map = await self.__collect_channel_list_map("docsIf3DsChSetChList")
+        us_channel_map = await self.__collect_channel_list_map("docsIf3UsChSetChList")
+
+        for group in service_groups:
+            ds_exists: bool = False
+            ds_ch_set_id: ChSetId = DEFAULT_CH_SET_ID
+            if int(group.md_ds_sg_id) > 0:
+                ds_key = _ServiceGroupChSetKey(
+                    int(group.if_index),
+                    int(group.md_ds_sg_id),
+                )
+                if ds_ch_set_map:
+                    if ds_key in ds_ch_set_map:
+                        ds_exists = True
+                        ds_ch_set_id = ds_ch_set_map[ds_key]
+                else:
+                    ds_exists, ds_ch_set_id = await self.getDocsIf3MdDsSgStatusChSetId(
+                        group.if_index,
+                        group.md_ds_sg_id,
+                    )
+
+            us_exists: bool = False
+            us_ch_set_id: ChSetId = DEFAULT_CH_SET_ID
+            if int(group.md_us_sg_id) > 0:
+                us_key = _ServiceGroupChSetKey(
+                    int(group.if_index),
+                    int(group.md_us_sg_id),
+                )
+                if us_ch_set_map:
+                    if us_key in us_ch_set_map:
+                        us_exists = True
+                        us_ch_set_id = us_ch_set_map[us_key]
+                else:
+                    us_exists, us_ch_set_id = await self.getDocsIf3MdUsSgStatusChSetId(
+                        group.if_index,
+                        group.md_us_sg_id,
+                    )
+
+            ds_channels: list[ChannelId] = []
+            if int(ds_ch_set_id) in ds_channel_map:
+                ds_channels = ds_channel_map[int(ds_ch_set_id)]
+            else:
+                if bool(ds_exists) and int(ds_ch_set_id) > 0:
+                    ds_channels = await self.getDocsIf3DsChSetChList(ds_ch_set_id)
+
+            us_channels: list[ChannelId] = []
+            if int(us_ch_set_id) in us_channel_map:
+                us_channels = us_channel_map[int(us_ch_set_id)]
+            else:
+                if bool(us_exists) and int(us_ch_set_id) > 0:
+                    us_channels = await self.getDocsIf3UsChSetChList(us_ch_set_id)
+
+            results.append(
+                CmtsServiceGroupTopologyModel(
+                    if_index        =   group.if_index,
+                    node_name       =   group.node_name,
+                    md_cm_sg_id     =   group.md_cm_sg_id,
+                    md_ds_sg_id     =   group.md_ds_sg_id,
+                    md_us_sg_id     =   group.md_us_sg_id,
+                    ds_exists       =   bool(ds_exists),
+                    us_exists       =   bool(us_exists),
+                    ds_ch_set_id    =   ds_ch_set_id,
+                    us_ch_set_id    =   us_ch_set_id,
+                    ds_channels     =   ds_channels,
+                    us_channels     =   us_channels,
+                )
+            )
+
+        return results
 
     async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
         """
@@ -615,6 +1014,8 @@ class CmtsOperation:
             limit = len(mac_values)
 
         for idx in range(limit):
+            if not isinstance(mac_values[idx], (bytes, str)):
+                continue
             try:
                 candidate = MacAddress(mac_values[idx])
             except (TypeError, ValueError):
@@ -645,12 +1046,17 @@ class CmtsOperation:
             sg_limit = len(sg_values)
 
         for idx in range(sg_limit):
+            if not isinstance(sg_indices[idx], (int, str)):
+                continue
             try:
-                if int(sg_indices[idx]) != found_index:
-                    continue
+                index_int = int(sg_indices[idx])
             except (TypeError, ValueError):
                 continue
+            if index_int != found_index:
+                continue
 
+            if not isinstance(sg_values[idx], (int, str)):
+                return (MacAddressExist(True), DEFAULT_MD_CM_SG_ID)
             try:
                 sg_id_value = int(sg_values[idx])
             except (TypeError, ValueError):
@@ -689,11 +1095,15 @@ class CmtsOperation:
             limit = len(values)
 
         for idx in range(limit):
+            if not isinstance(indices[idx], (int, str)):
+                continue
             try:
                 reg_status_id = CmtsCmRegStatusId(int(indices[idx]))
             except (TypeError, ValueError):
                 continue
 
+            if not isinstance(values[idx], (bytes, str)):
+                continue
             try:
                 mac_value = MacAddress(values[idx])
             except (TypeError, ValueError):
@@ -739,10 +1149,13 @@ class CmtsOperation:
             limit = len(values)
 
         for idx in range(limit):
+            if not isinstance(values[idx], (int, str)):
+                continue
             try:
-                if int(values[idx]) != target:
-                    continue
+                value_int = int(values[idx])
             except (TypeError, ValueError):
+                continue
+            if value_int != target:
                 continue
             matched_indices.append(int(indices[idx]))
 
@@ -833,6 +1246,8 @@ class CmtsOperation:
             if mac == "" and ipv4 == "" and ipv6 == "" and ipv6_ll == "":
                 continue
 
+            if not isinstance(mac, str) or mac == "":
+                continue
             try:
                 mac_value = MacAddress(mac)
             except (TypeError, ValueError):
@@ -879,6 +1294,8 @@ class CmtsOperation:
             limit = len(mac_values)
 
         for idx in range(limit):
+            if not isinstance(mac_values[idx], (bytes, str)):
+                continue
             try:
                 candidate = MacAddress(mac_values[idx])
             except (TypeError, ValueError):
@@ -928,10 +1345,13 @@ class CmtsOperation:
                     limit = len(walk_values)
 
                 for idx in range(limit):
+                    if not isinstance(walk_indices[idx], (int, str)):
+                        continue
                     try:
-                        if int(walk_indices[idx]) != found_index:
-                            continue
+                        index_int = int(walk_indices[idx])
                     except (TypeError, ValueError):
+                        continue
+                    if index_int != found_index:
                         continue
                     return str(walk_values[idx])
                 return ""

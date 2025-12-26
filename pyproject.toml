@@ -68,7 +68,6 @@ minversion   = "8.0"
 pythonpath   = ["src"]
 testpaths    = ["tests"]
 addopts      = "-ra -q --strict-markers --tb=short"
-asyncio_mode = "auto"
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(levelname)s %(name)s:%(lineno)d | %(message)s"

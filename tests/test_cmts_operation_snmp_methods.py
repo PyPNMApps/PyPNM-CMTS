@@ -9,6 +9,7 @@ from collections.abc import Iterator
 import pytest
 from pypnm.lib.inet import Inet
 from pypnm.lib.mac_address import MacAddress
+from pypnm.lib.types import InterfaceIndex
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
@@ -16,7 +17,15 @@ from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
     DocsIf3CmtsCmRegStatusEntry,
     DocsIf3CmtsCmRegStatusIdEntry,
 )
-from pypnm_cmts.lib.types import CmRegSgId, MdCmSgId, RegisterCmMacInetAddress
+from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
+from pypnm_cmts.lib.types import (
+    ChSetId,
+    CmRegSgId,
+    MdCmSgId,
+    MdDsSgId,
+    MdUsSgId,
+    RegisterCmMacInetAddress,
+)
 
 
 class _DummySnmp:
@@ -59,6 +68,22 @@ class _DummySnmpMapping:
 
     async def walk(self, oid: str) -> object | None:
         return self._mapping.get(oid, [])
+
+
+class _DummySnmpGetMapping:
+    def __init__(
+        self,
+        get_map: dict[str, object],
+        walk_map: dict[str, list[tuple[object, object]]] | None = None,
+    ) -> None:
+        self._get_map = get_map
+        self._walk_map = walk_map or {}
+
+    async def walk(self, oid: str) -> object | None:
+        return self._walk_map.get(oid, [])
+
+    async def get(self, oid: str) -> object | None:
+        return self._get_map.get(oid)
 
 
 def test_get_docsif3_md_node_status_ds_sg_id() -> None:
@@ -109,6 +134,153 @@ def test_get_docsif3_md_node_status_us_sg_id() -> None:
     assert len(results) == 1
     assert str(results[0][1]) == "NODE-1"
     assert int(results[0][2]) == 2
+
+
+def test_get_docsif3_md_ds_sg_status_ch_set_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.docsis.cmts_operation.Snmp_v2c.get_result_value",
+        lambda value: str(value) if value is not None else None,
+    )
+
+    snmp = _DummySnmpGetMapping(
+        {"docsIf3MdDsSgStatusChSetId.1049.6": _DummyValue("12")}
+    )
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    exists, ch_set_id = asyncio.run(
+        operation.getDocsIf3MdDsSgStatusChSetId(
+            InterfaceIndex(1049),
+            MdDsSgId(6),
+        )
+    )
+
+    assert bool(exists) is True
+    assert ch_set_id == ChSetId(12)
+
+
+def test_get_docsif3_md_us_sg_status_ch_set_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.docsis.cmts_operation.Snmp_v2c.get_result_value",
+        lambda value: str(value) if value is not None else None,
+    )
+
+    snmp = _DummySnmpGetMapping(
+        {"docsIf3MdUsSgStatusChSetId.1049.2": _DummyValue("9")}
+    )
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    exists, ch_set_id = asyncio.run(
+        operation.getDocsIf3MdUsSgStatusChSetId(
+            InterfaceIndex(1049),
+            MdUsSgId(2),
+        )
+    )
+
+    assert bool(exists) is True
+    assert ch_set_id == ChSetId(9)
+
+
+def test_get_docsif3_ds_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.docsis.cmts_operation.Snmp_v2c.get_result_value",
+        lambda value: str(value) if value is not None else None,
+    )
+
+    snmp = _DummySnmpGetMapping(
+        {"docsIf3DsChSetChList.12": _DummyValue("1, 2, 3")}
+    )
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    channels = asyncio.run(operation.getDocsIf3DsChSetChList(ChSetId(12)))
+
+    assert channels == [1, 2, 3]
+
+
+def test_get_docsif3_us_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.docsis.cmts_operation.Snmp_v2c.get_result_value",
+        lambda value: str(value) if value is not None else None,
+    )
+
+    snmp = _DummySnmpGetMapping(
+        {"docsIf3UsChSetChList.9": _DummyValue("4 5 6")}
+    )
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    channels = asyncio.run(operation.getDocsIf3UsChSetChList(ChSetId(9)))
+
+    assert channels == [4, 5, 6]
+
+
+def test_get_service_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _groups() -> list[CmtsServiceGroupModel]:
+        return [
+            CmtsServiceGroupModel(
+                if_index=InterfaceIndex(1049),
+                node_name="NODE-1",
+                md_cm_sg_id=MdCmSgId(3147266),
+                md_ds_sg_id=MdDsSgId(6),
+                md_us_sg_id=MdUsSgId(2),
+            )
+        ]
+
+    ds_base = Snmp_v2c.resolve_oid("docsIf3MdDsSgStatusChSetId")
+    us_base = Snmp_v2c.resolve_oid("docsIf3MdUsSgStatusChSetId")
+    ds_list_base = Snmp_v2c.resolve_oid("docsIf3DsChSetChList")
+    us_list_base = Snmp_v2c.resolve_oid("docsIf3UsChSetChList")
+
+    ds_oid = [int(part) for part in ds_base.strip(".").split(".")] + [1049, 6]
+    us_oid = [int(part) for part in us_base.strip(".").split(".")] + [1049, 2]
+    ds_list_oid = [int(part) for part in ds_list_base.strip(".").split(".")] + [12]
+    us_list_oid = [int(part) for part in us_list_base.strip(".").split(".")] + [9]
+
+    walk_map = {
+        "docsIf3MdDsSgStatusChSetId": [(_DummyOid(ds_oid), _DummyValue("12"))],
+        "docsIf3MdUsSgStatusChSetId": [(_DummyOid(us_oid), _DummyValue("9"))],
+        "docsIf3DsChSetChList": [(_DummyOid(ds_list_oid), _DummyValue("1,2"))],
+        "docsIf3UsChSetChList": [(_DummyOid(us_list_oid), _DummyValue("3,4"))],
+    }
+
+    snmp = _DummySnmpGetMapping({}, walk_map=walk_map)
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    monkeypatch.setattr(CmtsOperation, "listServiceGroups", lambda self: _groups())
+
+    topology = asyncio.run(operation.getServiceGroupTopology())
+
+    assert len(topology) == 1
+    entry = topology[0]
+    assert int(entry.if_index) == 1049
+    assert int(entry.md_ds_sg_id) == 6
+    assert int(entry.md_us_sg_id) == 2
+    assert int(entry.ds_ch_set_id) == 12
+    assert int(entry.us_ch_set_id) == 9
+    assert entry.ds_channels == [1, 2]
+    assert entry.us_channels == [3, 4]
 
 
 def test_get_md_cm_sg_id_from_node_name_ds(monkeypatch: pytest.MonkeyPatch) -> None:
