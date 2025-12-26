@@ -6,14 +6,19 @@ from __future__ import annotations
 
 from typing import NewType
 
-from pypnm.lib.types import InterfaceIndex, IPv4Str, IPv6Str, MacAddressStr, SnmpIndex
+from pypnm.lib.types import (
+    InterfaceIndex,
+    IPv4Str,
+    IPv6Str,
+    MacAddressStr,
+    SnmpIndex,
+)
 
-
-IPv6LinkLocalStr = NewType("IPv6LinkLocalStr", IPv6Str)
-CableModemIndex = NewType("CableModemIndex", SnmpIndex)
-CmRegSgId = NewType("CmRegSgId", int)
+IPv6LinkLocalStr        = NewType("IPv6LinkLocalStr", IPv6Str)
+CableModemIndex         = NewType("CableModemIndex", SnmpIndex)
+CmRegSgId               = NewType("CmRegSgId", int)
 RegisterCmMacInetAddress = tuple[CableModemIndex, MacAddressStr, IPv4Str, IPv6Str, IPv6LinkLocalStr]
-RegisterCmInetAddress = tuple[IPv4Str, IPv6Str, IPv6LinkLocalStr]
+RegisterCmInetAddress   = tuple[IPv4Str, IPv6Str, IPv6LinkLocalStr]
 
 MacAddressExist = NewType("MacAddressExist", bool)
 

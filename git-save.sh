@@ -6,17 +6,21 @@ usage() {
 Stage and commit the current Git repository.
 
 Usage:
-  git-save.sh [--commit-msg "Message"] [--push]
+  git-save.sh [--commit-msg "Message"] [--push] [--skip-ruff] [--ruff-fix]
 
 Options:
   --commit-msg  Commit message prefix (default: "Update").
   --push        Push the current branch after commit.
+  --skip-ruff   Skip ruff checks before committing.
+  --ruff-fix    Run ruff with --fix before committing.
   -h, --help    Show this help.
 EOF
 }
 
 commit_msg="Update"
 do_push="false"
+skip_ruff="false"
+ruff_fix="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,6 +35,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --push)
       do_push="true"
+      shift
+      ;;
+    --skip-ruff)
+      skip_ruff="true"
+      shift
+      ;;
+    --ruff-fix)
+      ruff_fix="true"
       shift
       ;;
     -h|--help)
@@ -73,6 +85,19 @@ final_msg="${commit_msg} - ${timestamp}"
 if git diff --quiet && git diff --cached --quiet; then
   echo "No changes to commit."
   exit 0
+fi
+
+if [[ "${skip_ruff}" != "true" ]]; then
+  if ! command -v ruff >/dev/null 2>&1; then
+    echo "ERROR: ruff not found on PATH. Use --skip-ruff or install ruff." >&2
+    exit 1
+  fi
+  echo "Running ruff checks..."
+  if [[ "${ruff_fix}" == "true" ]]; then
+    ruff check . --fix
+  else
+    ruff check .
+  fi
 fi
 
 echo "Staging changes..."

@@ -15,6 +15,7 @@ from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
     DocsIf3CmtsCmRegStatusIdEntry,
 )
 from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
+from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 from pypnm_cmts.lib.types import (
     CableModemIndex,
@@ -26,7 +27,9 @@ from pypnm_cmts.lib.types import (
     IPv6Str,
     MacAddressExist,
     MdCmSgId,
+    MdDsSgId,
     MdNodeStatus,
+    MdUsSgId,
     NodeName,
     RegisterCmInetAddress,
     RegisterCmMacInetAddress,
@@ -445,6 +448,143 @@ class CmtsOperation:
             return None
 
         return (InterfaceIndex(int(interface_index)), node_name, CmRegSgId(cm_reg_sg_id))
+
+    def __parse_md_node_status_key(
+        self, oid_base: str, oid_value: object
+    ) -> MdNodeStatus | None:
+        """
+        Parse the OID suffix for docsIf3MdNodeStatus entries.
+
+        Index:
+            ifIndex,
+            docsIf3MdNodeStatusNodeName (OCTET STRING),
+            docsIf3MdNodeStatusMdCmSgId (Unsigned32)
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 4:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        name_end = 2 + name_len
+        if len(suffix) <= name_end:
+            return None
+
+        name_bytes = bytes(suffix[2:name_end])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        md_cm_sg_id_raw = suffix[name_end]
+        if not isinstance(md_cm_sg_id_raw, int):
+            return None
+
+        return (
+            InterfaceIndex(int(interface_index)),
+            node_name,
+            MdCmSgId(int(md_cm_sg_id_raw)),
+        )
+
+    async def __collect_md_node_status_value(
+        self, oid_base: str
+    ) -> list[tuple[MdNodeStatus, int]]:
+        """
+        Collect MD node status (key, value) for the provided OID base.
+
+        The value is the walked column value (MD-DS-SG-ID or MD-US-SG-ID).
+        """
+        results: list[tuple[MdNodeStatus, int]] = []
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+
+        if not walk_results:
+            return results
+
+        values = Snmp_v2c.snmp_get_result_value(walk_results)
+        if not values:
+            return results
+
+        limit = len(walk_results)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            parsed_key = self.__parse_md_node_status_key(oid_base, walk_results[idx][0])
+            if parsed_key is None:
+                continue
+            try:
+                col_value = int(values[idx])
+            except (TypeError, ValueError):
+                continue
+            results.append((parsed_key, col_value))
+
+        return results
+
+    async def listServiceGroups(self) -> list[CmtsServiceGroupModel]:
+        """
+        Enumerate service groups using DOCS-IF3 MD Node Status.
+
+        Data model:
+            - Key (from OID index): ifIndex, nodeName, mdCmSgId
+            - Values (walked):
+                docsIf3MdNodeStatusMdDsSgId -> mdDsSgId
+                docsIf3MdNodeStatusMdUsSgId -> mdUsSgId
+        """
+        ds_oid = "docsIf3MdNodeStatusMdDsSgId"
+        us_oid = "docsIf3MdNodeStatusMdUsSgId"
+
+        merged: dict[tuple[int, str, int], CmtsServiceGroupModel] = {}
+
+        ds_rows = await self.__collect_md_node_status_value(ds_oid)
+        for key, ds_value in ds_rows:
+            if_index, node_name, md_cm_sg_id = key
+            dict_key = (int(if_index), str(node_name), int(md_cm_sg_id))
+            merged[dict_key] = CmtsServiceGroupModel(
+                if_index    =   if_index,
+                node_name   =   node_name,
+                md_cm_sg_id =   md_cm_sg_id,
+                md_ds_sg_id =   MdDsSgId(ds_value),
+                md_us_sg_id =   MdUsSgId(0),
+            )
+
+        us_rows = await self.__collect_md_node_status_value(us_oid)
+        for key, us_value in us_rows:
+            if_index, node_name, md_cm_sg_id = key
+            dict_key = (int(if_index), str(node_name), int(md_cm_sg_id))
+            if dict_key not in merged:
+                merged[dict_key] = CmtsServiceGroupModel(
+                    if_index    =   if_index,
+                    node_name   =   node_name,
+                    md_cm_sg_id =   md_cm_sg_id,
+                    md_ds_sg_id =   MdDsSgId(0),
+                    md_us_sg_id =   MdUsSgId(us_value),
+                )
+            else:
+                merged[dict_key].md_us_sg_id = MdUsSgId(us_value)
+
+        return [merged[k] for k in sorted(merged.keys())]
 
     async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
         """

@@ -162,8 +162,7 @@ class AllRegisterCmCli:
             lines: list[str] = []
             for group_id, group_entries in entries.items():
                 lines.append(f"serving_group_id={group_id}")
-                for entry in group_entries:
-                    lines.append(str(entry))
+                lines.extend(str(entry) for entry in group_entries)
             return "\n".join(lines)
 
         payload: dict[str, list[dict[str, object]]] = {}
