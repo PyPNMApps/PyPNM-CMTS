@@ -19,6 +19,8 @@ MacAddressExist = NewType("MacAddressExist", bool)
 
 NodeName        = NewType("NodeName", str)
 MdCmSgId        = NewType("MdCmSgId", int)
+MdDsSgId        = NewType("MdDsSgId", int)
+MdUsSgId        = NewType("MdUsSgId", int)
 MdNodeStatus    = tuple[InterfaceIndex, NodeName, MdCmSgId]
 
 CmtsCmRegStatusId       = NewType("CmtsCmRegStatusId", int)
@@ -41,6 +43,8 @@ __all__ = [
     "CmRegSgId",
     "NodeName",
     "MdCmSgId",
+    "MdDsSgId",
+    "MdUsSgId",
     "MdNodeStatus",
     "CmtsCmRegStatusId",
     "CmtsCmRegStatusMacAddr",
