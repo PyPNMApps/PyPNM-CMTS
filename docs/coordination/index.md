@@ -219,9 +219,28 @@ Operational guidance:
 - Tick interval should be well below TTL (for example, 1/3 to 1/2 of TTL).
 - SG workers scale with Service Group count.
 - Worker pool size should be configurable and capped, for example min(num_sgs, cap).
+- Convergence requires repeated ticks and may depend on TTL expiry under contention.
 
 Wiring note:
 - TODO: Resolve owner_id via OwnerIdResolver and pass coordination settings into CoordinationManager in the CLI or launcher path.
+
+Coordination config ownership:
+- state_dir, election_name, leader_ttl_seconds, and lease_ttl_seconds are launcher-owned inputs.
+- These values are not currently sourced from system.json; Phase-3 will wire them through the orchestrator launcher.
+
+Limitations:
+- Filesystem coordination assumes local filesystem semantics; NFS/SMB behavior for lock
+  directories and mtime staleness may be unreliable.
+- Mermaid JavaScript is vendored under docs assets to keep mkdocs build deterministic offline.
+
+## Phase-3 Wiring Questions
+
+- Source of state_dir, election_name, leader_ttl_seconds, lease_ttl_seconds, and tick_interval_seconds
+  (system.json, CLI flags, or defaults).
+- OwnerIdResolver usage in the launcher path and when it runs.
+- target_service_groups and worker_cap semantics (min(target_service_groups, worker_cap)).
+- shard_mode defaults, validation, and propagation across settings, CLI, and coordination manager.
+- Whether Phase-3 exposes coordination flags in CLI or keeps them config-only.
 
 ## Failure Modes and Expectations
 

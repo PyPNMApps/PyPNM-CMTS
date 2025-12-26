@@ -6,6 +6,7 @@ repo_name: PyPNMApps/PyPNM-CMTS
 
 nav:
   - Docs hub: index.md
+  - Architecture: architecture/architecture.md
   - Install: install/index.md
   - System: system/index.md
   - CLI: system/cli.md
@@ -19,6 +20,7 @@ nav:
       - Mermaid Examples: coordination/mermaid-examples.md
   - API:
       - Overview: api/index.md
+      - Common: api/common/index.md
       - FastAPI: api/fast-api/index.md
       - Python: api/python/index.md
   - Tests: tests/index.md
@@ -40,7 +42,8 @@ theme:
 
 plugins:
   - search
-  - mermaid2
+  - mermaid2:
+      javascript: assets/vendor/mermaid/mermaid.esm.min.mjs
 
 markdown_extensions:
   - admonition

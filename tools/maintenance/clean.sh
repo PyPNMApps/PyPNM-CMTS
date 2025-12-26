@@ -68,7 +68,7 @@ fi
 
 # Canonicalize ROOT_DIR
 ROOT_DIR=$(realpath "$ROOT_DIR")
-echo "🔍 Cleaning in root directory: $ROOT_DIR"
+echo "Cleaning in root directory: $ROOT_DIR"
 
 # -----------------------------------------------------------------------------
 # Helper: safe remove (handles multiple args)
@@ -78,7 +78,7 @@ safe_rm() {
   for path in "$@"; do
     if [[ -e $path || -L $path ]]; then
       rm -rf "$path"
-      echo "🗑️  Removed: $path"
+      echo "Removed: $path"
     fi
   done
 }
@@ -87,7 +87,7 @@ safe_rm() {
 # Individual “clean” functions
 # -----------------------------------------------------------------------------
 clean_logs() {
-  echo "🧹 Cleaning logs (truncate, preserve files)..."
+  echo "Cleaning logs (truncate, preserve files)..."
 
   local log_dir="$ROOT_DIR/logs"
   local log_glob="$log_dir"/*.log
@@ -95,20 +95,20 @@ clean_logs() {
   if compgen -G "$log_glob" > /dev/null; then
     for log_file in $log_glob; do
       : > "$log_file"
-      echo "🧾 Truncated: $log_file"
+      echo "Truncated: $log_file"
     done
   else
-    echo "ℹ️  No log files found at: $log_dir"
+    echo "No log files found at: $log_dir"
   fi
 }
 
 clean_archives() {
-  echo "🧹 Cleaning archives..."
+  echo "Cleaning archives..."
   safe_rm "$ROOT_DIR/.data/archive/"*
 }
 
 clean_python() {
-  echo "🐍 Cleaning Python caches and test artifacts..."
+  echo "Cleaning Python caches and test artifacts..."
 
   # Skip virtualenv directory (.env) while cleaning caches
   find "$ROOT_DIR" \
@@ -130,7 +130,7 @@ clean_python() {
 }
 
 clean_build() {
-  echo "🏗️  Cleaning build artifacts..."
+  echo "Cleaning build artifacts..."
   safe_rm "$ROOT_DIR/build" "$ROOT_DIR/dist"
 
   # Top-level and src-level egg-info (e.g., src/pypnm_cmts.egg-info)
@@ -139,56 +139,56 @@ clean_build() {
 }
 
 clean_pnm() {
-  echo "📦 Cleaning PNM data..."
+  echo "Cleaning PNM data..."
   safe_rm "$ROOT_DIR/.data/pnm/"*
   safe_rm "$ROOT_DIR/.data/db/"*
 }
 
 clean_excel() {
-  echo "📊 Cleaning Excel/CSV data..."
+  echo "Cleaning Excel/CSV data..."
   safe_rm "$ROOT_DIR/.data/xlsx/"*
   safe_rm "$ROOT_DIR/.data/csv/"*
 }
 
 clean_json() {
-  echo "🧾 Cleaning JSON data..."
+  echo "Cleaning JSON data..."
   safe_rm "$ROOT_DIR/.data/json/"*
 }
 
 clean_png() {
-  echo "🖼️  Cleaning PNG data..."
+  echo "Cleaning PNG data..."
   safe_rm "$ROOT_DIR/.data/png/"*
 }
 
 clean_output() {
-  echo "📤 Cleaning output files..."
+  echo "Cleaning output files..."
   safe_rm "$ROOT_DIR/output/"*
 }
 
 clean_plot_data() {
-  echo "📈 Cleaning plot data and archive files..."
+  echo "Cleaning plot data and archive files..."
   safe_rm "$ROOT_DIR/.data/png/"*
   safe_rm "$ROOT_DIR/.data/csv/"*
   safe_rm "$ROOT_DIR/.data/archive/"*
 }
 
 clean_msg_rsp() {
-  echo "📨 Cleaning message-response data..."
+  echo "Cleaning message-response data..."
   safe_rm "$ROOT_DIR/.data/msg_rsp/"*
 }
 
 clean_issues() {
-  echo "🧹 Cleaning issues support bundles (preserve directory)..."
+  echo "Cleaning issues support bundles (preserve directory)..."
   safe_rm "$ROOT_DIR/issues/"*
 }
 
 remove_issues_dir() {
-  echo "🗑️  Removing issues directory..."
+  echo "Removing issues directory..."
   safe_rm "$ROOT_DIR/issues"
 }
 
 clean_settings_backups() {
-  echo "🧹 Cleaning system.json backup files..."
+  echo "Cleaning system.json backup files..."
   # Only remove system.bak.*.json, leave system.json intact
   safe_rm "$ROOT_DIR/src/pypnm_cmts/settings"/system.bak.*.json
 }
@@ -200,7 +200,7 @@ for action in "${ACTIONS[@]}"; do
   case "$action" in
 
     --all)
-      echo "🚀 Performing full cleanup..."
+      echo "Performing full cleanup..."
       clean_logs
       clean_archives
       clean_python
