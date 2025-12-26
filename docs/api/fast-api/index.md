@@ -5,6 +5,7 @@ FastAPI endpoint documentation for PyPNM-CMTS will live here.
 ## Current endpoints
 
 - `POST /system/sysDescr` - CMTS sysDescr lookup.
+- `POST /system/serviceGroupTopology` - CMTS service-group topology lookup.
 
 ## Next steps
 

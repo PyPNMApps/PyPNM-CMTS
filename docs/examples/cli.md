@@ -5,6 +5,7 @@
 - [Get sysDescr (SNMPv2c)](#get-sysdescr-snmpv2c)
 - [Get docsIf3MdNodeStatusMdDsSgId (SNMPv2c)](#get-docsif3mdnodestatusmddssgid-snmpv2c)
 - [Get docsIf3MdNodeStatusMdUsSgId (SNMPv2c)](#get-docsif3mdnodestatusmdussgid-snmpv2c)
+- [Get service group topology (SNMPv2c)](#get-service-group-topology-snmpv2c)
 - [Get docsIf3CmtsCmRegStatusMacAddr (SNMPv2c)](#get-docsif3cmtscmregstatusmacaddr-snmpv2c)
 - [Get docsIf3CmtsCmRegStatusMdCmSgId via MAC (SNMPv2c)](#get-docsif3cmtscmregstatusmdcmsgid-via-mac-snmpv2c)
 - [Get all registered CMs (SNMPv2c)](#get-all-registered-cms-snmpv2c)
@@ -90,6 +91,31 @@ SNMP_COMMUNITY="public"
 python src/pypnm_cmts/examples/cli/get_md_us_sg_id.py \
   --cmts-hostname "${CMTS_HOST}" \
   --cmts-community "${SNMP_COMMUNITY}"
+```
+
+## Get service group topology (SNMPv2c)
+
+Fetch the CMTS service-group topology (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+python src/pypnm_cmts/examples/cli/get_service_group_topology.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}"
+```
+
+Text output:
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+python src/pypnm_cmts/examples/cli/get_service_group_topology.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --text
 ```
 
 ## Get docsIf3CmtsCmRegStatusMacAddr (SNMPv2c)

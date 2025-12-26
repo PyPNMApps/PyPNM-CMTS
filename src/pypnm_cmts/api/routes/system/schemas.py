@@ -8,6 +8,9 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import HostNameStr, InetAddressStr
 
 from pypnm_cmts.api.common.cmts.schema import CommonCmtsRequest
+from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
+    CmtsServiceGroupTopologyModel,
+)
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
 
@@ -15,6 +18,8 @@ class CmtsSysDescrRequest(CommonCmtsRequest):
     """
     Request model for CMTS sysDescr retrieval.
     """
+
+
 class CmtsSysDescrResponse(BaseModel):
     """
     Response model for CMTS sysDescr retrieval.
@@ -24,3 +29,20 @@ class CmtsSysDescrResponse(BaseModel):
     status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
     message: str = Field(default="", description="Informational or error message.")
     results: CmtsSysDescrModel = Field(default_factory=CmtsSysDescrModel.empty, description="Parsed CMTS sysDescr data.")
+
+
+class CmtsServiceGroupTopologyRequest(CommonCmtsRequest):
+    """
+    Request model for CMTS service-group topology retrieval.
+    """
+
+
+class CmtsServiceGroupTopologyResponse(BaseModel):
+    """
+    Response model for CMTS service-group topology retrieval.
+    """
+    hostname: HostNameStr = Field(default="", description="CMTS hostname or label.")
+    ip_address: InetAddressStr = Field(default="", description="CMTS IP address.")
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
+    message: str = Field(default="", description="Informational or error message.")
+    results: list[CmtsServiceGroupTopologyModel] = Field(default_factory=list, description="Service-group topology entries.")

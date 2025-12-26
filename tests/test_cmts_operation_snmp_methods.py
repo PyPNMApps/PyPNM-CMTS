@@ -53,6 +53,9 @@ class _DummyOid:
     def __iter__(self) -> Iterator[int]:
         return iter(self._values)
 
+    def __str__(self) -> str:
+        return ".".join(str(value) for value in self._values)
+
 
 class _DummyValue:
     def __init__(self, value: str) -> None:
@@ -199,7 +202,7 @@ def test_get_docsif3_ds_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     snmp = _DummySnmpGetMapping(
-        {"docsIf3DsChSetChList.12": _DummyValue("1, 2, 3")}
+        {"docsIf3DsChSetChList.1049.12": _DummyValue("1, 2, 3")}
     )
     operation = CmtsOperation(
         inet=Inet("192.168.0.100"),
@@ -207,7 +210,9 @@ def test_get_docsif3_ds_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
         snmp=snmp,
     )
 
-    channels = asyncio.run(operation.getDocsIf3DsChSetChList(ChSetId(12)))
+    channels = asyncio.run(
+        operation.getDocsIf3DsChSetChList(InterfaceIndex(1049), ChSetId(12))
+    )
 
     assert channels == [1, 2, 3]
 
@@ -219,7 +224,7 @@ def test_get_docsif3_us_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     snmp = _DummySnmpGetMapping(
-        {"docsIf3UsChSetChList.9": _DummyValue("4 5 6")}
+        {"docsIf3UsChSetChList.1049.9": _DummyValue("4 5 6")}
     )
     operation = CmtsOperation(
         inet=Inet("192.168.0.100"),
@@ -227,12 +232,26 @@ def test_get_docsif3_us_ch_set_ch_list(monkeypatch: pytest.MonkeyPatch) -> None:
         snmp=snmp,
     )
 
-    channels = asyncio.run(operation.getDocsIf3UsChSetChList(ChSetId(9)))
+    channels = asyncio.run(
+        operation.getDocsIf3UsChSetChList(InterfaceIndex(1049), ChSetId(9))
+    )
 
     assert channels == [4, 5, 6]
 
 
 def test_get_service_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_get_result_value(result: object) -> str | None:
+        if isinstance(result, tuple):
+            return str(result[1])
+        if result is None:
+            return None
+        return str(result)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.docsis.cmts_operation.Snmp_v2c.get_result_value",
+        _fake_get_result_value,
+    )
+
     async def _groups() -> list[CmtsServiceGroupModel]:
         return [
             CmtsServiceGroupModel(
@@ -251,8 +270,8 @@ def test_get_service_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
 
     ds_oid = [int(part) for part in ds_base.strip(".").split(".")] + [1049, 6]
     us_oid = [int(part) for part in us_base.strip(".").split(".")] + [1049, 2]
-    ds_list_oid = [int(part) for part in ds_list_base.strip(".").split(".")] + [12]
-    us_list_oid = [int(part) for part in us_list_base.strip(".").split(".")] + [9]
+    ds_list_oid = [int(part) for part in ds_list_base.strip(".").split(".")] + [1049, 12]
+    us_list_oid = [int(part) for part in us_list_base.strip(".").split(".")] + [1049, 9]
 
     walk_map = {
         "docsIf3MdDsSgStatusChSetId": [(_DummyOid(ds_oid), _DummyValue("12"))],

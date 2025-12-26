@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from pypnm.lib.inet import Inet, InetAddressStr
@@ -106,6 +107,26 @@ class CmtsOperation:
             return oid
         return f"{oid}.0"
 
+    @staticmethod
+    def __get_result_value(result: object) -> str | None:
+        if isinstance(result, list):
+            if not result:
+                return None
+            return Snmp_v2c.get_result_value(result[0])
+        return Snmp_v2c.get_result_value(result)  # type: ignore[arg-type]
+
+    @staticmethod
+    def __get_varbind_value(varbind: object) -> str | None:
+        if isinstance(varbind, tuple) and len(varbind) >= 2:
+            value = varbind[1]
+            pretty = getattr(value, "prettyPrint", None)
+            if callable(pretty):
+                return pretty()
+            if isinstance(value, (bytes, bytearray)):
+                return value.decode("ascii", errors="ignore")
+            return str(value)
+        return Snmp_v2c.get_result_value(varbind)  # type: ignore[arg-type]
+
     async def __snmp_get_str(self, oid: str) -> str:
         oid0 = self.__oid0(oid)
         try:
@@ -117,7 +138,7 @@ class CmtsOperation:
         if not result:
             return ""
 
-        raw_value = Snmp_v2c.get_result_value(result)
+        raw_value = self.__get_result_value(result)
         if not raw_value:
             return ""
 
@@ -618,13 +639,23 @@ class CmtsOperation:
 
     @staticmethod
     def __parse_channel_list(raw_value: str) -> list[ChannelId]:
-        tokens = raw_value.replace(",", " ").split()
-        channels: list[ChannelId] = []
-        for token in tokens:
-            if not token.isdigit():
-                continue
-            channels.append(ChannelId(int(token)))
-        return channels
+        text = raw_value
+        if isinstance(raw_value, (bytes, bytearray)):
+            text = raw_value.decode("ascii", errors="ignore")
+        else:
+            text = str(raw_value)
+
+        if text.startswith("0x"):
+            hex_str = text[2:]
+            if len(hex_str) % 2 == 0:
+                try:
+                    raw_bytes = bytes.fromhex(hex_str)
+                    return [ChannelId(byte) for byte in raw_bytes]
+                except ValueError:
+                    pass
+
+        numbers = re.findall(r"\d+", text)
+        return [ChannelId(int(value)) for value in numbers]
 
     async def __collect_ch_set_id_map(
         self, oid_base: str
@@ -639,41 +670,30 @@ class CmtsOperation:
         if not walk_results:
             return ch_set_map
 
-        values = Snmp_v2c.snmp_get_result_value(walk_results)
-        if not values:
-            return ch_set_map
+        base_str = Snmp_v2c.resolve_oid(oid_base)
+        base_prefix = f"{base_str}."
+        for idx in range(len(walk_results)):
+            oid_value = walk_results[idx][0]
+            oid_str = str(oid_value).lstrip(".")
+            if not oid_str.startswith(base_prefix):
+                continue
 
-        try:
-            base_str = Snmp_v2c.resolve_oid(oid_base)
-            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
-        except (TypeError, ValueError) as exc:
-            self.logger.error(f"Failed to parse OID base for {oid_base}: {exc}")
-            return ch_set_map
+            suffix_str = oid_str[len(base_prefix):]
+            parts = suffix_str.split(".")
+            if len(parts) < 2:
+                continue
 
-        limit = len(walk_results)
-        if len(values) < limit:
-            limit = len(values)
-
-        for idx in range(limit):
             try:
-                oid_tuple = tuple(walk_results[idx][0])
+                if_index = int(parts[0])
+                sg_id = int(parts[1])
             except (TypeError, ValueError):
                 continue
 
-            if len(oid_tuple) <= len(base_tuple) + 1:
-                continue
-
-            suffix = oid_tuple[len(base_tuple):]
-            if len(suffix) < 2:
-                continue
-
-            if_index = suffix[0]
-            sg_id = suffix[1]
-            if not isinstance(if_index, int) or not isinstance(sg_id, int):
-                continue
-
             try:
-                ch_set_id = int(values[idx])
+                raw_value = self.__get_varbind_value(walk_results[idx])
+                if raw_value is None:
+                    continue
+                ch_set_id = int(str(raw_value))
             except (TypeError, ValueError):
                 continue
 
@@ -685,8 +705,8 @@ class CmtsOperation:
 
     async def __collect_channel_list_map(
         self, oid_base: str
-    ) -> dict[int, list[ChannelId]]:
-        channel_map: dict[int, list[ChannelId]] = {}
+    ) -> dict[_ServiceGroupChSetKey, list[ChannelId]]:
+        channel_map: dict[_ServiceGroupChSetKey, list[ChannelId]] = {}
         try:
             walk_results = await self._snmp.walk(oid_base)
         except Exception as exc:
@@ -696,39 +716,32 @@ class CmtsOperation:
         if not walk_results:
             return channel_map
 
-        values = Snmp_v2c.snmp_get_result_value(walk_results)
-        if not values:
-            return channel_map
+        base_str = Snmp_v2c.resolve_oid(oid_base)
+        base_prefix = f"{base_str}."
+        for idx in range(len(walk_results)):
+            oid_value = walk_results[idx][0]
+            oid_str = str(oid_value).lstrip(".")
+            if not oid_str.startswith(base_prefix):
+                continue
 
-        try:
-            base_str = Snmp_v2c.resolve_oid(oid_base)
-            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
-        except (TypeError, ValueError) as exc:
-            self.logger.error(f"Failed to parse OID base for {oid_base}: {exc}")
-            return channel_map
+            suffix_str = oid_str[len(base_prefix):]
+            parts = suffix_str.split(".")
+            if len(parts) < 2:
+                continue
 
-        limit = len(walk_results)
-        if len(values) < limit:
-            limit = len(values)
-
-        for idx in range(limit):
             try:
-                oid_tuple = tuple(walk_results[idx][0])
+                if_index = int(parts[0])
+                ch_set_id = int(parts[1])
             except (TypeError, ValueError):
                 continue
 
-            if len(oid_tuple) <= len(base_tuple):
+            raw_value = self.__get_varbind_value(walk_results[idx])
+            if raw_value is None:
                 continue
 
-            suffix = oid_tuple[len(base_tuple):]
-            if len(suffix) < 1:
-                continue
+            channels = self.__parse_channel_list(str(raw_value))
 
-            ch_set_id = suffix[0]
-            if not isinstance(ch_set_id, int):
-                continue
-
-            channel_map[int(ch_set_id)] = self.__parse_channel_list(str(values[idx]))
+            channel_map[_ServiceGroupChSetKey(int(if_index), int(ch_set_id))] = channels
 
         return channel_map
 
@@ -826,6 +839,7 @@ class CmtsOperation:
 
     async def getDocsIf3DsChSetChList(
         self,
+        if_index: InterfaceIndex,
         ch_set_id: ChSetId,
     ) -> list[ChannelId]:
         """
@@ -837,30 +851,35 @@ class CmtsOperation:
         Index:
             docsIf3DsChSetId
         """
+        if not isinstance(if_index, int) or isinstance(if_index, bool):
+            raise TypeError(
+                f"if_index must be InterfaceIndex, got {type(if_index).__name__}"
+            )
         if not isinstance(ch_set_id, int) or isinstance(ch_set_id, bool):
             raise TypeError(
                 f"ch_set_id must be ChSetId, got {type(ch_set_id).__name__}"
             )
 
         oid_base: str = "docsIf3DsChSetChList"
-        oid = f"{oid_base}.{int(ch_set_id)}"
+        oid = f"{oid_base}.{int(if_index)}.{int(ch_set_id)}"
 
         try:
             result = await self._snmp.get(oid)
         except Exception as exc:
             self.logger.error(f"SNMP get failed for {oid}: {exc}")
-            return []
-        if not result:
-            return []
+            result = None
+        if result:
+            raw_value = self.__get_result_value(result)
+            if raw_value is not None:
+                return self.__parse_channel_list(str(raw_value))
 
-        raw_value = Snmp_v2c.get_result_value(result)
-        if raw_value is None:
-            return []
-
-        return self.__parse_channel_list(str(raw_value))
+        channel_map = await self.__collect_channel_list_map(oid_base)
+        channel_key = _ServiceGroupChSetKey(int(if_index), int(ch_set_id))
+        return channel_map.get(channel_key, [])
 
     async def getDocsIf3UsChSetChList(
         self,
+        if_index: InterfaceIndex,
         ch_set_id: ChSetId,
     ) -> list[ChannelId]:
         """
@@ -872,27 +891,31 @@ class CmtsOperation:
         Index:
             docsIf3UsChSetId
         """
+        if not isinstance(if_index, int) or isinstance(if_index, bool):
+            raise TypeError(
+                f"if_index must be InterfaceIndex, got {type(if_index).__name__}"
+            )
         if not isinstance(ch_set_id, int) or isinstance(ch_set_id, bool):
             raise TypeError(
                 f"ch_set_id must be ChSetId, got {type(ch_set_id).__name__}"
             )
 
         oid_base: str = "docsIf3UsChSetChList"
-        oid = f"{oid_base}.{int(ch_set_id)}"
+        oid = f"{oid_base}.{int(if_index)}.{int(ch_set_id)}"
 
         try:
             result = await self._snmp.get(oid)
         except Exception as exc:
             self.logger.error(f"SNMP get failed for {oid}: {exc}")
-            return []
-        if not result:
-            return []
+            result = None
+        if result:
+            raw_value = self.__get_result_value(result)
+            if raw_value is not None:
+                return self.__parse_channel_list(str(raw_value))
 
-        raw_value = Snmp_v2c.get_result_value(result)
-        if raw_value is None:
-            return []
-
-        return self.__parse_channel_list(str(raw_value))
+        channel_map = await self.__collect_channel_list_map(oid_base)
+        channel_key = _ServiceGroupChSetKey(int(if_index), int(ch_set_id))
+        return channel_map.get(channel_key, [])
 
     async def getServiceGroupTopology(self) -> list[CmtsServiceGroupTopologyModel]:
         """
@@ -954,18 +977,32 @@ class CmtsOperation:
                     )
 
             ds_channels: list[ChannelId] = []
-            if int(ds_ch_set_id) in ds_channel_map:
-                ds_channels = ds_channel_map[int(ds_ch_set_id)]
+            ds_channel_key = _ServiceGroupChSetKey(
+                int(group.if_index),
+                int(ds_ch_set_id),
+            )
+            if ds_channel_key in ds_channel_map:
+                ds_channels = ds_channel_map[ds_channel_key]
             else:
                 if bool(ds_exists) and int(ds_ch_set_id) > 0:
-                    ds_channels = await self.getDocsIf3DsChSetChList(ds_ch_set_id)
+                    ds_channels = await self.getDocsIf3DsChSetChList(
+                        group.if_index,
+                        ds_ch_set_id,
+                    )
 
             us_channels: list[ChannelId] = []
-            if int(us_ch_set_id) in us_channel_map:
-                us_channels = us_channel_map[int(us_ch_set_id)]
+            us_channel_key = _ServiceGroupChSetKey(
+                int(group.if_index),
+                int(us_ch_set_id),
+            )
+            if us_channel_key in us_channel_map:
+                us_channels = us_channel_map[us_channel_key]
             else:
                 if bool(us_exists) and int(us_ch_set_id) > 0:
-                    us_channels = await self.getDocsIf3UsChSetChList(us_ch_set_id)
+                    us_channels = await self.getDocsIf3UsChSetChList(
+                        group.if_index,
+                        us_ch_set_id,
+                    )
 
             results.append(
                 CmtsServiceGroupTopologyModel(
