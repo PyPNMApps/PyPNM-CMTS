@@ -62,12 +62,12 @@ An append-only JSONL index is maintained per SG/day:
 - [✅] Docs updated (system + CLI)
 
 ### Phase 1 — Storage & Index
-- [ ] Storage layout builder
-- [ ] Transaction writer
-- [ ] JSONL index append
-- [ ] JSONL query helpers
-- [ ] Pytest coverage
-- [ ] Docs updated (storage)
+- [✅] Storage layout builder
+- [✅] Transaction writer
+- [✅] JSONL index append
+- [✅] JSONL query helpers
+- [✅] Pytest coverage
+- [✅] Docs updated (storage)
 
 ### Phase 2 — Coordination
 - [ ] File-based leader election
