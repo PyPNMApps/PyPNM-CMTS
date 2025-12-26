@@ -18,6 +18,7 @@ from pypnm_cmts.docsis.data_type.cmts_identity import CmtsIdentityModel
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 from pypnm_cmts.lib.types import (
     CableModemIndex,
+    CmRegSgId,
     CmtsCmRegStatusId,
     CmtsCmRegStatusMacAddr,
     IPv4Str,
@@ -32,6 +33,7 @@ from pypnm_cmts.lib.types import (
 )
 
 DEFAULT_MD_CM_SG_ID: MdCmSgId = MdCmSgId(0)
+DEFAULT_CM_REG_SG_ID: CmRegSgId = CmRegSgId(0)
 DEFAULT_MAC_ADDRESS_EXIST: MacAddressExist = MacAddressExist(False)
 EMPTY_REGISTER_CM_INET_ADDRESS: RegisterCmInetAddress = (
     IPv4Str(""),
@@ -200,6 +202,128 @@ class CmtsOperation:
         oid_base: str = "docsIf3MdNodeStatusMdUsSgId"
         return await self.__collect_md_node_status(oid_base)
 
+    async def getMdCmSgIdFromNodeName(
+        self, node_name: NodeName | str
+    ) -> tuple[bool, MdCmSgId]:
+        """
+        Fetch MD-CM-SG-ID for a matching node name.
+        """
+        if not isinstance(node_name, str) or isinstance(node_name, bool):
+            raise TypeError(
+                f"node_name must be NodeName or str, got {type(node_name).__name__}"
+            )
+
+        name_value = str(node_name).strip()
+        if name_value == "":
+            return (False, DEFAULT_MD_CM_SG_ID)
+
+        try:
+            ds_entries = await self.getDocsIf3MdNodeStatusMdDsSgId()
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch DS node status: {exc}")
+            ds_entries = []
+
+        for _, entry_node, sg_id in ds_entries:
+            if str(entry_node) == name_value:
+                return (True, sg_id)
+
+        try:
+            us_entries = await self.getDocsIf3MdNodeStatusMdUsSgId()
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch US node status: {exc}")
+            return (False, DEFAULT_MD_CM_SG_ID)
+
+        for _, entry_node, sg_id in us_entries:
+            if str(entry_node) == name_value:
+                return (True, sg_id)
+
+        return (False, DEFAULT_MD_CM_SG_ID)
+
+    async def getCmRegStatusSgIdFromNodeName(
+        self, node_name: NodeName | str
+    ) -> tuple[bool, CmRegSgId]:
+        """
+        Fetch CM registration SG ID from a node name.
+        """
+        if not isinstance(node_name, str) or isinstance(node_name, bool):
+            raise TypeError(
+                f"node_name must be NodeName or str, got {type(node_name).__name__}"
+            )
+
+        name_value = node_name.strip()
+        if name_value == "":
+            return (False, DEFAULT_CM_REG_SG_ID)
+
+        oid_base: str = "docsIf3MdNodeStatusMdDsSgId"
+        try:
+            result = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return (False, DEFAULT_CM_REG_SG_ID)
+        if not result:
+            return (False, DEFAULT_CM_REG_SG_ID)
+
+        values = Snmp_v2c.snmp_get_result_value(result)
+        if not values:
+            return (False, DEFAULT_CM_REG_SG_ID)
+
+        limit = len(result)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            parsed = self.__parse_md_node_status_oid_with_sg_id(oid_base, result[idx][0])
+            if parsed is None:
+                continue
+            _, entry_node, cm_reg_sg_id = parsed
+            if str(entry_node) == name_value:
+                return (True, cm_reg_sg_id)
+
+        return (False, DEFAULT_CM_REG_SG_ID)
+
+    async def getCmRegStatusSgIdFromDsSgId(
+        self, ds_sg_id: MdCmSgId | int
+    ) -> tuple[bool, CmRegSgId]:
+        """
+        Fetch CM registration SG ID from a downstream SG ID value.
+        """
+        if not isinstance(ds_sg_id, int) or isinstance(ds_sg_id, bool):
+            raise TypeError(
+                f"ds_sg_id must be MdCmSgId or int, got {type(ds_sg_id).__name__}"
+            )
+
+        target = int(ds_sg_id)
+        oid_base: str = "docsIf3MdNodeStatusMdDsSgId"
+        try:
+            result = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return (False, DEFAULT_CM_REG_SG_ID)
+        if not result:
+            return (False, DEFAULT_CM_REG_SG_ID)
+
+        values = Snmp_v2c.snmp_get_result_value(result)
+        if not values:
+            return (False, DEFAULT_CM_REG_SG_ID)
+
+        limit = len(result)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            try:
+                if int(values[idx]) != target:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            parsed = self.__parse_md_node_status_oid_with_sg_id(oid_base, result[idx][0])
+            if parsed is None:
+                continue
+            return (True, parsed[2])
+
+        return (False, DEFAULT_CM_REG_SG_ID)
+
     async def __collect_md_node_status(self, oid_base: str) -> list[MdNodeStatus]:
         """
         Collect node status entries from the provided OID base.
@@ -276,6 +400,51 @@ class CmtsOperation:
             return None
 
         return (InterfaceIndex(int(interface_index)), node_name)
+
+    def __parse_md_node_status_oid_with_sg_id(
+        self, oid_base: str, oid_value: object
+    ) -> tuple[InterfaceIndex, NodeName, CmRegSgId] | None:
+        """
+        Parse the OID suffix and return the CM registration SG ID.
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 3:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        if len(suffix) < 2 + name_len + 1:
+            return None
+
+        name_bytes = bytes(suffix[2:2 + name_len])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        cm_reg_sg_id = suffix[2 + name_len]
+        if not isinstance(cm_reg_sg_id, int):
+            return None
+
+        return (InterfaceIndex(int(interface_index)), node_name, CmRegSgId(cm_reg_sg_id))
 
     async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
         """

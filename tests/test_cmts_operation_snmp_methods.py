@@ -16,7 +16,7 @@ from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
     DocsIf3CmtsCmRegStatusEntry,
     DocsIf3CmtsCmRegStatusIdEntry,
 )
-from pypnm_cmts.lib.types import MdCmSgId, RegisterCmMacInetAddress
+from pypnm_cmts.lib.types import CmRegSgId, MdCmSgId, RegisterCmMacInetAddress
 
 
 class _DummySnmp:
@@ -109,6 +109,124 @@ def test_get_docsif3_md_node_status_us_sg_id() -> None:
     assert len(results) == 1
     assert str(results[0][1]) == "NODE-1"
     assert int(results[0][2]) == 2
+
+
+def test_get_md_cm_sg_id_from_node_name_ds(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _ds_entries() -> list[tuple[object, object, MdCmSgId]]:
+        return [(0, "NODE-1", MdCmSgId(6))]
+
+    async def _us_entries() -> list[tuple[object, object, MdCmSgId]]:
+        return []
+
+    monkeypatch.setattr(
+        CmtsOperation,
+        "getDocsIf3MdNodeStatusMdDsSgId",
+        lambda self: _ds_entries(),
+    )
+    monkeypatch.setattr(
+        CmtsOperation,
+        "getDocsIf3MdNodeStatusMdUsSgId",
+        lambda self: _us_entries(),
+    )
+
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+    exists, sg_id = asyncio.run(operation.getMdCmSgIdFromNodeName("NODE-1"))
+
+    assert bool(exists) is True
+    assert sg_id == MdCmSgId(6)
+
+
+def test_get_md_cm_sg_id_from_node_name_us(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _ds_entries() -> list[tuple[object, object, MdCmSgId]]:
+        return []
+
+    async def _us_entries() -> list[tuple[object, object, MdCmSgId]]:
+        return [(0, "NODE-2", MdCmSgId(10))]
+
+    monkeypatch.setattr(
+        CmtsOperation,
+        "getDocsIf3MdNodeStatusMdDsSgId",
+        lambda self: _ds_entries(),
+    )
+    monkeypatch.setattr(
+        CmtsOperation,
+        "getDocsIf3MdNodeStatusMdUsSgId",
+        lambda self: _us_entries(),
+    )
+
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+    exists, sg_id = asyncio.run(operation.getMdCmSgIdFromNodeName("NODE-2"))
+
+    assert bool(exists) is True
+    assert sg_id == MdCmSgId(10)
+
+
+def test_get_md_cm_sg_id_from_node_name_requires_str() -> None:
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+
+    with pytest.raises(TypeError, match=r"node_name must be NodeName or str"):
+        asyncio.run(operation.getMdCmSgIdFromNodeName(123))  # type: ignore[arg-type]
+
+
+def test_get_cm_reg_sg_id_from_node_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_oid = Snmp_v2c.resolve_oid("docsIf3MdNodeStatusMdDsSgId")
+    base = [int(part) for part in base_oid.strip(".").split(".")]
+    entries = [base + [1049, 4, 70, 78, 45, 49, 3147266]]
+    varbinds = [(_DummyOid(entries[0]), _DummyValue("6"))]
+
+    snmp = _DummySnmpMapping({"docsIf3MdNodeStatusMdDsSgId": varbinds})
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    exists, sg_id = asyncio.run(operation.getCmRegStatusSgIdFromNodeName("FN-1"))
+
+    assert bool(exists) is True
+    assert sg_id == CmRegSgId(3147266)
+
+
+def test_get_cm_reg_sg_id_from_ds_sg_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_oid = Snmp_v2c.resolve_oid("docsIf3MdNodeStatusMdDsSgId")
+    base = [int(part) for part in base_oid.strip(".").split(".")]
+    entries = [base + [1050, 4, 70, 78, 45, 50, 3213825]]
+    varbinds = [(_DummyOid(entries[0]), _DummyValue("10"))]
+
+    snmp = _DummySnmpMapping({"docsIf3MdNodeStatusMdDsSgId": varbinds})
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    exists, sg_id = asyncio.run(operation.getCmRegStatusSgIdFromDsSgId(MdCmSgId(10)))
+
+    assert bool(exists) is True
+    assert sg_id == CmRegSgId(3213825)
+
+
+def test_get_cm_reg_sg_id_requires_int() -> None:
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+
+    with pytest.raises(TypeError, match=r"ds_sg_id must be MdCmSgId or int"):
+        asyncio.run(operation.getCmRegStatusSgIdFromDsSgId("10"))  # type: ignore[arg-type]
 
 
 def test_get_docsif3_cmts_cm_reg_status_mac_addr(monkeypatch: pytest.MonkeyPatch) -> None:

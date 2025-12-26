@@ -1,5 +1,21 @@
 # CLI examples
 
+## Table of contents
+
+- [Get sysDescr (SNMPv2c)](#get-sysdescr-snmpv2c)
+- [Get docsIf3MdNodeStatusMdDsSgId (SNMPv2c)](#get-docsif3mdnodestatusmddssgid-snmpv2c)
+- [Get docsIf3MdNodeStatusMdUsSgId (SNMPv2c)](#get-docsif3mdnodestatusmdussgid-snmpv2c)
+- [Get docsIf3CmtsCmRegStatusMacAddr (SNMPv2c)](#get-docsif3cmtscmregstatusmacaddr-snmpv2c)
+- [Get docsIf3CmtsCmRegStatusMdCmSgId via MAC (SNMPv2c)](#get-docsif3cmtscmregstatusmdcmsgid-via-mac-snmpv2c)
+- [Get all registered CMs (SNMPv2c)](#get-all-registered-cms-snmpv2c)
+- [Get registered CM MAC + IP tuples (SNMPv2c)](#get-registered-cm-mac-ip-tuples-snmpv2c)
+- [Get CM inet addresses by MAC (SNMPv2c)](#get-cm-inet-addresses-by-mac-snmpv2c)
+- [Get MD-CM-SG-ID by node name (SNMPv2c)](#get-md-cm-sg-id-by-node-name-snmpv2c)
+- [Get CM registration SG ID by node name (SNMPv2c)](#get-cm-registration-sg-id-by-node-name-snmpv2c)
+- [Get CM registration SG ID by DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
+- [Next steps](#next-steps)
+- [Orchestrator run modes (Phase-0 wiring)](#orchestrator-run-modes-phase-0-wiring)
+
 Use these examples to fetch CMTS data via SNMP.
 
 ## Get sysDescr (SNMPv2c)
@@ -182,6 +198,51 @@ python src/pypnm_cmts/examples/cli/get_cm_inet_address.py \
   --cmts-community "${SNMP_COMMUNITY}" \
   --mac "${CM_MAC}" \
   --raw
+```
+
+## Get MD-CM-SG-ID by node name (SNMPv2c)
+
+Fetch the MD-CM-SG-ID for a given node name (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+NODE_NAME="FN-1"
+
+python src/pypnm_cmts/examples/cli/get_md_cm_sg_id_from_node_name.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --node-name "${NODE_NAME}"
+```
+
+## Get CM registration SG ID by node name (SNMPv2c)
+
+Fetch the CM registration SG ID for a given node name (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+NODE_NAME="FN-1"
+
+python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_node_name.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --node-name "${NODE_NAME}"
+```
+
+## Get CM registration SG ID by DS SG ID (SNMPv2c)
+
+Fetch the CM registration SG ID for a downstream SG ID value (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+DS_SG_ID=6
+
+python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_ds_sg_id.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --ds-sg-id "${DS_SG_ID}"
 ```
 
 ## Next steps

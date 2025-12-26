@@ -18,6 +18,7 @@ CmtsCmRegStatusId       = NewType("CmtsCmRegStatusId", int)
 CmtsCmRegStatusMacAddr  = tuple[CmtsCmRegStatusId, MacAddressStr]
 CableModemIndex         = NewType("CableModemIndex", int)
 IPv6LinkLocalStr        = NewType("IPv6LinkLocalStr", IPv6Str)
+CmRegSgId               = NewType("CmRegSgId", int)
 RegisterCmMacInetAddress = tuple[
     CableModemIndex,
     MacAddressStr,
@@ -50,6 +51,7 @@ __all__ = [
     "CmtsCmRegStatusMacAddr",
     "CableModemIndex",
     "IPv6LinkLocalStr",
+    "CmRegSgId",
     "RegisterCmMacInetAddress",
     "RegisterCmInetAddress",
     "CmtsCmRegState",
