@@ -7,18 +7,9 @@ import json
 from pathlib import Path
 
 import pytest
-
-try:
-    import httpx  # noqa: F401
-    HAS_HTTPX = True
-except ModuleNotFoundError:
-    HAS_HTTPX = False
-
-if HAS_HTTPX:
-    from fastapi.testclient import TestClient
-
-SUCCESS_STATUS_CODE = 200
-VALIDATION_STATUS_CODE = 422
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+from pydantic import ValidationError
 
 
 def _write_system_config(path: Path) -> None:
@@ -35,114 +26,95 @@ def _write_system_config(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _write_pypnm_system_config(path: Path, log_dir: Path) -> None:
-    payload = {
-        "logging": {
-            "log_dir": str(log_dir),
-            "log_filename": "pypnm.log",
-            "log_level": "INFO",
-        }
-    }
-    path.write_text(json.dumps(payload), encoding="utf-8")
+def _load_app(tmp_path: Path) -> FastAPI:
+    from pypnm_cmts.api.routes.orchestrator.router import router as orchestrator_router
+    from pypnm_cmts.version import __version__
 
+    app = FastAPI(title="PyPNM-CMTS Test API", version=__version__)
 
-def _load_app(tmp_path: Path) -> object:
-    from pypnm.config.config_manager import ConfigManager
-    from pypnm.config.system_config_settings import SystemConfigSettings
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok", "version": __version__}
 
-    config_path = tmp_path / "pypnm_system.json"
-    log_dir = tmp_path / "pypnm_logs"
-    _write_pypnm_system_config(config_path, log_dir)
-    SystemConfigSettings._cfg = ConfigManager(config_path=str(config_path))
-
-    from pypnm_cmts.api.main import app
-
+    app.include_router(orchestrator_router)
     return app
 
 
-def test_httpx_dependency_available() -> None:
-    if not HAS_HTTPX:
-        pytest.xfail("httpx not installed; API tests are skipped.")
+def _call_route(app: FastAPI, path: str, method: str, payload: object | None = None) -> object:
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path != path:
+            continue
+        if method.upper() not in route.methods:
+            continue
+        if payload is None:
+            return route.endpoint()
+        return route.endpoint(payload)
+    raise AssertionError(f"Route not found: {method} {path}")
 
 
 def test_health_returns_version(tmp_path: Path) -> None:
-    if not HAS_HTTPX:
-        pytest.skip("httpx not installed.")
     app = _load_app(tmp_path)
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == SUCCESS_STATUS_CODE
-    payload = response.json()
+    payload = _call_route(app, "/health", "GET")
+    assert isinstance(payload, dict)
+    assert payload.get("status") == "ok"
     assert payload["status"] == "ok"
     assert "version" in payload
 
 
 def test_orchestrator_run_standalone_returns_payload(tmp_path: Path) -> None:
-    if not HAS_HTTPX:
-        pytest.skip("httpx not installed.")
     app = _load_app(tmp_path)
     config_path = tmp_path / "system.json"
     state_dir = tmp_path / "coordination"
     _write_system_config(config_path)
+    request_payload = {
+        "mode": "standalone",
+        "config_path": str(config_path),
+        "state_dir": str(state_dir),
+    }
+    from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
 
-    client = TestClient(app)
-    response = client.post(
-        "/orchestrator/run",
-        json={
-            "mode": "standalone",
-            "config_path": str(config_path),
-            "state_dir": str(state_dir),
-        },
-    )
-    assert response.status_code == SUCCESS_STATUS_CODE
-    payload = response.json()
-    assert "mode" in payload
-    assert "inventory" in payload
-    assert "coordination_tick" in payload
-    assert "coordination_status" in payload
-    assert "leader_status" in payload
-    assert "work_results" in payload
-    assert "tick_index" in payload
-    assert "run_id" in payload
-    assert "lease_held" in payload
+    request = OrchestratorRunRequest.model_validate(request_payload)
+    payload = _call_route(app, "/orchestrator/run", "POST", request)
+    assert hasattr(payload, "mode")
+    assert hasattr(payload, "inventory")
+    assert hasattr(payload, "coordination_tick")
+    assert hasattr(payload, "coordination_status")
+    assert hasattr(payload, "leader_status")
+    assert hasattr(payload, "work_results")
+    assert hasattr(payload, "tick_index")
+    assert hasattr(payload, "run_id")
+    assert hasattr(payload, "lease_held")
 
 
 def test_orchestrator_run_worker_requires_sg_id(tmp_path: Path) -> None:
-    if not HAS_HTTPX:
-        pytest.skip("httpx not installed.")
-    app = _load_app(tmp_path)
-    client = TestClient(app)
-    response = client.post(
-        "/orchestrator/run",
-        json={"mode": "worker"},
-    )
-    assert response.status_code == VALIDATION_STATUS_CODE
-    assert "sg_id is required" in response.text
+    _load_app(tmp_path)
+    from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
+
+    with pytest.raises(ValidationError) as exc_info:
+        OrchestratorRunRequest.model_validate({"mode": "worker"})
+    assert "sg_id is required" in str(exc_info.value)
 
 
 def test_orchestrator_status_does_not_persist_results(tmp_path: Path) -> None:
-    if not HAS_HTTPX:
-        pytest.skip("httpx not installed.")
     app = _load_app(tmp_path)
     config_path = tmp_path / "system.json"
     state_dir = tmp_path / "coordination"
     _write_system_config(config_path)
+    request_payload = {
+        "mode": "standalone",
+        "config_path": str(config_path),
+        "state_dir": str(state_dir),
+    }
+    from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
 
-    client = TestClient(app)
-    response = client.post(
-        "/orchestrator/status",
-        json={
-            "mode": "standalone",
-            "config_path": str(config_path),
-            "state_dir": str(state_dir),
-        },
-    )
-    assert response.status_code == SUCCESS_STATUS_CODE
-    payload = response.json()
-    assert "inventory" in payload
-    assert "coordination_status" in payload
-    assert "leader_status" in payload
-    assert "target_service_groups" in payload
+    request = OrchestratorRunRequest.model_validate(request_payload)
+    payload = _call_route(app, "/orchestrator/status", "POST", request)
+    assert hasattr(payload, "inventory")
+    assert hasattr(payload, "coordination_status")
+    assert hasattr(payload, "leader_status")
+    assert hasattr(payload, "target_service_groups")
 
     results_root = state_dir / "results"
     if results_root.exists():

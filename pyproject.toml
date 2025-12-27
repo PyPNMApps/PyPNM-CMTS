@@ -40,7 +40,7 @@ dev = [
 ]
 test = [
   "pytest>=8.0.0",
-  "httpx>=0.27.0",
+  "httpx>=0.27.0,<0.28.0",
 ]
 docs = [
   "mkdocs>=1.5.0",
