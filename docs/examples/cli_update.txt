@@ -1,33 +1,32 @@
-# CLI Examples
+# CLI examples
 
-Use These Examples To Fetch CMTS Data Via SNMP.
+## Table of contents
 
-## Table Of Contents
-
-- [Assumptions](#assumptions)
 - [Get sysDescr (SNMPv2c)](#get-sysdescr-snmpv2c)
 - [Get docsIf3MdNodeStatusMdDsSgId (SNMPv2c)](#get-docsif3mdnodestatusmddssgid-snmpv2c)
 - [Get docsIf3MdNodeStatusMdUsSgId (SNMPv2c)](#get-docsif3mdnodestatusmdussgid-snmpv2c)
-- [Get Service Group Topology (SNMPv2c)](#get-service-group-topology-snmpv2c)
+- [Get service group topology (SNMPv2c)](#get-service-group-topology-snmpv2c)
 - [Get docsIf3CmtsCmRegStatusMacAddr (SNMPv2c)](#get-docsif3cmtscmregstatusmacaddr-snmpv2c)
-- [Get docsIf3CmtsCmRegStatusMdCmSgId Via MAC (SNMPv2c)](#get-docsif3cmtscmregstatusmdcmsgid-via-mac-snmpv2c)
-- [Get All Registered CMs (SNMPv2c)](#get-all-registered-cms-snmpv2c)
-- [Get Registered CM MAC And IP Tuples (SNMPv2c)](#get-registered-cm-mac-and-ip-tuples-snmpv2c)
-- [Get CM Inet Addresses By MAC (SNMPv2c)](#get-cm-inet-addresses-by-mac-snmpv2c)
-- [Get MD-CM-SG-ID By Node Name (SNMPv2c)](#get-md-cm-sg-id-by-node-name-snmpv2c)
-- [Get CM Registration SG ID By Node Name (SNMPv2c)](#get-cm-registration-sg-id-by-node-name-snmpv2c)
-- [Get CM Registration SG ID By DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
-- [Orchestrator Run Modes](#orchestrator-run-modes)
-- [Next Steps](#next-steps)
+- [Get docsIf3CmtsCmRegStatusMdCmSgId via MAC (SNMPv2c)](#get-docsif3cmtscmregstatusmdcmsgid-via-mac-snmpv2c)
+- [Get all registered CMs (SNMPv2c)](#get-all-registered-cms-snmpv2c)
+- [Get registered CM MAC + IP tuples (SNMPv2c)](#get-registered-cm-mac-ip-tuples-snmpv2c)
+- [Get CM inet addresses by MAC (SNMPv2c)](#get-cm-inet-addresses-by-mac-snmpv2c)
+- [Get MD-CM-SG-ID by node name (SNMPv2c)](#get-md-cm-sg-id-by-node-name-snmpv2c)
+- [Get CM registration SG ID by node name (SNMPv2c)](#get-cm-registration-sg-id-by-node-name-snmpv2c)
+- [Get CM registration SG ID by DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
+- [Next steps](#next-steps)
+- [Orchestrator run modes](#orchestrator-run-modes)
 
-## Assumptions
+Use these examples to fetch CMTS data via SNMP.
 
-- Commands Are Run From The Repository Root.
-- Python Is Available; Optional `.env` Activation Is Handled By Your Environment.
+Assumptions:
+- Commands are run from the repository root.
+- Python is available; optional `.env` activation is handled by your environment.
 
 ## Get sysDescr (SNMPv2c)
 
-Fetch The CMTS `sysDescr` Via SNMPv2c. The Command Exits With Code `1` When The Response Is Empty Or The Request Fails. JSON Output Is The Default.
+Fetch the CMTS `sysDescr` via SNMPv2c. The command exits with code `1` when the
+response is empty or the request fails. JSON output is the default.
 
 ### Linux/macOS
 
@@ -36,9 +35,7 @@ CMTS_HOST="192.168.0.100"
 SNMP_COMMUNITY="public"
 SNMP_PORT=161
 
-clear && python src/pypnm_cmts/examples/cli/get_sysdescr.py "${CMTS_HOST}" \
-  -c "${SNMP_COMMUNITY}" \
-  -p "${SNMP_PORT}"
+clear && python src/pypnm_cmts/examples/cli/get_sysdescr.py "${CMTS_HOST}" -c "${SNMP_COMMUNITY}" -p "${SNMP_PORT}"
 ```
 
 Text output:
@@ -47,9 +44,7 @@ Text output:
 CMTS_HOST="192.168.0.100"
 SNMP_COMMUNITY="public"
 
-clear && python src/pypnm_cmts/examples/cli/get_sysdescr.py "${CMTS_HOST}" \
-  -c "${SNMP_COMMUNITY}" \
-  --text
+clear && python src/pypnm_cmts/examples/cli/get_sysdescr.py "${CMTS_HOST}" -c "${SNMP_COMMUNITY}" --text
 ```
 
 ### Windows PowerShell
@@ -78,7 +73,7 @@ Clear-Host; python src/pypnm_cmts/examples/cli/get_sysdescr.py $env:CMTS_HOST -c
 
 ## Get docsIf3MdNodeStatusMdDsSgId (SNMPv2c)
 
-Fetch Downstream Service Group IDs For The Available MD Nodes.
+Fetch downstream service group IDs for the available MD nodes.
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -91,7 +86,7 @@ clear && python src/pypnm_cmts/examples/cli/get_md_ds_sg_id.py \
 
 ## Get docsIf3MdNodeStatusMdUsSgId (SNMPv2c)
 
-Fetch Upstream Service Group IDs For The Available MD Nodes.
+Fetch upstream service group IDs for the available MD nodes.
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -102,9 +97,9 @@ clear && python src/pypnm_cmts/examples/cli/get_md_us_sg_id.py \
   --cmts-community "${SNMP_COMMUNITY}"
 ```
 
-## Get Service Group Topology (SNMPv2c)
+## Get service group topology (SNMPv2c)
 
-Fetch The CMTS Service-Group Topology (Default JSON Output).
+Fetch the CMTS service-group topology (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -129,7 +124,7 @@ clear && python src/pypnm_cmts/examples/cli/get_service_group_topology.py \
 
 ## Get docsIf3CmtsCmRegStatusMacAddr (SNMPv2c)
 
-Fetch CM Registration Status MAC Address Entries.
+Fetch CM registration status MAC address entries.
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -140,9 +135,10 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_status_mac_addr.py \
   --cmts-community "${SNMP_COMMUNITY}"
 ```
 
-## Get docsIf3CmtsCmRegStatusMdCmSgId Via MAC (SNMPv2c)
+## Get docsIf3CmtsCmRegStatusMdCmSgId via MAC (SNMPv2c)
 
-Fetch The Service Group ID For The First MAC Address Discovered In `docsIf3CmtsCmRegStatusMacAddr`.
+Fetch the service group ID for the first MAC address discovered in
+`docsIf3CmtsCmRegStatusMacAddr`.
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -153,9 +149,9 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_status_sg_id_via_mac.py \
   --cmts-community "${SNMP_COMMUNITY}"
 ```
 
-## Get All Registered CMs (SNMPv2c)
+## Get all registered CMs (SNMPv2c)
 
-Fetch CM Registration Entries For All Serving Groups (Default JSON Output).
+Fetch CM registration entries for all serving groups (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -166,7 +162,7 @@ clear && python src/pypnm_cmts/examples/cli/get_all_registered_cm.py \
   --cmts-community "${SNMP_COMMUNITY}"
 ```
 
-Fetch CM Registration Entries For A Specific Serving Group:
+Fetch CM registration entries for a specific serving group:
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -179,9 +175,9 @@ clear && python src/pypnm_cmts/examples/cli/get_all_registered_cm.py \
   --serving-group-id "${SERVING_GROUP_ID}"
 ```
 
-## Get Registered CM MAC And IP Tuples (SNMPv2c)
+## Get registered CM MAC + IP tuples (SNMPv2c)
 
-Fetch CM MAC And IP Address Tuples For A Serving Group (Default JSON Output).
+Fetch CM MAC and IP address tuples for a serving group (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -194,7 +190,7 @@ clear && python src/pypnm_cmts/examples/cli/get_all_registered_cm_mac_inet.py \
   --serving-group-id "${SERVING_GROUP_ID}"
 ```
 
-Fetch CM MAC And IP Address Tuples For All Serving Groups:
+Fetch CM MAC and IP address tuples for all serving groups:
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -205,9 +201,9 @@ clear && python src/pypnm_cmts/examples/cli/get_all_registered_cm_mac_inet.py \
   --cmts-community "${SNMP_COMMUNITY}"
 ```
 
-## Get CM Inet Addresses By MAC (SNMPv2c)
+## Get CM inet addresses by MAC (SNMPv2c)
 
-Fetch CM Inet Addresses For A Specific MAC Address (Default JSON Output).
+Fetch CM inet addresses for a specific MAC address (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -220,7 +216,7 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_inet_address.py \
   --mac "${CM_MAC}"
 ```
 
-Fetch CM Inet Addresses With Raw SNMP Values:
+Fetch CM inet addresses with raw SNMP values:
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -234,9 +230,9 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_inet_address.py \
   --raw
 ```
 
-## Get MD-CM-SG-ID By Node Name (SNMPv2c)
+## Get MD-CM-SG-ID by node name (SNMPv2c)
 
-Fetch The MD-CM-SG-ID For A Given Node Name (Default JSON Output).
+Fetch the MD-CM-SG-ID for a given node name (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -249,9 +245,9 @@ clear && python src/pypnm_cmts/examples/cli/get_md_cm_sg_id_from_node_name.py \
   --node-name "${NODE_NAME}"
 ```
 
-## Get CM Registration SG ID By Node Name (SNMPv2c)
+## Get CM registration SG ID by node name (SNMPv2c)
 
-Fetch The CM Registration SG ID For A Given Node Name (Default JSON Output).
+Fetch the CM registration SG ID for a given node name (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -264,9 +260,9 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_node_name.py \
   --node-name "${NODE_NAME}"
 ```
 
-## Get CM Registration SG ID By DS SG ID (SNMPv2c)
+## Get CM registration SG ID by DS SG ID (SNMPv2c)
 
-Fetch The CM Registration SG ID For A Downstream SG ID Value (Default JSON Output).
+Fetch the CM registration SG ID for a downstream SG ID value (default JSON output).
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -279,76 +275,29 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_ds_sg_id.py \
   --ds-sg-id "${DS_SG_ID}"
 ```
 
-## Orchestrator Run Modes
+## Next steps
 
-`pypnm-cmts` Supports One-Shot And Continuous Orchestrator Execution Modes.
+- Update the Python API docs when new parsers or data models are added.
+- Update the FastAPI docs when endpoints are introduced.
 
-- `run` executes a single coordination tick and prints JSON output.
-- `run-forever` executes coordination ticks continuously and prints JSON output per tick.
+## Orchestrator run modes
 
-JSON output includes:
-
-- `tick_index` (1-based tick index)
-- `run_id` (worker ticks that execute work)
-- `lease_held` (worker lease status for the tick)
-
-One-shot runs report `tick_index` = 1.
-Continuous runs increment `tick_index` once per tick in the same process.
-Worker persistence happens only when `lease_held` is true.
-
-Standalone mode (single tick):
+Run (single tick):
 
 ```bash
 clear && pypnm-cmts run --mode standalone
 ```
 
-Standalone mode (continuous ticks):
-
-```bash
-clear && pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
-```
-
-Controller mode (single tick):
-
 ```bash
 clear && pypnm-cmts run --mode controller
 ```
-
-Controller mode (continuous ticks):
-
-```bash
-clear && pypnm-cmts run-forever --mode controller
-```
-
-Worker mode (single tick, requires numeric service group id):
 
 ```bash
 clear && pypnm-cmts run --mode worker --sg-id 1
 ```
 
-Worker mode (continuous ticks, requires numeric service group id):
+Run-forever (continuous):
 
 ```bash
-clear && pypnm-cmts run-forever --mode worker --sg-id 1
+clear && pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1
 ```
-
-Optional overrides (example):
-
-```bash
-clear && pypnm-cmts run --mode standalone \
-  --config ./src/pypnm_cmts/settings/system.json \
-  --owner-id owner-1 \
-  --target-service-groups 2 \
-  --shard-mode score \
-  --tick-interval-seconds 1.0 \
-  --leader-ttl-seconds 10 \
-  --lease-ttl-seconds 10 \
-  --state-dir ./.data/coordination \
-  --election-name cmts-primary
-```
-
-## Next Steps
-
-- Update The Python API Docs When New Parsers Or Data Models Are Added.
-- Update The FastAPI Docs When Endpoints Are Introduced.
-- Add A Short "Troubleshooting" Section Once You Have Common Failure Modes (SNMP Timeout, Missing MIB View, etc.).

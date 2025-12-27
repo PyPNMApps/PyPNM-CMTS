@@ -10,6 +10,7 @@ from pypnm_cmts.lib.types import (
     LeaderId,
     OwnerId,
     ServiceGroupId,
+    TickIndex,
 )
 
 
@@ -109,6 +110,7 @@ class ServiceGroupLeaseReleaseResultModel(BaseModel):
 
 
 class CoordinationTickResultModel(BaseModel):
+    tick_index: TickIndex = Field(default=TickIndex(0), description="1-based tick index if provided; 0 when unset.")
     is_leader: bool = Field(default=False, description="True if the caller is the current leader.")
     leader_id: LeaderId = Field(default=LeaderId(""), description="Current leader identifier.")
     acquired_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups acquired during the tick.")

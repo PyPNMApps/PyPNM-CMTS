@@ -11,6 +11,7 @@ from pypnm.lib.types import (
     IPv4Str,
     IPv6Str,
     MacAddressStr,
+    PathLike,
     SnmpIndex,
 )
 
@@ -26,6 +27,9 @@ CoordinationElectionName = NewType("CoordinationElectionName", str)
 LeaderId                 = NewType("LeaderId", str)
 OwnerId                  = NewType("OwnerId", str)
 ServiceGroupId           = NewType("ServiceGroupId", int)
+TickIndex                = NewType("TickIndex", int)
+OrchestratorRunId        = NewType("OrchestratorRunId", str)
+CoordinationPath         = PathLike
 
 NodeName        = NewType("NodeName", str)
 MdCmSgId        = NewType("MdCmSgId", int)
@@ -55,6 +59,9 @@ __all__ = [
     "LeaderId",
     "OwnerId",
     "ServiceGroupId",
+    "TickIndex",
+    "OrchestratorRunId",
+    "CoordinationPath",
     "NodeName",
     "MdCmSgId",
     "MdDsSgId",

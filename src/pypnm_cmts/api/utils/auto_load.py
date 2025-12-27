@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from pypnm_cmts.api.routes.orchestrator.router import router as orchestrator_router
 from pypnm_cmts.api.routes.system.router import router as system_router
 
 
@@ -13,5 +14,6 @@ class RouterRegistrar:
 
     def register(self, app: FastAPI) -> FastAPI:
         """Attach API routers to the FastAPI application."""
+        app.include_router(orchestrator_router)
         app.include_router(system_router)
         return app

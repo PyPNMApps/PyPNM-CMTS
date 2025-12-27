@@ -27,6 +27,8 @@ nav:
   - Topology: topology/index.md
   - Docker: docker/index.md
   - Release: release/index.md
+  - Developer:
+      - Deferred cleanups: dev/deferred-cleanups.md
   - Issues: issues/index.md
   - Style guide: style-guide.md
 

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+from pathlib import Path
+
 from pydantic import BaseModel, Field, model_validator
 
 from pypnm_cmts.config.config_manager import CmtsConfigManager
-from pypnm_cmts.lib.types import OwnerId
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    CoordinationPath,
+    OwnerId,
+    ServiceGroupId,
+)
 from pypnm_cmts.types.orchestrator_types import AdapterKind, OrchestratorMode
 
 DEFAULT_CMTS_INDEX: int = 0
@@ -14,6 +21,11 @@ DEFAULT_TESTS: list[str] = ["ds_ofdm_rxmer"]
 DEFAULT_OWNER_ID: OwnerId = OwnerId("")
 DEFAULT_TARGET_SERVICE_GROUPS: int = 0
 DEFAULT_WORKER_CAP: int = 0
+DEFAULT_STATE_DIR = Path(".data/coordination")
+DEFAULT_ELECTION_NAME: CoordinationElectionName = CoordinationElectionName("")
+DEFAULT_LEADER_TTL_SECONDS = 10
+DEFAULT_LEASE_TTL_SECONDS = 10
+DEFAULT_TICK_INTERVAL_SECONDS = 1.0
 SHARD_MODE_SEQUENTIAL = "sequential"
 SHARD_MODE_SCORE = "score"
 SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
@@ -31,10 +43,16 @@ class CmtsAdapterConfig(BaseModel):
 class ServiceGroupDescriptor(BaseModel):
     """Descriptor for a CMTS service group boundary."""
 
-    sg_id: str = Field(default="", description="Service group identifier.")
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
     name: str = Field(default="", description="Service group name or label.")
     cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="CMTS index for the service group.")
     enabled: bool = Field(default=True, description="Whether the service group is enabled for orchestration.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> ServiceGroupDescriptor:
+        if int(self.sg_id) <= 0:
+            raise ValueError("sg_id must be greater than zero.")
+        return self
 
 
 class CmtsOrchestratorSettings(BaseModel):
@@ -48,6 +66,11 @@ class CmtsOrchestratorSettings(BaseModel):
     target_service_groups: int = Field(default=DEFAULT_TARGET_SERVICE_GROUPS, description="Target number of service groups per replica.")
     shard_mode: str = Field(default=DEFAULT_SHARD_MODE, description="Service group shard mode: sequential or score.")
     worker_cap: int = Field(default=DEFAULT_WORKER_CAP, description="Optional cap on worker count (0 means no cap).")
+    tick_interval_seconds: float = Field(default=DEFAULT_TICK_INTERVAL_SECONDS, description="Tick interval in seconds.")
+    leader_ttl_seconds: int = Field(default=DEFAULT_LEADER_TTL_SECONDS, description="Leader election TTL in seconds.")
+    lease_ttl_seconds: int = Field(default=DEFAULT_LEASE_TTL_SECONDS, description="Service group lease TTL in seconds.")
+    state_dir: CoordinationPath = Field(default=DEFAULT_STATE_DIR, description="State directory for coordination files.")
+    election_name: CoordinationElectionName = Field(default=DEFAULT_ELECTION_NAME, description="Optional election name override.")
 
     @model_validator(mode="after")
     def _apply_default_tests(self) -> CmtsOrchestratorSettings:
@@ -59,10 +82,25 @@ class CmtsOrchestratorSettings(BaseModel):
             raise ValueError("target_service_groups must be non-negative.")
         if int(self.worker_cap) < 0:
             raise ValueError("worker_cap must be non-negative.")
+        if float(self.tick_interval_seconds) <= 0:
+            raise ValueError("tick_interval_seconds must be greater than zero.")
+        if int(self.leader_ttl_seconds) <= 0:
+            raise ValueError("leader_ttl_seconds must be greater than zero.")
+        if int(self.lease_ttl_seconds) <= 0:
+            raise ValueError("lease_ttl_seconds must be greater than zero.")
+        min_ttl = min(int(self.leader_ttl_seconds), int(self.lease_ttl_seconds))
+        if float(self.tick_interval_seconds) >= float(min_ttl):
+            raise ValueError("tick_interval_seconds must be less than leader_ttl_seconds and lease_ttl_seconds.")
+        if isinstance(self.state_dir, str):
+            if self.state_dir.strip() == "":
+                raise ValueError("state_dir must be non-empty.")
+            self.state_dir = Path(self.state_dir)
+        if str(self.election_name).strip() == "":
+            self.election_name = DEFAULT_ELECTION_NAME
         return self
 
     @classmethod
-    def from_system_config(cls, config_path: str | None = None) -> CmtsOrchestratorSettings:
+    def from_system_config(cls, config_path: CoordinationPath | None = None) -> CmtsOrchestratorSettings:
         """
         Build orchestrator configuration from system.json.
 
