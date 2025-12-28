@@ -45,10 +45,14 @@ class SysDescrCli:
             help="CMTS IP address or resolvable hostname.",
         )
         parser.add_argument(
-            "-c",
-            "--community",
+            "--read-community",
             default=SysDescrCli.DEFAULT_COMMUNITY,
-            help="SNMP community string (default: public).",
+            help="SNMPv2c read community string (default: public).",
+        )
+        parser.add_argument(
+            "--write-community",
+            default="",
+            help="Optional SNMPv2c write community string (defaults to read community when empty).",
         )
         parser.add_argument(
             "-p",
@@ -149,14 +153,13 @@ class SysDescrCli:
             SysDescrCli._emit_error(str(exc))
             return SysDescrCli.EXIT_FAILURE
 
-        community = args.community.strip()
-        if community == "":
+        read_community = args.read_community.strip()
+        if read_community == "":
             SysDescrCli._emit_error("Community string is empty.")
             return SysDescrCli.EXIT_FAILURE
-
         try:
             system_description = asyncio.run(
-                SysDescrCli.fetch_sysdescr(inet, community, args.port)
+                SysDescrCli.fetch_sysdescr(inet, read_community, args.port)
             )
         except Exception as exc:
             SysDescrCli._emit_error(f"SNMP request failed: {exc}")

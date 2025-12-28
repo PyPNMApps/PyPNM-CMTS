@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+# ruff: noqa: I001
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from pypnm.lib.types import HostNameStr, IPv4Str, IPv6Str, MacAddressStr
-from pytest import CaptureFixture
-
+from pypnm.lib.types import HostNameStr, IPv4Str, IPv6Str, MacAddressStr, SnmpReadCommunity, SnmpWriteCommunity
 from pypnm_cmts.cli import EXIT_CODE_USAGE, _run_cli
 from pypnm_cmts.cmts.discovery_models import (
     InventoryDiscoveryResultModel,
@@ -16,13 +15,15 @@ from pypnm_cmts.cmts.discovery_models import (
     ServiceGroupCableModemInventoryModel,
 )
 from pypnm_cmts.lib.types import IPv6LinkLocalStr, ServiceGroupId
+from pytest import CaptureFixture
 
 
 def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
     class _Args:
         command = "discover"
         cmts_hostname = "192.168.0.100"
-        community = "public"
+        read_community = ""
+        write_community = ""
         port = 161
         config = ""
         state_dir = str(tmp_path / "coordination")
@@ -70,9 +71,20 @@ def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: 
         ],
     )
 
+    def _fake_run_discovery(
+        cmts_hostname: HostNameStr,
+        read_community: SnmpReadCommunity,
+        write_community: SnmpWriteCommunity,
+        port: int,
+        state_dir: Path | None = None,
+    ) -> InventoryDiscoveryResultModel:
+        assert str(read_community) == "public"
+        assert str(write_community) == "public"
+        return fake_result
+
     monkeypatch.setattr(
         "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
-        lambda cmts_hostname, community, port, state_dir=None: fake_result,
+        _fake_run_discovery,
     )
 
     exit_code = _run_cli()
@@ -88,11 +100,64 @@ def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: 
     ]
 
 
+def test_cli_discover_write_override(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    class _Args:
+        command = "discover"
+        cmts_hostname = "192.168.0.100"
+        read_community = "public"
+        write_community = "private"
+        port = 161
+        config = ""
+        state_dir = str(tmp_path / "coordination")
+        text = False
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    fake_result = InventoryDiscoveryResultModel(
+        cmts_host=HostNameStr("192.168.0.100"),
+        discovered_sg_ids=[ServiceGroupId(1)],
+        per_sg=[
+            ServiceGroupCableModemInventoryModel(
+                sg_id=ServiceGroupId(1),
+                cm_count=0,
+                cms=[],
+            ),
+        ],
+    )
+
+    def _fake_run_discovery(
+        cmts_hostname: HostNameStr,
+        read_community: SnmpReadCommunity,
+        write_community: SnmpWriteCommunity,
+        port: int,
+        state_dir: Path | None = None,
+    ) -> InventoryDiscoveryResultModel:
+        assert str(read_community) == "public"
+        assert str(write_community) == "private"
+        return fake_result
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
+        _fake_run_discovery,
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert [int(sg_id) for sg_id in payload["discovered_sg_ids"]] == [1]
+
+
 def test_cli_discover_outputs_text(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
     class _Args:
         command = "discover"
         cmts_hostname = "192.168.0.100"
-        community = "public"
+        read_community = ""
+        write_community = ""
         port = 161
         config = ""
         state_dir = str(tmp_path / "coordination")
@@ -134,9 +199,20 @@ def test_cli_discover_outputs_text(monkeypatch: object, tmp_path: Path, capsys: 
         ],
     )
 
+    def _fake_run_discovery(
+        cmts_hostname: HostNameStr,
+        read_community: SnmpReadCommunity,
+        write_community: SnmpWriteCommunity,
+        port: int,
+        state_dir: Path | None = None,
+    ) -> InventoryDiscoveryResultModel:
+        assert str(read_community) == "public"
+        assert str(write_community) == "public"
+        return fake_result
+
     monkeypatch.setattr(
         "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
-        lambda cmts_hostname, community, port, state_dir=None: fake_result,
+        _fake_run_discovery,
     )
 
     exit_code = _run_cli()
@@ -154,7 +230,8 @@ def test_cli_discover_requires_hostname(monkeypatch: object) -> None:
     class _Args:
         command = "discover"
         cmts_hostname = ""
-        community = ""
+        read_community = ""
+        write_community = ""
         port = 161
         config = ""
         state_dir = ""

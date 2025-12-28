@@ -35,6 +35,7 @@ Table Of Contents in alphabetical order.
 - [Service Group](#service-group)
 - [Service Group Descriptor](#service-group-descriptor)
 - [Service Group ID](#service-group-id)
+- [Service Group Shard Planner](#service-group-shard-planner)
 - [Shard Mode](#shard-mode)
 - [Standalone](#standalone)
 - [Target Service Groups](#target-service-groups)
@@ -149,6 +150,9 @@ A configuration record describing a service group boundary, including `sg_id`, o
 
 ### Service Group ID
 An integer identifier for a service group (`ServiceGroupId`). Used as the primary key for leasing and result directory naming.
+
+### Service Group Shard Planner
+The deterministic planner that orders enabled service groups and computes the worker count for controller planning.
 
 ### Shard Mode
 The strategy used to select which service groups to target per tick when the inventory is larger than the target count. Current options:

@@ -11,6 +11,7 @@ from pypnm.lib.types import (
     IPv6Str,
     MacAddressStr,
     SnmpReadCommunity,
+    SnmpWriteCommunity,
 )
 
 from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
@@ -78,7 +79,8 @@ class _FakeOperation:
 def test_discovery_inventory_orders_service_groups_and_cms(monkeypatch: object) -> None:
     service = CmtsInventoryDiscoveryService(
         cmts_hostname=HostNameStr("192.168.0.100"),
-        community=SnmpReadCommunity("public"),
+        read_community=SnmpReadCommunity("public"),
+        write_community=SnmpWriteCommunity(""),
         port=161,
     )
 
@@ -102,3 +104,34 @@ def test_discovery_inventory_orders_service_groups_and_cms(monkeypatch: object) 
     sg_2 = result.per_sg[1]
     assert sg_2.cm_count == 1
     assert str(sg_2.cms[0].mac) == "aa:bb:cc:dd:ee:ff"
+
+
+def test_build_operation_uses_write_community_fallback(monkeypatch: object) -> None:
+    captured: dict[str, str] = {}
+
+    class _FakeCmtsOperation:
+        def __init__(self, inet: object, write_community: str, port: int) -> None:
+            captured["write_community"] = write_community
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.inventory_discovery.CmtsOperation",
+        _FakeCmtsOperation,
+    )
+
+    service = CmtsInventoryDiscoveryService(
+        cmts_hostname=HostNameStr("192.168.0.100"),
+        read_community=SnmpReadCommunity("read"),
+        write_community=SnmpWriteCommunity(""),
+        port=161,
+    )
+    service._build_operation()
+    assert captured["write_community"] == "read"
+
+    service = CmtsInventoryDiscoveryService(
+        cmts_hostname=HostNameStr("192.168.0.100"),
+        read_community=SnmpReadCommunity("read"),
+        write_community=SnmpWriteCommunity("write"),
+        port=161,
+    )
+    service._build_operation()
+    assert captured["write_community"] == "write"

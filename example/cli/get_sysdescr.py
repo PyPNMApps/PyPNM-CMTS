@@ -22,7 +22,7 @@ class SysDescrCli:
     CLI helper for retrieving sysDescr from a CMTS via SNMPv2c.
     """
 
-    DEFAULT_COMMUNITY = "public"
+    DEFAULT_READ_COMMUNITY = "public"
     DEFAULT_PORT = Snmp_v2c.SNMP_PORT
 
     EXIT_SUCCESS = 0
@@ -34,7 +34,7 @@ class SysDescrCli:
         Build the argument parser for the sysDescr CLI example.
 
         Returns:
-            argparse.ArgumentParser: Configured parser with host, community, and port options.
+            argparse.ArgumentParser: Configured parser with host, read community, and port options.
         """
         parser = argparse.ArgumentParser(
             description="Fetch sysDescr from a CMTS using SNMPv2c."
@@ -45,10 +45,9 @@ class SysDescrCli:
             help="CMTS IP address or resolvable hostname.",
         )
         parser.add_argument(
-            "-c",
-            "--community",
-            default=SysDescrCli.DEFAULT_COMMUNITY,
-            help="SNMP community string (default: public).",
+            "--read-community",
+            default=SysDescrCli.DEFAULT_READ_COMMUNITY,
+            help="SNMPv2c read community string (default: public).",
         )
         parser.add_argument(
             "-p",
@@ -93,19 +92,23 @@ class SysDescrCli:
             return Inet(addresses[0])
 
     @staticmethod
-    async def fetch_sysdescr(inet: Inet, community: str, port: int) -> CmtsSysDescrModel:
+    async def fetch_sysdescr(
+        inet: Inet,
+        read_community: str,
+        port: int,
+    ) -> CmtsSysDescrModel:
         """
         Fetch and parse sysDescr from the target CMTS.
 
         Args:
             inet (Inet): CMTS IP address.
-            community (str): SNMP community string.
+            read_community (str): SNMPv2c read community string.
             port (int): SNMP port.
 
         Returns:
             SystemDescriptor: Parsed sysDescr data from the CMTS.
         """
-        operation = CmtsOperation(inet=inet, write_community=community, port=port)
+        operation = CmtsOperation(inet=inet, write_community=read_community, port=port)
         return await operation.getSysDescr()
 
     @staticmethod
@@ -149,14 +152,14 @@ class SysDescrCli:
             SysDescrCli._emit_error(str(exc))
             return SysDescrCli.EXIT_FAILURE
 
-        community = args.community.strip()
-        if community == "":
+        read_community = args.read_community.strip()
+        if read_community == "":
             SysDescrCli._emit_error("Community string is empty.")
             return SysDescrCli.EXIT_FAILURE
 
         try:
             system_description = asyncio.run(
-                SysDescrCli.fetch_sysdescr(inet, community, args.port)
+                SysDescrCli.fetch_sysdescr(inet, read_community, args.port)
             )
         except Exception as exc:
             SysDescrCli._emit_error(f"SNMP request failed: {exc}")

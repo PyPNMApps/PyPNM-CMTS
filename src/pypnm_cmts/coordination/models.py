@@ -109,6 +109,12 @@ class ServiceGroupLeaseReleaseResultModel(BaseModel):
     message: str = Field(default="", description="Result message.")
 
 
+class ServiceGroupLeaseConflictModel(BaseModel):
+    sg_id: ServiceGroupId = Field(default=ServiceGroupId(0), description="Service group identifier associated with the conflict.")
+    owner_id: OwnerId = Field(default=OwnerId(""), description="Current lease owner identifier.")
+    reason: str = Field(default="", description="Reason the lease could not be acquired.")
+
+
 class CoordinationTickResultModel(BaseModel):
     tick_index: TickIndex = Field(default=TickIndex(0), description="1-based tick index if provided; 0 when unset.")
     is_leader: bool = Field(default=False, description="True if the caller is the current leader.")
@@ -117,6 +123,11 @@ class CoordinationTickResultModel(BaseModel):
     renewed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups renewed during the tick.")
     released_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups released during the tick.")
     failed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups that failed to acquire, renew, or release.")
+    enabled_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Enabled service group identifiers for this tick.")
+    desired_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Desired service groups for this tick.")
+    leased_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups leased by this coordinator.")
+    conflicts: list[ServiceGroupLeaseConflictModel] = Field(default_factory=list, description="Lease conflicts encountered for desired service groups.")
+    worker_count: int = Field(default=0, description="Planned worker count derived from shard planning.")
     message: str = Field(default="", description="Summary message for the tick operation.")
 
 

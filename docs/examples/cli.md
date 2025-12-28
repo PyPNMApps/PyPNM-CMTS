@@ -283,6 +283,8 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_ds_sg_id.py \
 ## Discovery (CMTS Inventory)
 
 Discover Service Groups And Registered Cable Modems From The CMTS (Default JSON Output).
+If `--write-community` is omitted or empty, the discovery path uses the effective read community.
+`run` and `run-forever` load CMTS adapter settings from system.json unless you pass adapter overrides.
 
 ```bash
 CMTS_HOST="192.168.0.100"
@@ -290,7 +292,7 @@ SNMP_COMMUNITY="public"
 
 clear && pypnm-cmts discover \
   --cmts-hostname "${CMTS_HOST}" \
-  --community "${SNMP_COMMUNITY}" \
+  --read-community "${SNMP_COMMUNITY}" \
   --state-dir ./.data/coordination
 ```
 
@@ -302,7 +304,8 @@ SNMP_COMMUNITY="public"
 
 clear && pypnm-cmts discover \
   --cmts-hostname "${CMTS_HOST}" \
-  --community "${SNMP_COMMUNITY}" \
+  --read-community "${SNMP_COMMUNITY}" \
+  --write-community "private" \
   --state-dir ./.data/coordination \
   --text
 ```
@@ -313,6 +316,7 @@ clear && pypnm-cmts discover \
 
 - `run` executes a single coordination tick and prints JSON output.
 - `run-forever` executes coordination ticks continuously and prints JSON output per tick.
+By default, `run` and `run-forever` use CMTS adapter settings from system.json. Adapter overrides can be supplied via flags.
 
 JSON output includes:
 
@@ -377,6 +381,10 @@ clear && pypnm-cmts run --mode standalone \
   --tick-interval-seconds 1.0 \
   --leader-ttl-seconds 10 \
   --lease-ttl-seconds 10 \
+  --cmts-hostname 192.168.0.100 \
+  --read-community public \
+  --write-community private \
+  --cmts-port 161 \
   --state-dir ./.data/coordination \
   --election-name cmts-primary
 ```

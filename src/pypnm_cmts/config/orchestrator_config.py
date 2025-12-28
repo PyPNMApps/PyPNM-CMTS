@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
-from pypnm.lib.types import HostNameStr, SnmpReadCommunity
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.config.config_manager import CmtsConfigManager
 from pypnm_cmts.lib.types import (
@@ -42,7 +42,8 @@ class CmtsAdapterConfig(BaseModel):
     cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="Index of the CMTS entry in system.json.")
     label: str = Field(default="primary", description="Human-friendly adapter label.")
     hostname: HostNameStr = Field(default=HostNameStr(""), description="CMTS hostname or IP address.")
-    community: SnmpReadCommunity = Field(default=DEFAULT_SNMP_COMMUNITY, description="SNMPv2c community string.")
+    community: SnmpReadCommunity = Field(default=DEFAULT_SNMP_COMMUNITY, description="SNMPv2c read community string.")
+    write_community: SnmpWriteCommunity = Field(default=SnmpWriteCommunity(""), description="Optional SNMPv2c write community string.")
     port: int = Field(default=DEFAULT_SNMP_PORT, description="SNMP port for CMTS discovery.")
 
 

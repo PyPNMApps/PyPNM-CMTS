@@ -11,7 +11,7 @@ from pathlib import Path
 
 import uvicorn
 from pydantic import ValidationError
-from pypnm.lib.types import HostNameStr, SnmpReadCommunity
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
@@ -58,6 +58,27 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         "--config",
         default="",
         help="Optional path to system.json configuration file.",
+    )
+    parser.add_argument(
+        "--cmts-hostname",
+        default="",
+        help="Optional CMTS hostname/IP override for auto-discovery (adapter.hostname).",
+    )
+    parser.add_argument(
+        "--read-community",
+        default="",
+        help="Optional SNMPv2c read community override (adapter.community).",
+    )
+    parser.add_argument(
+        "--write-community",
+        default="",
+        help="Optional SNMPv2c write community override (adapter.write_community).",
+    )
+    parser.add_argument(
+        "--cmts-port",
+        type=int,
+        default=None,
+        help="Optional SNMP port override for CMTS discovery (adapter.port).",
     )
     parser.add_argument(
         "--sg-id",
@@ -118,9 +139,14 @@ def _add_discover_args(parser: argparse.ArgumentParser) -> None:
         help="CMTS hostname or IP address.",
     )
     parser.add_argument(
-        "--community",
+        "--read-community",
         default="",
-        help="SNMPv2c community string (default: public).",
+        help="SNMPv2c read community string (default: public).",
+    )
+    parser.add_argument(
+        "--write-community",
+        default="",
+        help="Optional SNMPv2c write community string (defaults to read community when empty).",
     )
     parser.add_argument(
         "--port",
@@ -244,6 +270,9 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
     owner_id_value = args.owner_id
     state_dir_value = args.state_dir
     election_name_value = args.election_name
+    cmts_hostname_value = str(getattr(args, "cmts_hostname", "")).strip()
+    read_community_value = str(getattr(args, "read_community", "")).strip()
+    write_community_value = str(getattr(args, "write_community", "")).strip()
 
     mode_value = OrchestratorMode(args.mode)
 
@@ -269,10 +298,16 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
         lease_ttl_seconds=args.lease_ttl_seconds,
         state_dir=state_dir,
         election_name=election_name,
+        adapter_hostname=HostNameStr(cmts_hostname_value) if cmts_hostname_value != "" else None,
+        adapter_read_community=SnmpReadCommunity(read_community_value) if read_community_value != "" else None,
+        adapter_write_community=SnmpWriteCommunity(write_community_value) if write_community_value != "" else None,
+        adapter_port=int(args.cmts_port) if getattr(args, "cmts_port", None) is not None else None,
     )
 
 
-def _resolve_discovery_inputs(args: argparse.Namespace) -> tuple[HostNameStr, SnmpReadCommunity, int, Path]:
+def _resolve_discovery_inputs(
+    args: argparse.Namespace,
+) -> tuple[HostNameStr, SnmpReadCommunity, SnmpWriteCommunity, int, Path]:
     settings = CmtsOrchestratorSettings.from_system_config(
         config_path=Path(args.config) if args.config != "" else None
     )
@@ -283,11 +318,17 @@ def _resolve_discovery_inputs(args: argparse.Namespace) -> tuple[HostNameStr, Sn
     if hostname == "":
         raise ValueError("cmts-hostname is required for discovery.")
 
-    community = str(args.community).strip()
-    if community == "":
-        community = str(settings.adapter.community).strip()
-    if community == "":
-        community = str(SnmpReadCommunity("public"))
+    read_community = str(args.read_community).strip()
+    if read_community == "":
+        read_community = str(settings.adapter.community).strip()
+    if read_community == "":
+        read_community = str(SnmpReadCommunity("public"))
+
+    write_community = str(args.write_community).strip()
+    if write_community == "":
+        write_community = str(settings.adapter.write_community).strip()
+    if write_community == "":
+        write_community = read_community
 
     state_dir_value = str(args.state_dir).strip()
     if state_dir_value == "":
@@ -295,7 +336,13 @@ def _resolve_discovery_inputs(args: argparse.Namespace) -> tuple[HostNameStr, Sn
     else:
         state_dir = Path(state_dir_value)
 
-    return (HostNameStr(hostname), SnmpReadCommunity(community), int(args.port), state_dir)
+    return (
+        HostNameStr(hostname),
+        SnmpReadCommunity(read_community),
+        SnmpWriteCommunity(write_community),
+        int(args.port),
+        state_dir,
+    )
 
 
 def _render_discovery_text(result: InventoryDiscoveryResultModel) -> str:
@@ -356,10 +403,11 @@ def _run_cli() -> int:
 
     if args.command == "discover":
         try:
-            cmts_hostname, community, port, state_dir = _resolve_discovery_inputs(args)
+            cmts_hostname, read_community, write_community, port, state_dir = _resolve_discovery_inputs(args)
             result = CmtsInventoryDiscoveryService.run_discovery(
                 cmts_hostname=cmts_hostname,
-                community=community,
+                read_community=read_community,
+                write_community=write_community,
                 port=port,
                 state_dir=state_dir,
             )

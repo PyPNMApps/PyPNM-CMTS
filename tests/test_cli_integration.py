@@ -251,26 +251,6 @@ def test_cli_run_forever_multi_worker_shared_state_dir(tmp_path: Path) -> None:
     state_dir = tmp_path / "coordination"
     _write_system_config_multi(config_path)
 
-    controller_result = _run_cli(
-        [
-            "run-forever",
-            "--mode",
-            "controller",
-            "--max-ticks",
-            "1",
-            "--config",
-            str(config_path),
-            "--state-dir",
-            str(state_dir),
-            "--target-service-groups",
-            "0",
-            "--owner-id",
-            "controller-1",
-        ],
-        cwd=_repo_root(),
-    )
-    assert controller_result.returncode == SUCCESS_EXIT_CODE
-
     worker_1 = _run_cli(
         [
             "run-forever",

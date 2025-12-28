@@ -59,9 +59,15 @@ pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
 ## Discovery (CMTS Inventory)
 
 Discover service groups and registered cable modems from a CMTS using SNMP.
+If `--write-community` is omitted or empty, the discovery path uses the effective read community.
+The `run` and `run-forever` commands load CMTS adapter settings from system.json unless you pass adapter overrides.
 
 ```bash
-pypnm-cmts discover --cmts-hostname 192.168.0.100 --community public --state-dir ./.data/coordination
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --state-dir ./.data/coordination
+```
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --write-community private --state-dir ./.data/coordination
 ```
 
 ## Orchestrator Run Modes
@@ -69,6 +75,7 @@ pypnm-cmts discover --cmts-hostname 192.168.0.100 --community public --state-dir
 Run a single coordination tick and print JSON output.
 
 Worker mode supports a numeric service group id (bound worker) or no `--sg-id` (unbound worker).
+Use adapter overrides to supply CMTS hostname and read/write communities at runtime without editing system.json.
 
 Tick index is 1-based. The one-shot run reports `tick_index` = 1.
 Continuous runs increment `tick_index` once per tick in the same process.
@@ -128,6 +135,7 @@ Example:
 
 ```bash
 pypnm-cmts run-forever --mode standalone --owner-id replica-1 --target-service-groups 2 --shard-mode score \
+  --cmts-hostname 192.168.0.100 --read-community public --cmts-port 161 \
   --state-dir ./.data/coordination --election-name cmts-primary
 ```
 
@@ -140,6 +148,10 @@ Flags:
 - --lease-ttl-seconds <int>
 - --state-dir <path>
 - --election-name <str>
+- --cmts-hostname <str>
+- --read-community <str>
+- --write-community <str>
+- --cmts-port <int>
 
 ## Serve Options
 

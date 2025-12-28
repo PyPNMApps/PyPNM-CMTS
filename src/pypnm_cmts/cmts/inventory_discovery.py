@@ -15,6 +15,7 @@ from pypnm.lib.types import (
     IPv6Str,
     MacAddressStr,
     SnmpReadCommunity,
+    SnmpWriteCommunity,
 )
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
@@ -33,7 +34,8 @@ from pypnm_cmts.lib.types import (
     ServiceGroupId,
 )
 
-DEFAULT_COMMUNITY: SnmpReadCommunity = SnmpReadCommunity("public")
+DEFAULT_READ_COMMUNITY: SnmpReadCommunity = SnmpReadCommunity("public")
+DEFAULT_WRITE_COMMUNITY: SnmpWriteCommunity = SnmpWriteCommunity("")
 DEFAULT_SNMP_PORT = Snmp_v2c.SNMP_PORT
 
 
@@ -45,7 +47,8 @@ class CmtsInventoryDiscoveryService:
     def __init__(
         self,
         cmts_hostname: HostNameStr,
-        community: SnmpReadCommunity = DEFAULT_COMMUNITY,
+        read_community: SnmpReadCommunity = DEFAULT_READ_COMMUNITY,
+        write_community: SnmpWriteCommunity = DEFAULT_WRITE_COMMUNITY,
         port: int = DEFAULT_SNMP_PORT,
     ) -> None:
         """
@@ -53,12 +56,14 @@ class CmtsInventoryDiscoveryService:
 
         Args:
             cmts_hostname (HostNameStr): CMTS hostname or IP address.
-            community (SnmpReadCommunity): SNMPv2c community string.
+            read_community (SnmpReadCommunity): SNMPv2c read community string.
+            write_community (SnmpWriteCommunity): SNMPv2c write community string.
             port (int): SNMP port for CMTS discovery.
         """
         self.logger = logging.getLogger(self.__class__.__name__)
         self._cmts_hostname = HostNameStr(str(cmts_hostname))
-        self._community = SnmpReadCommunity(str(community))
+        self._read_community = SnmpReadCommunity(str(read_community))
+        self._write_community = SnmpWriteCommunity(str(write_community))
         self._port = int(port)
 
     async def discover_inventory(
@@ -135,7 +140,8 @@ class CmtsInventoryDiscoveryService:
     @staticmethod
     def run_discovery(
         cmts_hostname: HostNameStr,
-        community: SnmpReadCommunity,
+        read_community: SnmpReadCommunity,
+        write_community: SnmpWriteCommunity,
         port: int,
         state_dir: CoordinationPath | None = None,
     ) -> InventoryDiscoveryResultModel:
@@ -144,7 +150,8 @@ class CmtsInventoryDiscoveryService:
 
         Args:
             cmts_hostname (HostNameStr): CMTS hostname or IP address.
-            community (SnmpReadCommunity): SNMPv2c community string.
+            read_community (SnmpReadCommunity): SNMPv2c read community string.
+            write_community (SnmpWriteCommunity): SNMPv2c write community string.
             port (int): SNMP port for CMTS discovery.
             state_dir (CoordinationPath | None): Optional state directory for persistence.
 
@@ -153,7 +160,8 @@ class CmtsInventoryDiscoveryService:
         """
         service = CmtsInventoryDiscoveryService(
             cmts_hostname=cmts_hostname,
-            community=community,
+            read_community=read_community,
+            write_community=write_community,
             port=port,
         )
         return asyncio.run(service.discover_inventory(state_dir=state_dir))
@@ -177,9 +185,13 @@ class CmtsInventoryDiscoveryService:
                 ) from exc
             inet = Inet(addresses[0])
 
+        effective_write = str(self._write_community).strip()
+        if effective_write == "":
+            effective_write = str(self._read_community)
+
         return CmtsOperation(
             inet=inet,
-            write_community=str(self._community),
+            write_community=effective_write,
             port=self._port,
         )
 

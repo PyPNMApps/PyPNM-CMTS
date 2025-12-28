@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+# ruff: noqa: I001
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
 
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings, ServiceGroupDescriptor
 from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
 from pypnm_cmts.coordination.manager import CoordinationManager
-from pypnm_cmts.coordination.models import CoordinationTickResultModel
+from pypnm_cmts.coordination.models import CoordinationTickResultModel, ServiceGroupLeaseConflictModel
+from pypnm_cmts.coordination.service_group_lease import FileServiceGroupLease
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     CoordinationPath,
@@ -27,6 +30,7 @@ from pypnm_cmts.orchestrator.models import (
     WorkResultModel,
 )
 from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
+from pypnm_cmts.orchestrator.sg_shard_planner import ServiceGroupShardPlanner
 from pypnm_cmts.orchestrator.work_runner import WorkRunner
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
@@ -36,6 +40,7 @@ DEFAULT_ELECTION_LABEL = "primary"
 INVENTORY_SOURCE_CONFIG = "config"
 INVENTORY_SOURCE_DISCOVERY = "discovery"
 INVENTORY_SOURCE_WORKER = "worker"
+DEFAULT_CONFLICT_REASON = "Lease not acquired."
 
 
 class CmtsOrchestratorLauncher:
@@ -56,6 +61,10 @@ class CmtsOrchestratorLauncher:
         lease_ttl_seconds: int | None = None,
         state_dir: CoordinationPath | None = None,
         election_name: CoordinationElectionName | None = None,
+        adapter_hostname: HostNameStr | None = None,
+        adapter_read_community: SnmpReadCommunity | None = None,
+        adapter_write_community: SnmpWriteCommunity | None = None,
+        adapter_port: int | None = None,
         state_dir_override: Path | None = None,
     ) -> None:
         """
@@ -73,6 +82,10 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds (int | None): Optional lease TTL override.
             state_dir (CoordinationPath | None): Optional coordination state directory override.
             election_name (CoordinationElectionName | None): Optional election name override.
+            adapter_hostname (HostNameStr | None): Optional CMTS hostname override.
+            adapter_read_community (SnmpReadCommunity | None): Optional SNMP read community override.
+            adapter_write_community (SnmpWriteCommunity | None): Optional SNMP write community override.
+            adapter_port (int | None): Optional SNMP port override.
             state_dir_override (Path | None): Optional state directory override (tests only).
         """
         self._config_path = config_path
@@ -86,6 +99,10 @@ class CmtsOrchestratorLauncher:
         self._lease_ttl_seconds = lease_ttl_seconds
         self._state_dir = state_dir
         self._election_name = election_name
+        self._adapter_hostname = adapter_hostname
+        self._adapter_read_community = adapter_read_community
+        self._adapter_write_community = adapter_write_community
+        self._adapter_port = adapter_port
         self._state_dir_override = state_dir_override
 
     def run_once(self) -> OrchestratorRunResultModel:
@@ -112,10 +129,20 @@ class CmtsOrchestratorLauncher:
             source=source,
         )
 
+        desired_sg_ids = list(service_groups)
+        worker_count = 0
+        if self._mode == OrchestratorMode.CONTROLLER:
+            desired_sg_ids, worker_count = self._plan_controller_service_groups(
+                settings=settings,
+                service_groups=service_groups,
+            )
+
         effective_target = self._effective_target_service_groups(
             settings=settings,
             inventory_count=len(service_groups),
         )
+        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
+            effective_target = len(desired_sg_ids)
 
         manager = CoordinationManager(
             state_dir=state_dir,
@@ -128,12 +155,30 @@ class CmtsOrchestratorLauncher:
             shard_mode=settings.shard_mode,
         )
 
-        tick_result = manager.tick(service_groups)
+        tick_target = desired_sg_ids if self._mode == OrchestratorMode.CONTROLLER else service_groups
+        tick_result = manager.tick(tick_target)
         tick_value = int(tick_result.tick_index)
         tick_index = TickIndex(tick_value if tick_value > 0 else 1)
         acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
         coordination_status = manager.status()
         held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+        conflicts = self._build_conflicts(
+            desired_sg_ids=desired_sg_ids,
+            leased_sg_ids=held_sg_ids,
+            state_dir=state_dir,
+            election_name=election_name,
+            owner_id=OwnerId(str(owner_id)),
+            lease_ttl_seconds=int(settings.lease_ttl_seconds),
+        )
+        tick_result = tick_result.model_copy(
+            update={
+                "enabled_sg_ids": sorted(service_groups, key=int),
+                "desired_sg_ids": sorted(desired_sg_ids, key=int),
+                "leased_sg_ids": sorted(held_sg_ids, key=int),
+                "conflicts": conflicts,
+                "worker_count": worker_count,
+            }
+        )
         work_sg_ids = self._select_work_sg_ids(
             acquired_sg_ids=acquired_sg_ids,
             held_sg_ids=held_sg_ids,
@@ -194,10 +239,19 @@ class CmtsOrchestratorLauncher:
             count=len(service_groups),
             source=source,
         )
+        desired_sg_ids = list(service_groups)
+        worker_count = 0
+        if self._mode == OrchestratorMode.CONTROLLER:
+            desired_sg_ids, worker_count = self._plan_controller_service_groups(
+                settings=settings,
+                service_groups=service_groups,
+            )
         effective_target = self._effective_target_service_groups(
             settings=settings,
             inventory_count=len(service_groups),
         )
+        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
+            effective_target = len(desired_sg_ids)
 
         manager = CoordinationManager(
             state_dir=state_dir,
@@ -224,6 +278,23 @@ class CmtsOrchestratorLauncher:
             acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
             coordination_status = manager.status()
             held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+            conflicts = self._build_conflicts(
+                desired_sg_ids=desired_sg_ids,
+                leased_sg_ids=held_sg_ids,
+                state_dir=state_dir,
+                election_name=election_name,
+                owner_id=OwnerId(str(owner_id)),
+                lease_ttl_seconds=int(settings.lease_ttl_seconds),
+            )
+            tick_result = tick_result.model_copy(
+                update={
+                    "enabled_sg_ids": sorted(service_groups, key=int),
+                    "desired_sg_ids": sorted(desired_sg_ids, key=int),
+                    "leased_sg_ids": sorted(held_sg_ids, key=int),
+                    "conflicts": conflicts,
+                    "worker_count": worker_count,
+                }
+            )
             work_sg_ids = self._select_work_sg_ids(
                 acquired_sg_ids=acquired_sg_ids,
                 held_sg_ids=held_sg_ids,
@@ -362,7 +433,8 @@ class CmtsOrchestratorLauncher:
     ) -> tuple[list[ServiceGroupId], str]:
         result = CmtsInventoryDiscoveryService.run_discovery(
             cmts_hostname=settings.adapter.hostname,
-            community=settings.adapter.community,
+            read_community=settings.adapter.community,
+            write_community=settings.adapter.write_community,
             port=int(settings.adapter.port),
             state_dir=state_dir,
         )
@@ -375,6 +447,28 @@ class CmtsOrchestratorLauncher:
                 continue
             enabled_ids.append(entry.sg_id)
         return (sorted(enabled_ids, key=int), INVENTORY_SOURCE_CONFIG)
+
+    def _plan_controller_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        service_groups: list[ServiceGroupId],
+    ) -> tuple[list[ServiceGroupId], int]:
+        descriptors = self._build_planner_descriptors(settings, service_groups)
+        return ServiceGroupShardPlanner.plan(
+            descriptors=descriptors,
+            shard_mode=settings.shard_mode,
+            target_service_groups=int(settings.target_service_groups),
+            worker_cap=int(settings.worker_cap),
+        )
+
+    def _build_planner_descriptors(
+        self,
+        settings: CmtsOrchestratorSettings,
+        service_groups: list[ServiceGroupId],
+    ) -> list[ServiceGroupDescriptor]:
+        if settings.service_groups:
+            return list(settings.service_groups)
+        return [ServiceGroupDescriptor(sg_id=sg_id) for sg_id in service_groups]
 
     def _effective_target_service_groups(self, settings: CmtsOrchestratorSettings, inventory_count: int) -> int:
         if self._mode == OrchestratorMode.WORKER and self._sg_id is not None:
@@ -429,6 +523,40 @@ class CmtsOrchestratorLauncher:
         value = f"sg{int(sg_id)}_tick{int(tick_index):06d}"
         return OrchestratorRunId(value)
 
+    def _build_conflicts(
+        self,
+        desired_sg_ids: list[ServiceGroupId],
+        leased_sg_ids: list[ServiceGroupId],
+        state_dir: Path,
+        election_name: CoordinationElectionName,
+        owner_id: OwnerId,
+        lease_ttl_seconds: int,
+    ) -> list[ServiceGroupLeaseConflictModel]:
+        if not desired_sg_ids:
+            return []
+
+        conflicts: list[ServiceGroupLeaseConflictModel] = []
+        for sg_id in sorted(desired_sg_ids, key=int):
+            if sg_id in leased_sg_ids:
+                continue
+            lease = FileServiceGroupLease(
+                state_dir=state_dir,
+                election_name=election_name,
+                sg_id=sg_id,
+                owner_id=owner_id,
+                ttl_seconds=int(lease_ttl_seconds),
+            )
+            status = lease.status()
+            reason = status.message if status.message != "" else DEFAULT_CONFLICT_REASON
+            conflicts.append(
+                ServiceGroupLeaseConflictModel(
+                    sg_id=sg_id,
+                    owner_id=status.owner_id,
+                    reason=reason,
+                )
+            )
+        return conflicts
+
     def _select_work_sg_ids(
         self,
         acquired_sg_ids: list[ServiceGroupId],
@@ -445,6 +573,7 @@ class CmtsOrchestratorLauncher:
 
     def _apply_overrides(self, settings: CmtsOrchestratorSettings) -> CmtsOrchestratorSettings:
         data = settings.model_dump()
+        adapter_data = dict(data.get("adapter", {}))
 
         if self._owner_id is not None and str(self._owner_id).strip() != "":
             data["owner_id"] = self._owner_id
@@ -462,6 +591,16 @@ class CmtsOrchestratorLauncher:
             data["state_dir"] = str(self._state_dir)
         if self._election_name is not None:
             data["election_name"] = self._election_name
+        if self._adapter_hostname is not None and str(self._adapter_hostname).strip() != "":
+            adapter_data["hostname"] = str(self._adapter_hostname)
+        if self._adapter_read_community is not None and str(self._adapter_read_community).strip() != "":
+            adapter_data["community"] = str(self._adapter_read_community)
+        if self._adapter_write_community is not None:
+            adapter_data["write_community"] = str(self._adapter_write_community)
+        if self._adapter_port is not None:
+            adapter_data["port"] = int(self._adapter_port)
+
+        data["adapter"] = adapter_data
 
         return CmtsOrchestratorSettings.model_validate(data)
 
