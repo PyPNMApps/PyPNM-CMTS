@@ -25,11 +25,14 @@ def test_default_tests_fallback_when_empty() -> None:
     assert settings.default_tests == ["ds_ofdm_rxmer"]
 
 
-def test_worker_mode_requires_sg_id(monkeypatch: object) -> None:
+def test_worker_mode_allows_unbound(monkeypatch: object, tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
     class _Args:
         command = "run"
         mode = "worker"
-        config = ""
+        config = str(config_path)
         sg_id = ""
         owner_id = ""
         target_service_groups: int | None = None
@@ -55,8 +58,13 @@ def test_worker_mode_requires_sg_id(monkeypatch: object) -> None:
         lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
     )
 
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher.run_once",
+        lambda self: _build_minimal_run_result(),
+    )
+
     exit_code = _run_cli()
-    assert exit_code == EXIT_CODE_USAGE
+    assert exit_code == 0
 
 
 def test_orchestrator_settings_invalid_shard_mode_raises() -> None:

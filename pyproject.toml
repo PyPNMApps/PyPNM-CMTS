@@ -31,7 +31,7 @@ classifiers = [
 license-files = ["LICENSE", "NOTICE"]
 
 dependencies = [
-  "pypnm-docsis>=1.0.10.0",
+  "pypnm-docsis>=1.0.12.0",
 ]
 
 [project.optional-dependencies]

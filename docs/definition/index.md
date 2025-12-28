@@ -9,12 +9,15 @@ Table Of Contents in alphabetical order.
 - [Acronyms](#acronyms)
 - [Adapter](#adapter)
 - [Adapter Kind](#adapter-kind)
+- [Cable Modem](#cable-modem)
 - [CMTS Index](#cmts-index)
 - [Command (CLI)](#command-cli)
 - [Controller](#controller)
 - [Coordination Election Name](#coordination-election-name)
 - [Coordination Manager](#coordination-manager)
 - [Coordination State Directory](#coordination-state-directory)
+- [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
+- [Inventory Discovery](#inventory-discovery)
 - [Leader ID](#leader-id)
 - [Leader TTL](#leader-ttl)
 - [Lease](#lease)
@@ -23,6 +26,7 @@ Table Of Contents in alphabetical order.
 - [Orchestrator Mode](#orchestrator-mode)
 - [Orchestrator Run ID](#orchestrator-run-id)
 - [Owner ID](#owner-id)
+- [Registered Cable Modem](#registered-cable-modem)
 - [Result Persistence](#result-persistence)
 - [Results Root](#results-root)
 - [Run](#run)
@@ -37,12 +41,14 @@ Table Of Contents in alphabetical order.
 - [Tick](#tick)
 - [Tick Index](#tick-index)
 - [Tick Interval](#tick-interval)
+- [Unbound Worker](#unbound-worker)
 - [Uvicorn](#uvicorn)
 - [Work Item](#work-item)
 - [Work Result](#work-result)
 - [Work Status](#work-status)
 - [Worker](#worker)
 - [Worker Cap](#worker-cap)
+- [Zero-Touch (0T)](#zero-touch-0t)
 
 ## Terms
 
@@ -52,6 +58,10 @@ includes `kind`, `cmts_index`, and a human-friendly `label`.
 
 ### Adapter Kind
 The adapter implementation family (for example, `snmp`). This value selects which CMTS integration backend is used.
+
+### Cable Modem
+An individual modem registered on a CMTS. In inventory output, a cable modem is represented with at least a MAC
+address and may include IP addressing when available.
 
 ### CMTS Index
 A numeric index selecting which CMTS entry in `system.json` is being targeted by the adapter or a service group. This allows one configuration
@@ -75,6 +85,13 @@ state directory.
 ### Coordination State Directory
 The filesystem directory used for shared coordination state (leader-election records, leases, and worker result persistence). Default:
 `.data/coordination`.
+
+### Discovery (CMTS Inventory)
+The process of querying a CMTS via SNMP to determine the current service group inventory and the registered cable modems per service group.
+
+### Inventory Discovery
+The typed result of a CMTS discovery operation, including the discovered service group identifiers and the per-SG list of registered cable
+modems.
 
 ### Leader ID
 A stable identifier used in leader election to represent the current leader candidate. In the current design, this is derived from `owner_id`.
@@ -102,6 +119,10 @@ lease. Example format: `sg<id>_tick<6-digit-index>`.
 
 ### Owner ID
 A stable identifier for the running process or container instance. Used for coordination ownership, logging, and leader-election identification.
+
+### Registered Cable Modem
+A cable modem that is currently registered to the CMTS. Discovery outputs group registered modems by service group and include the modem MAC
+address and, when available, its IP address.
 
 ### Result Persistence
 The convention for writing work results to disk under the coordination state directory. Work results are stored under `results/sg_<id>/` with
@@ -152,6 +173,10 @@ A monotonically increasing 1-based counter for ticks within a run loop. In the r
 The configured delay between ticks in continuous mode (seconds). This value must be positive and must be less than both the leader TTL and lease
 TTL.
 
+### Unbound Worker
+A worker started without `--sg-id` that requests leases for the enabled inventory each tick. Work execution and persistence are still gated by
+the leases acquired in that tick.
+
 ### Uvicorn
 The ASGI server used to run the FastAPI application for PyPNM-CMTS.
 
@@ -172,10 +197,15 @@ that service group.
 An optional configuration value limiting the number of worker processes/replicas allowed to participate (0 means no cap). This is a
 planning/configuration primitive; enforcement may be added later.
 
+### Zero-Touch (0T)
+The target operational model where service group inventory is discovered automatically and workers self-assign work via coordination leases,
+without manual per-worker SG configuration.
+
 ## Acronyms
 
 | Acronym | Meaning |
 |---------|---------|
+| 0T | Zero-Touch |
 | API | Application Programming Interface |
 | CLI | Command Line Interface |
 | CM | Cable Modem |
@@ -198,6 +228,7 @@ planning/configuration primitive; enforcement may be added later.
 | OID | Object Identifier |
 | PNM | Proactive Network Maintenance |
 | QoS | Quality of Service |
+| SG | Service Group |
 | RCC | Receive Channel Configuration |
 | RCP | Receive Channel Profile |
 | RCS | Receive Channel Set |

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity
 
 from pypnm_cmts.config.config_manager import CmtsConfigManager
 from pypnm_cmts.lib.types import (
@@ -26,6 +27,8 @@ DEFAULT_ELECTION_NAME: CoordinationElectionName = CoordinationElectionName("")
 DEFAULT_LEADER_TTL_SECONDS = 10
 DEFAULT_LEASE_TTL_SECONDS = 10
 DEFAULT_TICK_INTERVAL_SECONDS = 1.0
+DEFAULT_SNMP_COMMUNITY: SnmpReadCommunity = SnmpReadCommunity("public")
+DEFAULT_SNMP_PORT = 161
 SHARD_MODE_SEQUENTIAL = "sequential"
 SHARD_MODE_SCORE = "score"
 SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
@@ -38,6 +41,9 @@ class CmtsAdapterConfig(BaseModel):
     kind: AdapterKind = Field(default=AdapterKind.SNMP, description="CMTS adapter kind.")
     cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="Index of the CMTS entry in system.json.")
     label: str = Field(default="primary", description="Human-friendly adapter label.")
+    hostname: HostNameStr = Field(default=HostNameStr(""), description="CMTS hostname or IP address.")
+    community: SnmpReadCommunity = Field(default=DEFAULT_SNMP_COMMUNITY, description="SNMPv2c community string.")
+    port: int = Field(default=DEFAULT_SNMP_PORT, description="SNMP port for CMTS discovery.")
 
 
 class ServiceGroupDescriptor(BaseModel):
@@ -61,6 +67,7 @@ class CmtsOrchestratorSettings(BaseModel):
     mode: OrchestratorMode = Field(default=DEFAULT_ORCHESTRATOR_MODE, description="Orchestrator execution mode.")
     adapter: CmtsAdapterConfig = Field(default_factory=CmtsAdapterConfig, description="CMTS adapter configuration.")
     service_groups: list[ServiceGroupDescriptor] = Field(default_factory=list, description="Service group descriptors.")
+    auto_discover: bool = Field(default=False, description="Enable CMTS-based service group discovery.")
     default_tests: list[str] = Field(default_factory=list, description="Default test names for orchestration.")
     owner_id: OwnerId = Field(default=DEFAULT_OWNER_ID, description="Optional explicit owner id for coordination.")
     target_service_groups: int = Field(default=DEFAULT_TARGET_SERVICE_GROUPS, description="Target number of service groups per replica.")
@@ -91,6 +98,13 @@ class CmtsOrchestratorSettings(BaseModel):
         min_ttl = min(int(self.leader_ttl_seconds), int(self.lease_ttl_seconds))
         if float(self.tick_interval_seconds) >= float(min_ttl):
             raise ValueError("tick_interval_seconds must be less than leader_ttl_seconds and lease_ttl_seconds.")
+        if bool(self.auto_discover):
+            hostname_value = str(self.adapter.hostname).strip()
+            if hostname_value == "":
+                raise ValueError("adapter.hostname must be set when auto_discover is enabled.")
+            community_value = str(self.adapter.community).strip()
+            if community_value == "":
+                raise ValueError("adapter.community must be set when auto_discover is enabled.")
         if isinstance(self.state_dir, str):
             if self.state_dir.strip() == "":
                 raise ValueError("state_dir must be non-empty.")

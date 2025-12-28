@@ -7,6 +7,7 @@ Use the `pypnm-cmts serve` command to start the FastAPI service with development
 - [Assumptions](#assumptions)
 - [When to Use](#when-to-use)
 - [Usage](#usage)
+- [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
 - [Orchestrator Run Modes](#orchestrator-run-modes)
 - [Worker Result Persistence](#worker-result-persistence)
 - [Coordination Flags](#coordination-flags)
@@ -55,11 +56,19 @@ pypnm-cmts serve --reload --reload-dir src --reload-dir tools
 pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
 ```
 
+## Discovery (CMTS Inventory)
+
+Discover service groups and registered cable modems from a CMTS using SNMP.
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --community public --state-dir ./.data/coordination
+```
+
 ## Orchestrator Run Modes
 
 Run a single coordination tick and print JSON output.
 
-Worker mode requires a numeric service group id.
+Worker mode supports a numeric service group id (bound worker) or no `--sg-id` (unbound worker).
 
 Tick index is 1-based. The one-shot run reports `tick_index` = 1.
 Continuous runs increment `tick_index` once per tick in the same process.
@@ -89,6 +98,10 @@ pypnm-cmts run-forever --mode controller --tick-interval-seconds 1
 
 ```bash
 pypnm-cmts run-forever --mode worker --sg-id 1 --tick-interval-seconds 1
+```
+
+```bash
+pypnm-cmts run-forever --mode worker --tick-interval-seconds 1
 ```
 
 ## Worker Result Persistence

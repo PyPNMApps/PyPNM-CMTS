@@ -11,8 +11,16 @@ from pathlib import Path
 
 import uvicorn
 from pydantic import ValidationError
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity
 
-from pypnm_cmts.lib.types import CoordinationElectionName, OwnerId, ServiceGroupId
+from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
+from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    OwnerId,
+    ServiceGroupId,
+)
 from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
 from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
@@ -20,11 +28,13 @@ from pypnm_cmts.version import __version__
 
 SUCCESS_EXIT_CODE = 0
 EXIT_CODE_USAGE = 2
+EXIT_CODE_FAILURE = 1
 HOST_DEFAULT = "127.0.0.1"
 PORT_DEFAULT = 8000
 LOG_LEVEL_DEFAULT = "info"
 DEFAULT_WORKERS = 1
 TIMEOUT_KEEP_ALIVE_SECONDS = 120
+DEFAULT_SNMP_PORT = 161
 
 
 def main() -> int:
@@ -52,7 +62,7 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--sg-id",
         default="",
-        help="Service group identifier (required for worker mode).",
+        help="Optional service group identifier (bound worker mode).",
     )
     parser.add_argument(
         "--owner-id",
@@ -101,6 +111,40 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_discover_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cmts-hostname",
+        default="",
+        help="CMTS hostname or IP address.",
+    )
+    parser.add_argument(
+        "--community",
+        default="",
+        help="SNMPv2c community string (default: public).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_SNMP_PORT,
+        help="SNMP port for discovery (default: 161).",
+    )
+    parser.add_argument(
+        "--config",
+        default="",
+        help="Optional path to system.json configuration file.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default="",
+        help="Optional coordination state directory override.",
+    )
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="Output in text format instead of JSON.",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """
     Build the CLI argument parser.
@@ -130,6 +174,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional maximum number of ticks to execute.",
     )
+
+    discover_parser = subparsers.add_parser("discover", help="Discover CMTS service groups and registered cable modems.")
+    _add_discover_args(discover_parser)
 
     serve_parser = subparsers.add_parser("serve", help="Start the FastAPI service (Uvicorn).")
     serve_parser.add_argument("--host", default=HOST_DEFAULT, help=f"Host to bind (default: {HOST_DEFAULT})")
@@ -199,8 +246,6 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
     election_name_value = args.election_name
 
     mode_value = OrchestratorMode(args.mode)
-    if mode_value == OrchestratorMode.WORKER and sg_id_value == "":
-        raise ValueError("--sg-id is required when mode=worker.")
 
     config_path: Path | None = Path(config_value) if config_value != "" else None
     state_dir: Path | None = Path(state_dir_value) if state_dir_value != "" else None
@@ -225,6 +270,43 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
         state_dir=state_dir,
         election_name=election_name,
     )
+
+
+def _resolve_discovery_inputs(args: argparse.Namespace) -> tuple[HostNameStr, SnmpReadCommunity, int, Path]:
+    settings = CmtsOrchestratorSettings.from_system_config(
+        config_path=Path(args.config) if args.config != "" else None
+    )
+
+    hostname = str(args.cmts_hostname).strip()
+    if hostname == "":
+        hostname = str(settings.adapter.hostname).strip()
+    if hostname == "":
+        raise ValueError("cmts-hostname is required for discovery.")
+
+    community = str(args.community).strip()
+    if community == "":
+        community = str(settings.adapter.community).strip()
+    if community == "":
+        community = str(SnmpReadCommunity("public"))
+
+    state_dir_value = str(args.state_dir).strip()
+    if state_dir_value == "":
+        state_dir = Path(settings.state_dir)
+    else:
+        state_dir = Path(state_dir_value)
+
+    return (HostNameStr(hostname), SnmpReadCommunity(community), int(args.port), state_dir)
+
+
+def _render_discovery_text(result: InventoryDiscoveryResultModel) -> str:
+    lines: list[str] = []
+    lines.append(f"cmts_host={result.cmts_host}")
+    for entry in result.per_sg:
+        lines.append(f"sg_id={int(entry.sg_id)} cm_count={int(entry.cm_count)}")
+        lines.extend(
+            [f"  mac={cm.mac} ipv4={cm.ipv4} ipv6={cm.ipv6}" for cm in entry.cms]
+        )
+    return "\n".join(lines)
 
 
 def _run_cli() -> int:
@@ -270,6 +352,31 @@ def _run_cli() -> int:
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return EXIT_CODE_USAGE
+        return SUCCESS_EXIT_CODE
+
+    if args.command == "discover":
+        try:
+            cmts_hostname, community, port, state_dir = _resolve_discovery_inputs(args)
+            result = CmtsInventoryDiscoveryService.run_discovery(
+                cmts_hostname=cmts_hostname,
+                community=community,
+                port=port,
+                state_dir=state_dir,
+            )
+        except ValidationError as exc:
+            _print_validation_errors(exc)
+            return EXIT_CODE_USAGE
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_USAGE
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_FAILURE
+
+        if args.text:
+            print(_render_discovery_text(result))
+        else:
+            print(result.model_dump_json(indent=2))
         return SUCCESS_EXIT_CODE
 
     if args.command == "serve":

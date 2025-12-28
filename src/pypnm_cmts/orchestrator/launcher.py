@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
 from pypnm_cmts.coordination.manager import CoordinationManager
@@ -33,6 +34,7 @@ DEFAULT_STATE_DIR = ".data/coordination"
 DEFAULT_ELECTION_PREFIX = "cmts"
 DEFAULT_ELECTION_LABEL = "primary"
 INVENTORY_SOURCE_CONFIG = "config"
+INVENTORY_SOURCE_DISCOVERY = "discovery"
 INVENTORY_SOURCE_WORKER = "worker"
 
 
@@ -103,7 +105,7 @@ class CmtsOrchestratorLauncher:
         leader_id = LeaderId(str(owner_id))
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings)
+        service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -129,15 +131,20 @@ class CmtsOrchestratorLauncher:
         tick_result = manager.tick(service_groups)
         tick_value = int(tick_result.tick_index)
         tick_index = TickIndex(tick_value if tick_value > 0 else 1)
-        lease_held = self._is_worker_lease_held(manager=manager, service_groups=service_groups)
-        run_id = self._build_run_id(service_groups=service_groups, tick_index=tick_index, lease_held=lease_held)
+        acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
+        coordination_status = manager.status()
+        held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+        work_sg_ids = self._select_work_sg_ids(
+            acquired_sg_ids=acquired_sg_ids,
+            held_sg_ids=held_sg_ids,
+        )
+        lease_held = self._is_worker_lease_held(held_sg_ids=held_sg_ids)
+        run_id = self._build_run_id(acquired_sg_ids=work_sg_ids, tick_index=tick_index, lease_held=lease_held)
         work_results = self._run_worker_tests(
             settings=settings,
             state_dir=state_dir,
-            manager=manager,
-            service_groups=service_groups,
             tick_index=tick_index,
-            run_id=run_id,
+            acquired_sg_ids=work_sg_ids,
             lease_held=lease_held,
         )
 
@@ -148,7 +155,7 @@ class CmtsOrchestratorLauncher:
             lease_held=lease_held,
             inventory=inventory,
             coordination_tick=tick_result,
-            coordination_status=manager.status(),
+            coordination_status=coordination_status,
             leader_status=manager.leader_status(),
             target_service_groups=effective_target,
             work_results=work_results,
@@ -181,7 +188,7 @@ class CmtsOrchestratorLauncher:
         leader_id = LeaderId(str(owner_id))
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings)
+        service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -214,15 +221,20 @@ class CmtsOrchestratorLauncher:
             if on_tick is None:
                 return
             tick_value = TickIndex(int(tick_index))
-            lease_held = self._is_worker_lease_held(manager=manager, service_groups=service_groups)
-            run_id = self._build_run_id(service_groups=service_groups, tick_index=tick_value, lease_held=lease_held)
+            acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
+            coordination_status = manager.status()
+            held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+            work_sg_ids = self._select_work_sg_ids(
+                acquired_sg_ids=acquired_sg_ids,
+                held_sg_ids=held_sg_ids,
+            )
+            lease_held = self._is_worker_lease_held(held_sg_ids=held_sg_ids)
+            run_id = self._build_run_id(acquired_sg_ids=work_sg_ids, tick_index=tick_value, lease_held=lease_held)
             work_results = self._run_worker_tests(
                 settings=settings,
                 state_dir=state_dir,
-                manager=manager,
-                service_groups=service_groups,
                 tick_index=tick_value,
-                run_id=run_id,
+                acquired_sg_ids=work_sg_ids,
                 lease_held=lease_held,
             )
             result = OrchestratorRunResultModel(
@@ -232,7 +244,7 @@ class CmtsOrchestratorLauncher:
                 lease_held=lease_held,
                 inventory=inventory,
                 coordination_tick=tick_result,
-                coordination_status=manager.status(),
+                coordination_status=coordination_status,
                 leader_status=manager.leader_status(),
                 target_service_groups=effective_target,
                 work_results=work_results,
@@ -262,7 +274,7 @@ class CmtsOrchestratorLauncher:
         leader_id = LeaderId(str(owner_id))
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings)
+        service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -309,14 +321,22 @@ class CmtsOrchestratorLauncher:
         value = f"{DEFAULT_ELECTION_PREFIX}-{label}"
         return CoordinationElectionName(value)
 
-    def _build_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
+    def _build_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+    ) -> tuple[list[ServiceGroupId], str]:
         if self._mode == OrchestratorMode.WORKER:
-            return self._build_worker_service_groups(settings)
-        return self._build_config_service_groups(settings)
+            return self._build_worker_service_groups(settings, state_dir)
+        return self._build_inventory_service_groups(settings, state_dir)
 
-    def _build_worker_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
+    def _build_worker_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+    ) -> tuple[list[ServiceGroupId], str]:
         if self._sg_id is None:
-            raise ValueError("worker mode requires --sg-id.")
+            return self._build_inventory_service_groups(settings, state_dir)
 
         config_groups = self._build_config_service_groups(settings)[0]
         if settings.service_groups:
@@ -325,6 +345,28 @@ class CmtsOrchestratorLauncher:
             return ([self._sg_id], INVENTORY_SOURCE_CONFIG)
 
         return ([self._sg_id], INVENTORY_SOURCE_WORKER)
+
+    def _build_inventory_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+    ) -> tuple[list[ServiceGroupId], str]:
+        if bool(settings.auto_discover) or not settings.service_groups:
+            return self._build_discovered_service_groups(settings, state_dir)
+        return self._build_config_service_groups(settings)
+
+    def _build_discovered_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+    ) -> tuple[list[ServiceGroupId], str]:
+        result = CmtsInventoryDiscoveryService.run_discovery(
+            cmts_hostname=settings.adapter.hostname,
+            community=settings.adapter.community,
+            port=int(settings.adapter.port),
+            state_dir=state_dir,
+        )
+        return (sorted(result.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
 
     def _build_config_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
         enabled_ids: list[ServiceGroupId] = []
@@ -335,7 +377,7 @@ class CmtsOrchestratorLauncher:
         return (sorted(enabled_ids, key=int), INVENTORY_SOURCE_CONFIG)
 
     def _effective_target_service_groups(self, settings: CmtsOrchestratorSettings, inventory_count: int) -> int:
-        if self._mode == OrchestratorMode.WORKER:
+        if self._mode == OrchestratorMode.WORKER and self._sg_id is not None:
             requested = 1
         else:
             requested = int(settings.target_service_groups)
@@ -347,28 +389,26 @@ class CmtsOrchestratorLauncher:
         self,
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
-        manager: CoordinationManager,
-        service_groups: list[ServiceGroupId],
         tick_index: TickIndex,
-        run_id: OrchestratorRunId,
+        acquired_sg_ids: list[ServiceGroupId],
         lease_held: bool,
     ) -> list[WorkResultModel]:
         if self._mode != OrchestratorMode.WORKER:
             return []
         if not lease_held:
             return []
-        if not service_groups:
+        if not acquired_sg_ids:
             return []
-
-        sg_id = service_groups[0]
 
         tests = [str(test_name) for test_name in settings.default_tests]
         runner = WorkRunner(state_dir=state_dir)
+        sg_id = sorted(acquired_sg_ids, key=int)[0]
+        run_id = self._build_run_id_for_sg(sg_id=sg_id, tick_index=tick_index)
         return runner.run_tests(sg_id=sg_id, tests=tests, run_id=run_id)
 
     def _build_run_id(
         self,
-        service_groups: list[ServiceGroupId],
+        acquired_sg_ids: list[ServiceGroupId],
         tick_index: TickIndex,
         lease_held: bool,
     ) -> OrchestratorRunId:
@@ -376,24 +416,32 @@ class CmtsOrchestratorLauncher:
             return OrchestratorRunId("")
         if not lease_held:
             return OrchestratorRunId("")
-        if not service_groups:
+        if not acquired_sg_ids:
             return OrchestratorRunId("")
-        sg_id = service_groups[0]
+        sg_id = sorted(acquired_sg_ids, key=int)[0]
+        return self._build_run_id_for_sg(sg_id=sg_id, tick_index=tick_index)
+
+    def _build_run_id_for_sg(
+        self,
+        sg_id: ServiceGroupId,
+        tick_index: TickIndex,
+    ) -> OrchestratorRunId:
         value = f"sg{int(sg_id)}_tick{int(tick_index):06d}"
         return OrchestratorRunId(value)
 
-    def _is_worker_lease_held(
+    def _select_work_sg_ids(
         self,
-        manager: CoordinationManager,
-        service_groups: list[ServiceGroupId],
-    ) -> bool:
+        acquired_sg_ids: list[ServiceGroupId],
+        held_sg_ids: list[ServiceGroupId],
+    ) -> list[ServiceGroupId]:
+        if acquired_sg_ids:
+            return sorted(acquired_sg_ids, key=int)[:1]
+        return sorted(held_sg_ids, key=int)[:1]
+
+    def _is_worker_lease_held(self, held_sg_ids: list[ServiceGroupId]) -> bool:
         if self._mode != OrchestratorMode.WORKER:
             return False
-        if not service_groups:
-            return False
-        sg_id = service_groups[0]
-        status = manager.status()
-        return sg_id in status.held_sg_ids
+        return bool(held_sg_ids)
 
     def _apply_overrides(self, settings: CmtsOrchestratorSettings) -> CmtsOrchestratorSettings:
         data = settings.model_dump()

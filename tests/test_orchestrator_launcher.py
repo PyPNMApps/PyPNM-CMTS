@@ -7,10 +7,16 @@ import json
 from pathlib import Path
 
 import pytest
+from pypnm.lib.types import HostNameStr
 
-from pypnm_cmts.coordination.models import CoordinationTickResultModel
-from pypnm_cmts.lib.types import ServiceGroupId, TickIndex
+from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
+from pypnm_cmts.coordination.models import (
+    CoordinationStatusModel,
+    CoordinationTickResultModel,
+)
+from pypnm_cmts.lib.types import OrchestratorRunId, ServiceGroupId, TickIndex
 from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+from pypnm_cmts.orchestrator.models import WorkResultModel
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
 
@@ -35,6 +41,23 @@ def _write_system_config_only_disabled(path: Path) -> None:
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": False},
             ],
+            "target_service_groups": 2,
+            "shard_mode": "sequential",
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_system_config_auto_discover(path: Path) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "auto_discover": True,
+            "adapter": {
+                "hostname": "192.168.0.100",
+                "community": "public",
+                "port": 161,
+            },
+            "service_groups": [],
             "target_service_groups": 2,
             "shard_mode": "sequential",
         }
@@ -116,9 +139,17 @@ def test_launcher_worker_rejects_sg_id_not_enabled(tmp_path: Path) -> None:
         launcher.run_once()
 
 
-def test_launcher_worker_requires_sg_id(tmp_path: Path) -> None:
+def test_launcher_worker_allows_unbound_mode(tmp_path: Path, monkeypatch: object) -> None:
     config_path = tmp_path / "system.json"
     _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
 
     launcher = CmtsOrchestratorLauncher(
         config_path=config_path,
@@ -127,8 +158,9 @@ def test_launcher_worker_requires_sg_id(tmp_path: Path) -> None:
         state_dir_override=tmp_path / "coordination",
     )
 
-    with pytest.raises(ValueError, match="worker mode requires --sg-id"):
-        launcher.run_once()
+    result = launcher.run_once()
+    assert result.mode == OrchestratorMode.WORKER
+    assert [int(sg_id) for sg_id in result.inventory.sg_ids] == [1, 3]
 
 
 def test_launcher_no_enabled_service_groups_returns_empty_inventory(tmp_path: Path) -> None:
@@ -200,6 +232,37 @@ def test_build_status_snapshot_does_not_tick(
     assert result.inventory.count == 2
 
 
+def test_launcher_uses_discovery_when_auto_discover_enabled(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config_auto_discover(config_path)
+
+    async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        return InventoryDiscoveryResultModel(
+            cmts_host=HostNameStr("192.168.0.100"),
+            discovered_sg_ids=[ServiceGroupId(2), ServiceGroupId(1)],
+            per_sg=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
+        _fake_discover,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.STANDALONE,
+        sg_id=None,
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    result = launcher.run_once()
+    assert result.inventory.source == "discovery"
+    assert [int(sg_id) for sg_id in result.inventory.sg_ids] == [1, 2]
+
+
 def test_worker_run_once_without_lease_does_not_persist_results(
     monkeypatch: object,
     tmp_path: Path,
@@ -207,16 +270,12 @@ def test_worker_run_once_without_lease_does_not_persist_results(
     config_path = tmp_path / "system.json"
     _write_system_config(config_path)
 
-    def _lease_not_held(
-        self: CmtsOrchestratorLauncher,
-        manager: object,
-        service_groups: list[ServiceGroupId],
-    ) -> bool:
-        return False
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[])
 
     monkeypatch.setattr(
-        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher._is_worker_lease_held",
-        _lease_not_held,
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
     )
 
     state_dir = tmp_path / "coordination"
@@ -236,3 +295,84 @@ def test_worker_run_once_without_lease_does_not_persist_results(
     if results_root.exists():
         assert list(results_root.glob("sg_*")) == []
         assert list(results_root.rglob("*.json")) == []
+
+
+def test_unbound_worker_without_lease_returns_empty_work_results(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    state_dir = tmp_path / "coordination"
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+
+    result = launcher.run_once()
+    assert result.lease_held is False
+    assert str(result.run_id) == ""
+    assert result.work_results == []
+
+    results_root = state_dir / "results"
+    if results_root.exists():
+        assert list(results_root.glob("sg_*")) == []
+        assert list(results_root.rglob("*.json")) == []
+
+
+def test_worker_runs_single_sg_when_multiple_acquired(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[ServiceGroupId(3), ServiceGroupId(1)])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        lambda self: CoordinationStatusModel(held_sg_ids=[ServiceGroupId(1)]),
+    )
+
+    captured: dict[str, ServiceGroupId] = {}
+
+    def _fake_run_tests(
+        self: object,
+        sg_id: ServiceGroupId,
+        tests: list[str],
+        run_id: OrchestratorRunId,
+    ) -> list[WorkResultModel]:
+        captured["sg_id"] = sg_id
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
+        _fake_run_tests,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=ServiceGroupId(1),
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    result = launcher.run_once()
+    assert int(captured["sg_id"]) == 1
+    assert str(result.run_id).startswith("sg1_tick")

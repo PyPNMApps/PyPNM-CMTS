@@ -17,6 +17,7 @@ Use These Examples To Fetch CMTS Data Via SNMP.
 - [Get MD-CM-SG-ID By Node Name (SNMPv2c)](#get-md-cm-sg-id-by-node-name-snmpv2c)
 - [Get CM Registration SG ID By Node Name (SNMPv2c)](#get-cm-registration-sg-id-by-node-name-snmpv2c)
 - [Get CM Registration SG ID By DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
+- [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
 - [Orchestrator Run Modes](#orchestrator-run-modes)
 - [Next Steps](#next-steps)
 
@@ -279,6 +280,33 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_ds_sg_id.py \
   --ds-sg-id "${DS_SG_ID}"
 ```
 
+## Discovery (CMTS Inventory)
+
+Discover Service Groups And Registered Cable Modems From The CMTS (Default JSON Output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && pypnm-cmts discover \
+  --cmts-hostname "${CMTS_HOST}" \
+  --community "${SNMP_COMMUNITY}" \
+  --state-dir ./.data/coordination
+```
+
+Text Output:
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && pypnm-cmts discover \
+  --cmts-hostname "${CMTS_HOST}" \
+  --community "${SNMP_COMMUNITY}" \
+  --state-dir ./.data/coordination \
+  --text
+```
+
 ## Orchestrator Run Modes
 
 `pypnm-cmts` Supports One-Shot And Continuous Orchestrator Execution Modes.
@@ -320,16 +348,22 @@ Controller mode (continuous ticks):
 clear && pypnm-cmts run-forever --mode controller
 ```
 
-Worker mode (single tick, requires numeric service group id):
+Worker mode (single tick, bound worker with numeric service group id):
 
 ```bash
 clear && pypnm-cmts run --mode worker --sg-id 1
 ```
 
-Worker mode (continuous ticks, requires numeric service group id):
+Worker mode (continuous ticks, bound worker with numeric service group id):
 
 ```bash
 clear && pypnm-cmts run-forever --mode worker --sg-id 1
+```
+
+Worker mode (unbound, continuous ticks with inventory-derived service groups):
+
+```bash
+clear && pypnm-cmts run-forever --mode worker --max-ticks 5
 ```
 
 Optional overrides (example):

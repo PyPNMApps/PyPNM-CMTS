@@ -50,6 +50,20 @@ def _write_system_config(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_system_config_no_leases(path: Path) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "service_groups": [
+                {"sg_id": 1, "name": "sg-1", "enabled": True},
+            ],
+            "target_service_groups": 0,
+            "shard_mode": "sequential",
+            "default_tests": ["test-a"],
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _write_system_config_multi(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
@@ -92,10 +106,28 @@ def test_cli_no_command_exits_usage_and_shows_help() -> None:
     assert "usage:" in result.stdout
 
 
-def test_cli_worker_requires_sg_id() -> None:
-    result = _run_cli(["run", "--mode", "worker"], cwd=_repo_root())
-    assert result.returncode == EXIT_CODE_USAGE
-    assert "--sg-id is required" in result.stderr
+def test_cli_worker_without_sg_id_uses_inventory(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config_no_leases(config_path)
+
+    result = _run_cli(
+        [
+            "run",
+            "--mode",
+            "worker",
+            "--config",
+            str(config_path),
+            "--state-dir",
+            str(state_dir),
+        ],
+        cwd=_repo_root(),
+    )
+    assert result.returncode == SUCCESS_EXIT_CODE
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "worker"
+    assert payload["lease_held"] is False
+    assert payload["run_id"] == ""
 
 
 def test_cli_run_single_tick_outputs_json(tmp_path: Path) -> None:

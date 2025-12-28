@@ -6,7 +6,12 @@ repo_name: PyPNMApps/PyPNM-CMTS
 
 nav:
   - Docs hub: index.md
-  - Architecture: architecture/architecture.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - Core Architecture: architecture/architecture.md
+      - Service Group Workers And Zero-Touch Operation: architecture/service-group-workers.md
+      - Phase 3 Definition Of Done: architecture/phase3_definition_of_done.md
+      - Phase 4 Zero-Touch Worker Enablement: architecture/phase4_zero_touch_worker_enablement.md
   - Install: install/index.md
   - System: system/index.md
   - CLI: system/cli.md
