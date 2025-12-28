@@ -4,8 +4,46 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install package and test deps
+        run: |
+          python -m pip --version
+          python -m pip install -U pip setuptools wheel
+          python -m pip install ".[test]"
+
+      - name: Smoke - CLI help
+        run: |
+          python -m pypnm_cmts.cli --help || pypnm-cmts --help
+
+      - name: Run pytest
+        run: |
+          python -m pytest -q -ra --tb=short
+
+  docs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,12 +53,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: "pip"
 
-      - name: Install package and test deps
+      - name: Install docs deps
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install .[test]
+          python -m pip --version
+          python -m pip install -U pip setuptools wheel
+          python -m pip install ".[docs]"
 
-      - name: Run pytest
+      - name: Smoke - MkDocs version
         run: |
-          python -m pytest -q
+          mkdocs --version
+
+      - name: Build docs
+        run: |
+          mkdocs build --strict
