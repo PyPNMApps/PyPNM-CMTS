@@ -1,18 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
-# ruff: noqa: I001
-
 from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
 
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings, ServiceGroupDescriptor
+from pypnm_cmts.config.orchestrator_config import (
+    CmtsOrchestratorSettings,
+    ServiceGroupDescriptor,
+)
 from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
 from pypnm_cmts.coordination.manager import CoordinationManager
-from pypnm_cmts.coordination.models import CoordinationTickResultModel, ServiceGroupLeaseConflictModel
+from pypnm_cmts.coordination.models import (
+    CoordinationTickResultModel,
+    ServiceGroupLeaseConflictModel,
+)
 from pypnm_cmts.coordination.service_group_lease import FileServiceGroupLease
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,

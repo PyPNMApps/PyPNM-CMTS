@@ -1,13 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
-# ruff: noqa: I001
-
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from pypnm.lib.types import HostNameStr, IPv4Str, IPv6Str, MacAddressStr, SnmpReadCommunity, SnmpWriteCommunity
+from pypnm.lib.types import (
+    HostNameStr,
+    IPv4Str,
+    IPv6Str,
+    MacAddressStr,
+    SnmpReadCommunity,
+    SnmpWriteCommunity,
+)
+from pytest import CaptureFixture
+
 from pypnm_cmts.cli import EXIT_CODE_USAGE, _run_cli
 from pypnm_cmts.cmts.discovery_models import (
     InventoryDiscoveryResultModel,
@@ -15,7 +22,6 @@ from pypnm_cmts.cmts.discovery_models import (
     ServiceGroupCableModemInventoryModel,
 )
 from pypnm_cmts.lib.types import IPv6LinkLocalStr, ServiceGroupId
-from pytest import CaptureFixture
 
 
 def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
