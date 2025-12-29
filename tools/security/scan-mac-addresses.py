@@ -85,14 +85,49 @@ def _is_approved(mac: str) -> bool:
     return _normalize_mac(mac) in APPROVED_MACS_NORMALIZED
 
 
-def _iter_files(root: str) -> Iterable[str]:
+def _load_gitignore_dirs(root: str) -> Set[str]:
+    gitignore_path = os.path.join(root, ".gitignore")
+    ignore_dirs: Set[str] = set()
+
+    try:
+        with open(gitignore_path, "r", encoding="utf-8", errors="ignore") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.endswith("/*"):
+                    line = line[:-2]
+                if line.endswith("/"):
+                    line = line[:-1]
+                if not line:
+                    continue
+                if "*" in line or "?" in line or "[" in line:
+                    continue
+                ignore_dirs.add(line)
+    except OSError:
+        return ignore_dirs
+
+    return ignore_dirs
+
+
+def _should_ignore_dir(root: str, dirpath: str, dirname: str, ignore_dirs: Set[str]) -> bool:
+    candidate = os.path.relpath(os.path.join(dirpath, dirname), root)
+    for ignore_dir in ignore_dirs:
+        if candidate == ignore_dir or candidate.startswith(f"{ignore_dir}{os.sep}"):
+            return True
+    return False
+
+
+def _iter_files(root: str, ignore_dirs: Set[str]) -> Iterable[str]:
     """
     Yield Text File Candidates Under The Given Root Directory.
 
     Skips common virtualenv and build directories using IGNORE_DIRS.
     """
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        dirnames[:] = [
+            d for d in dirnames if not _should_ignore_dir(root, dirpath, d, ignore_dirs)
+        ]
 
         for name in filenames:
             path = os.path.join(dirpath, name)
@@ -139,6 +174,11 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
         action="store_true",
         help="Exit with non-zero status if any MAC addresses are found.",
     )
+    parser.add_argument(
+        "--skip-gitignore",
+        action="store_true",
+        help="Ignore .gitignore directory entries when scanning.",
+    )
     return parser.parse_args(argv)
 
 
@@ -162,7 +202,11 @@ def main(argv: List[str] | None = None) -> None:
 
     all_matches: List[MACMatch] = []
 
-    for path in _iter_files(root):
+    ignore_dirs = set(IGNORE_DIRS)
+    if not args.skip_gitignore:
+        ignore_dirs |= _load_gitignore_dirs(root)
+
+    for path in _iter_files(root, ignore_dirs):
         file_matches = _scan_file(path)
         all_matches.extend(file_matches)
 

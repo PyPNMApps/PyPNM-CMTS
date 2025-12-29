@@ -12,6 +12,7 @@ Use the `pypnm-cmts serve` command to start the FastAPI service with development
 - [Worker Result Persistence](#worker-result-persistence)
 - [Coordination Flags](#coordination-flags)
 - [Serve Options](#serve-options)
+- [Security Tools](#security-tools)
 - [Next Steps](#next-steps)
 
 ## Assumptions
@@ -171,6 +172,19 @@ These options apply to `pypnm-cmts serve`.
 --reload-dir Directory to watch for changes (repeatable)
 --reload-include Glob pattern(s) to include (repeatable; default: *.py)
 --reload-exclude Glob pattern(s) to exclude (repeatable)
+```
+
+## Security Tools
+
+Repository security checks live under `tools/security`.
+The MAC scan respects `.gitignore` directory entries by default; use `--skip-gitignore` to scan ignored paths.
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
 ```
 
 ## Next Steps
