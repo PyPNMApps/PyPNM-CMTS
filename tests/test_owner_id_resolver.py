@@ -15,10 +15,9 @@ def test_owner_id_resolver_prefers_explicit_value(tmp_path: Path) -> None:
     assert resolved == OwnerId("explicit-owner")
 
 
-def test_owner_id_resolver_derives_hostname_pid(tmp_path: Path, monkeypatch: object) -> None:
+def test_owner_id_resolver_derives_hostname(tmp_path: Path, monkeypatch: object) -> None:
     monkeypatch.setattr("pypnm_cmts.config.owner_id_resolver.socket.gethostname", lambda: "host-a")
-    monkeypatch.setattr("pypnm_cmts.config.owner_id_resolver.os.getpid", lambda: 1234)
 
     resolved = OwnerIdResolver.resolve("", tmp_path)
 
-    assert resolved == OwnerId("host-a-1234")
+    assert resolved == OwnerId("host-a")

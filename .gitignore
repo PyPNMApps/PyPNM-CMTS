@@ -32,7 +32,8 @@ issues/*
 deploy/docker/compose/.env
 AGENTS.md
 release-reports/
-.state/
+.state/*
+.state
 
 # PyPNM-CMTS Dev tools
 log-level-rewriter.py

@@ -340,7 +340,7 @@ wait_for_worker_json() {
 
 verify_phase4() {
   local state_dir="$1"
-  local leader_retry_max=15
+  local leader_retry_max=5
   local leader_retry_sleep=1
 
   load_run_env "${state_dir}"

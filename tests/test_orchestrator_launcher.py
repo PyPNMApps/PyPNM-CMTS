@@ -301,6 +301,32 @@ def test_controller_overwrites_empty_leader_record(tmp_path: Path) -> None:
     assert persisted_id.startswith("worker-") is False
 
 
+def test_controller_restart_retains_leader_identity(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    first = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+    first_result = first.run_once()
+    first_leader_id = str(first_result.leader_status.leader_id)
+    assert first_leader_id != ""
+
+    second = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+    second_result = second.run_once()
+    assert second_result.leader_status.is_leader is True
+    assert str(second_result.leader_status.leader_id) == first_leader_id
+
+
 def test_controller_rewrites_worker_prefixed_owner_id(tmp_path: Path) -> None:
     config_path = tmp_path / "system.json"
     state_dir = tmp_path / "coordination"
