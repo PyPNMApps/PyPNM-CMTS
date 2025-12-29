@@ -67,7 +67,7 @@ def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: 
                 cm_count=1,
                 cms=[
                     RegisteredCableModemModel(
-                        mac=MacAddressStr("cc:dd:ee:ff:00:11"),
+                        mac=MacAddressStr("00:11:22:33:44:56"),
                         ipv4=IPv4Str(""),
                         ipv6=IPv6Str(""),
                         ipv6_link_local=IPv6LinkLocalStr(IPv6Str("")),
@@ -195,7 +195,7 @@ def test_cli_discover_outputs_text(monkeypatch: object, tmp_path: Path, capsys: 
                 cm_count=1,
                 cms=[
                     RegisteredCableModemModel(
-                        mac=MacAddressStr("bb:cc:dd:ee:ff:00"),
+                        mac=MacAddressStr("10:23:45:67:89:ab"),
                         ipv4=IPv4Str(""),
                         ipv6=IPv6Str(""),
                         ipv6_link_local=IPv6LinkLocalStr(IPv6Str("")),

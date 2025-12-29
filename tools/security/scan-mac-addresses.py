@@ -55,6 +55,7 @@ IGNORE_DIRS: Set[str] = {
     "build",
     ".mypy_cache",
     ".ruff_cache",
+    ".data",
 }
 
 
