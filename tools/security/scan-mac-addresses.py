@@ -111,6 +111,8 @@ def _load_gitignore_dirs(root: str) -> Set[str]:
 
 
 def _should_ignore_dir(root: str, dirpath: str, dirname: str, ignore_dirs: Set[str]) -> bool:
+    if dirname in ignore_dirs:
+        return True
     candidate = os.path.relpath(os.path.join(dirpath, dirname), root)
     for ignore_dir in ignore_dirs:
         if candidate == ignore_dir or candidate.startswith(f"{ignore_dir}{os.sep}"):
