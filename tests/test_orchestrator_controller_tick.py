@@ -58,8 +58,7 @@ def test_controller_tick_reports_desired_and_conflicts(tmp_path: Path) -> None:
     assert int(tick.worker_count) == 2
 
     leased = [int(sg_id) for sg_id in tick.leased_sg_ids]
-    assert 2 not in leased
-    assert len(leased) == 2
+    assert leased == []
 
     conflicts = [conflict for conflict in tick.conflicts if int(conflict.sg_id) == 2]
     assert conflicts

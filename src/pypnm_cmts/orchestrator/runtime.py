@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import signal
+import threading
 import time
 from collections.abc import Callable
 
@@ -17,6 +20,8 @@ class CmtsOrchestratorRuntime:
     """
     Long-running orchestrator runtime that executes coordination ticks.
     """
+
+    STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
     def __init__(
         self,
@@ -68,27 +73,52 @@ class CmtsOrchestratorRuntime:
         if max_ticks is not None and max_ticks < 0:
             raise ValueError("max_ticks must be non-negative.")
 
+        if self._stop_requested:
+            with contextlib.suppress(Exception):
+                self._manager.release_all()
+            return []
+
         sleep_fn = sleeper if sleeper is not None else time.sleep
         tick_interval = float(self._settings.tick_interval_seconds)
         results: list[CoordinationTickResultModel] = []
         ticks = 0
+        previous_handlers: dict[signal.Signals, object] = {}
+        register_signals = threading.current_thread() is threading.main_thread()
 
-        while not self._stop_requested:
-            tick_result = self._manager.tick(self._service_groups)
-            tick_result = tick_result.model_copy(update={"tick_index": TickIndex(ticks + 1)})
-            if max_ticks is not None:
-                results.append(tick_result)
-            if on_tick is not None:
-                on_tick(tick_result)
-            if on_tick_indexed is not None:
-                on_tick_indexed(ticks + 1, tick_result)
+        def _handle_stop(signum: int, frame: object | None) -> None:
+            self.stop()
 
-            ticks += 1
-            if max_ticks is not None and ticks >= max_ticks:
-                break
-            if self._stop_requested:
-                break
-            sleep_fn(tick_interval)
+        if register_signals:
+            for sig in self.STOP_SIGNALS:
+                previous_handlers[sig] = signal.getsignal(sig)
+                signal.signal(sig, _handle_stop)
+
+        try:
+            while not self._stop_requested:
+                if self._mode == OrchestratorMode.CONTROLLER:
+                    tick_result = self._manager.tick_leader_only()
+                else:
+                    tick_result = self._manager.tick(self._service_groups)
+                tick_result = tick_result.model_copy(update={"tick_index": TickIndex(ticks + 1)})
+                if max_ticks is not None:
+                    results.append(tick_result)
+                if on_tick is not None:
+                    on_tick(tick_result)
+                if on_tick_indexed is not None:
+                    on_tick_indexed(ticks + 1, tick_result)
+
+                ticks += 1
+                if max_ticks is not None and ticks >= max_ticks:
+                    break
+                if self._stop_requested:
+                    break
+                sleep_fn(tick_interval)
+        finally:
+            if register_signals:
+                for sig, handler in previous_handlers.items():
+                    signal.signal(sig, handler)
+            with contextlib.suppress(Exception):
+                self._manager.release_all()
 
         return results
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from pathlib import Path
 
@@ -18,9 +19,8 @@ class OwnerIdResolver:
 
     Resolution order:
     1) Explicit owner id (if provided and non-empty).
-    2) Persisted owner id in state_dir/owner_id.txt (if available).
-    3) Hostname-derived owner id.
-    4) DEFAULT_OWNER_ID.
+    2) Hostname + process id derived owner id.
+    3) DEFAULT_OWNER_ID.
     """
 
     @staticmethod
@@ -40,14 +40,7 @@ class OwnerIdResolver:
             if owner_value != "":
                 return OwnerId(owner_value)
 
-        if state_dir is not None:
-            persisted = OwnerIdResolver._read_owner_id(state_dir)
-            if persisted is not None:
-                return persisted
-
         derived = OwnerIdResolver._derive_owner_id()
-        if state_dir is not None:
-            OwnerIdResolver._write_owner_id(state_dir, derived)
         return derived
 
     @staticmethod
@@ -78,9 +71,15 @@ class OwnerIdResolver:
             hostname = socket.gethostname().strip()
         except Exception:
             hostname = ""
+        try:
+            pid_value = int(os.getpid())
+        except Exception:
+            pid_value = 0
         if hostname == "":
             return DEFAULT_OWNER_ID
-        return OwnerId(hostname)
+        if pid_value <= 0:
+            return OwnerId(hostname)
+        return OwnerId(f"{hostname}-{pid_value}")
 
 
 __all__ = [

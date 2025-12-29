@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
+from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
 from pypnm_cmts.config.orchestrator_config import (
     CmtsOrchestratorSettings,
@@ -124,10 +125,17 @@ class CmtsOrchestratorLauncher:
 
         state_dir = self._resolve_state_dir()
         owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = LeaderId(str(owner_id))
+        leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings, state_dir)
+        if self._mode == OrchestratorMode.CONTROLLER:
+            service_groups, source = self._build_controller_service_groups(
+                settings=settings,
+                state_dir=state_dir,
+                is_leader=False,
+            )
+        else:
+            service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -158,15 +166,44 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
+            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
+            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
         )
 
-        tick_target = desired_sg_ids if self._mode == OrchestratorMode.CONTROLLER else service_groups
-        tick_result = manager.tick(tick_target)
+        if self._mode == OrchestratorMode.CONTROLLER:
+            tick_result = manager.tick_leader_only()
+            leader_status = manager.leader_status()
+            service_groups, source = self._build_controller_service_groups(
+                settings=settings,
+                state_dir=state_dir,
+                is_leader=leader_status.is_leader,
+            )
+            inventory = ServiceGroupInventoryModel(
+                sg_ids=service_groups,
+                count=len(service_groups),
+                source=source,
+            )
+            desired_sg_ids, worker_count = self._plan_controller_service_groups(
+                settings=settings,
+                service_groups=service_groups,
+            )
+            effective_target = self._effective_target_service_groups(
+                settings=settings,
+                inventory_count=len(service_groups),
+            )
+            if int(settings.target_service_groups) == 0:
+                effective_target = len(desired_sg_ids)
+        else:
+            tick_target = service_groups
+            tick_result = manager.tick(tick_target)
         tick_value = int(tick_result.tick_index)
         tick_index = TickIndex(tick_value if tick_value > 0 else 1)
         acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
         coordination_status = manager.status()
-        held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+        if self._mode == OrchestratorMode.CONTROLLER:
+            held_sg_ids = []
+        else:
+            held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
         conflicts = self._build_conflicts(
             desired_sg_ids=desired_sg_ids,
             leased_sg_ids=held_sg_ids,
@@ -235,7 +272,7 @@ class CmtsOrchestratorLauncher:
 
         state_dir = self._resolve_state_dir()
         owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = LeaderId(str(owner_id))
+        leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
         service_groups, source = self._build_service_groups(settings, state_dir)
@@ -267,6 +304,8 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
+            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
+            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
         )
 
         runtime = CmtsOrchestratorRuntime(
@@ -275,14 +314,42 @@ class CmtsOrchestratorLauncher:
             service_groups=service_groups,
             mode=self._mode,
         )
+        controller_inventory_source = source
+        controller_inventory_initialized = False
 
         def _emit_result(tick_index: int, tick_result: CoordinationTickResultModel) -> None:
             if on_tick is None:
                 return
+            nonlocal service_groups, inventory, desired_sg_ids, worker_count, effective_target, controller_inventory_source, controller_inventory_initialized
             tick_value = TickIndex(int(tick_index))
             acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
             coordination_status = manager.status()
-            held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+            if self._mode == OrchestratorMode.CONTROLLER:
+                held_sg_ids = []
+                if coordination_status.is_leader and not controller_inventory_initialized:
+                    service_groups, controller_inventory_source = self._build_controller_service_groups(
+                        settings=settings,
+                        state_dir=state_dir,
+                        is_leader=True,
+                    )
+                    inventory = ServiceGroupInventoryModel(
+                        sg_ids=service_groups,
+                        count=len(service_groups),
+                        source=controller_inventory_source,
+                    )
+                    desired_sg_ids, worker_count = self._plan_controller_service_groups(
+                        settings=settings,
+                        service_groups=service_groups,
+                    )
+                    effective_target = self._effective_target_service_groups(
+                        settings=settings,
+                        inventory_count=len(service_groups),
+                    )
+                    if int(settings.target_service_groups) == 0:
+                        effective_target = len(desired_sg_ids)
+                    controller_inventory_initialized = True
+            else:
+                held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
             conflicts = self._build_conflicts(
                 desired_sg_ids=desired_sg_ids,
                 leased_sg_ids=held_sg_ids,
@@ -347,7 +414,7 @@ class CmtsOrchestratorLauncher:
 
         state_dir = self._resolve_state_dir()
         owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = LeaderId(str(owner_id))
+        leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
         service_groups, source = self._build_service_groups(settings, state_dir)
@@ -370,6 +437,8 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
+            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
+            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
         )
 
         return OrchestratorStatusModel(
@@ -397,6 +466,36 @@ class CmtsOrchestratorLauncher:
         value = f"{DEFAULT_ELECTION_PREFIX}-{label}"
         return CoordinationElectionName(value)
 
+    def _build_leader_id(self, owner_id: OwnerId) -> LeaderId:
+        owner_value = str(owner_id).strip()
+        if owner_value == "":
+            owner_value = str(owner_id)
+        if self._mode == OrchestratorMode.CONTROLLER:
+            if owner_value.startswith("controller-"):
+                return LeaderId(owner_value)
+            if owner_value.startswith("worker-"):
+                stripped = owner_value[len("worker-") :]
+                if stripped == "":
+                    stripped = str(owner_id).strip()
+                return LeaderId(f"controller-{stripped}")
+            return LeaderId(f"controller-{owner_value}")
+        if owner_value.startswith("worker-"):
+            return LeaderId(owner_value)
+        if owner_value.startswith("controller-"):
+            stripped = owner_value[len("controller-") :]
+            if stripped == "":
+                stripped = str(owner_id).strip()
+            return LeaderId(f"worker-{stripped}")
+        return LeaderId(f"worker-{owner_value}")
+
+    @staticmethod
+    def _leader_id_validator() -> Callable[[LeaderId], bool]:
+        def _is_controller(leader_id: LeaderId) -> bool:
+            value = str(leader_id).strip()
+            return value != "" and not value.startswith("worker-")
+
+        return _is_controller
+
     def _build_service_groups(
         self,
         settings: CmtsOrchestratorSettings,
@@ -412,7 +511,14 @@ class CmtsOrchestratorLauncher:
         state_dir: Path,
     ) -> tuple[list[ServiceGroupId], str]:
         if self._sg_id is None:
-            return self._build_inventory_service_groups(settings, state_dir)
+            snapshot = self._load_inventory_snapshot(state_dir)
+            if snapshot is not None:
+                return (sorted(snapshot.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
+            if settings.service_groups:
+                return self._build_config_service_groups(settings)
+            if self._should_discover(settings):
+                raise ValueError("inventory snapshot not found for worker mode.")
+            return ([], INVENTORY_SOURCE_WORKER)
 
         config_groups = self._build_config_service_groups(settings)[0]
         if settings.service_groups:
@@ -431,6 +537,24 @@ class CmtsOrchestratorLauncher:
             return self._build_discovered_service_groups(settings, state_dir)
         return self._build_config_service_groups(settings)
 
+    def _build_controller_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+        is_leader: bool,
+    ) -> tuple[list[ServiceGroupId], str]:
+        if is_leader and self._should_discover(settings):
+            return self._build_discovered_service_groups(settings, state_dir)
+
+        snapshot = self._load_inventory_snapshot(state_dir)
+        if snapshot is not None:
+            return (sorted(snapshot.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
+
+        service_groups, source = self._build_config_service_groups(settings)
+        if is_leader and service_groups:
+            self._persist_inventory_snapshot(settings, state_dir, service_groups)
+        return (service_groups, source)
+
     def _build_discovered_service_groups(
         self,
         settings: CmtsOrchestratorSettings,
@@ -444,6 +568,35 @@ class CmtsOrchestratorLauncher:
             state_dir=state_dir,
         )
         return (sorted(result.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
+
+    def _load_inventory_snapshot(self, state_dir: Path) -> InventoryDiscoveryResultModel | None:
+        snapshot_path = state_dir / "inventory" / "discovery.json"
+        if not snapshot_path.exists():
+            return None
+        try:
+            content = snapshot_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise ValueError("inventory snapshot could not be read.") from exc
+        try:
+            return InventoryDiscoveryResultModel.model_validate_json(content)
+        except Exception as exc:
+            raise ValueError("inventory snapshot is invalid.") from exc
+
+    def _persist_inventory_snapshot(
+        self,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+        sg_ids: list[ServiceGroupId],
+    ) -> None:
+        snapshot = InventoryDiscoveryResultModel(
+            cmts_host=HostNameStr(str(settings.adapter.hostname)),
+            discovered_sg_ids=sorted(sg_ids, key=int),
+            per_sg=[],
+        )
+        inventory_dir = state_dir / "inventory"
+        inventory_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = inventory_dir / "discovery.json"
+        snapshot_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
 
     def _build_config_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
         enabled_ids: list[ServiceGroupId] = []
@@ -575,6 +728,9 @@ class CmtsOrchestratorLauncher:
         if self._mode != OrchestratorMode.WORKER:
             return False
         return bool(held_sg_ids)
+
+    def _should_discover(self, settings: CmtsOrchestratorSettings) -> bool:
+        return bool(settings.auto_discover) or not settings.service_groups
 
     def _apply_overrides(self, settings: CmtsOrchestratorSettings) -> CmtsOrchestratorSettings:
         data = settings.model_dump()

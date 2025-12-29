@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.coordination.manager import CoordinationManager
+from pypnm_cmts.coordination.models import CoordinationTickResultModel
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     LeaderId,
@@ -74,3 +76,73 @@ def test_runtime_stop_prevents_ticks(tmp_path: Path) -> None:
     runtime.stop()
     results = runtime.run_forever(max_ticks=2, sleeper=lambda _: None)
     assert results == []
+
+
+def test_runtime_release_all_called_on_stop(tmp_path: Path, monkeypatch: object) -> None:
+    settings = _build_settings(tmp_path)
+    manager = CoordinationManager(
+        state_dir=settings.state_dir,
+        election_name=CoordinationElectionName("cmts-test"),
+        leader_id=LeaderId("leader-1"),
+        owner_id=OwnerId("owner-1"),
+        leader_ttl_seconds=settings.leader_ttl_seconds,
+        lease_ttl_seconds=settings.lease_ttl_seconds,
+        target_service_groups=1,
+        shard_mode="sequential",
+    )
+
+    release_called = {"value": False}
+
+    def _fake_release_all() -> object:
+        release_called["value"] = True
+        return None
+
+    monkeypatch.setattr(manager, "release_all", _fake_release_all)
+
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[ServiceGroupId(1)],
+        mode=OrchestratorMode.STANDALONE,
+    )
+
+    runtime.stop()
+    runtime.run_forever(max_ticks=1, sleeper=lambda _: None)
+    assert release_called["value"] is True
+
+
+def test_runtime_runs_in_non_main_thread(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    manager = CoordinationManager(
+        state_dir=settings.state_dir,
+        election_name=CoordinationElectionName("cmts-test"),
+        leader_id=LeaderId("leader-1"),
+        owner_id=OwnerId("owner-1"),
+        leader_ttl_seconds=settings.leader_ttl_seconds,
+        lease_ttl_seconds=settings.lease_ttl_seconds,
+        target_service_groups=1,
+        shard_mode="sequential",
+    )
+
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[ServiceGroupId(1)],
+        mode=OrchestratorMode.STANDALONE,
+    )
+
+    results: list[CoordinationTickResultModel] = []
+    errors: list[Exception] = []
+
+    def _run() -> None:
+        try:
+            results.extend(runtime.run_forever(max_ticks=1, sleeper=lambda _: None))
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    assert len(results) == 1

@@ -52,3 +52,6 @@ site/*
 .coverage
 htmlcov/
 gitleaks-report.json
+
+# SW Iterations
+*.patch

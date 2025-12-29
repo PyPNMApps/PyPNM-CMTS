@@ -35,6 +35,7 @@ class FileLeaderElection:
         election_name: CoordinationElectionName,
         leader_id: LeaderId,
         ttl_seconds: int,
+        leader_id_validator: Callable[[LeaderId], bool] | None = None,
         now: Callable[[], float] | None = None,
     ) -> None:
         """
@@ -50,6 +51,7 @@ class FileLeaderElection:
         self._election_name = CoordinationElectionName(str(election_name).strip())
         self._leader_id = LeaderId(str(leader_id).strip())
         self._ttl_seconds = int(ttl_seconds)
+        self._leader_id_validator = leader_id_validator
         self._now = now or time.time
         self._state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -265,6 +267,8 @@ class FileLeaderElection:
         if str(election_name) != str(self._election_name):
             return self._empty_record(), False
         leader_id = LeaderId(str(data.get("leader_id", "")))
+        if self._leader_id_validator is not None and not self._leader_id_validator(leader_id):
+            return self._empty_record(), False
         try:
             acquired_at = float(data.get("acquired_at", 0.0))
             expires_at = float(data.get("expires_at", 0.0))

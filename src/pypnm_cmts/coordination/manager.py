@@ -47,6 +47,8 @@ class CoordinationManager:
         lease_ttl_seconds: int,
         target_service_groups: int,
         shard_mode: str = SHARD_MODE_DEFAULT,
+        leader_enabled: bool = True,
+        leader_id_validator: Callable[[LeaderId], bool] | None = None,
         now: Callable[[], float] | None = None,
     ) -> None:
         """
@@ -61,6 +63,8 @@ class CoordinationManager:
             lease_ttl_seconds (int): TTL in seconds for service group leases.
             target_service_groups (int): Target number of service groups to hold.
             shard_mode (str): Sharding mode for candidate ordering.
+            leader_enabled (bool): When false, skip leader election writes.
+            leader_id_validator (Callable[[LeaderId], bool] | None): Optional validator for leader records.
             now (Callable[[], float] | None): Optional time provider for testing.
         """
         if int(target_service_groups) < self.MIN_TARGET_SERVICE_GROUPS:
@@ -75,6 +79,7 @@ class CoordinationManager:
         self._lease_ttl_seconds = int(lease_ttl_seconds)
         self._target_service_groups = int(target_service_groups)
         self._shard_mode = shard_mode
+        self._leader_enabled = leader_enabled
         self._now = now
         self._held_leases: set[ServiceGroupId] = set()
 
@@ -83,6 +88,7 @@ class CoordinationManager:
             election_name=self._election_name,
             leader_id=self._leader_id,
             ttl_seconds=self._leader_ttl_seconds,
+            leader_id_validator=leader_id_validator,
             now=self._now,
         )
 
@@ -106,11 +112,24 @@ class CoordinationManager:
         released_sg_ids: list[ServiceGroupId] = []
         failed_sg_ids: list[ServiceGroupId] = []
 
-        leader_result = self._leader_election.try_acquire()
-        if leader_result.is_leader and not leader_result.acquired:
-            renew_result = self._leader_election.renew()
-            if renew_result.renewed:
-                leader_result = renew_result
+        if self._leader_enabled:
+            leader_result = self._leader_election.try_acquire()
+            if leader_result.is_leader and not leader_result.acquired:
+                renew_result = self._leader_election.renew()
+                if renew_result.renewed:
+                    leader_result = renew_result
+        else:
+            leader_status = self._leader_election.status()
+            leader_result = LeaderElectionStatusModel(
+                election_name=leader_status.election_name,
+                is_leader=leader_status.is_leader,
+                leader_id=leader_status.leader_id,
+                acquired_at=leader_status.acquired_at,
+                expires_at=leader_status.expires_at,
+                remaining_seconds=leader_status.remaining_seconds,
+                state_path=leader_status.state_path,
+                message=leader_status.message,
+            )
 
         held_sorted = self._sorted_held_leases()
         for sg_id in held_sorted:
@@ -177,6 +196,42 @@ class CoordinationManager:
             message=self.MESSAGE_LEADER_ACTIVE if leader_result.is_leader else self.MESSAGE_NOT_LEADER,
         )
 
+    def tick_leader_only(self) -> CoordinationTickResultModel:
+        """
+        Execute a leader-only coordination step without service group leases.
+
+        Returns:
+            CoordinationTickResultModel: Summary of leader election state with empty lease actions.
+        """
+        if self._leader_enabled:
+            leader_result = self._leader_election.try_acquire()
+            if leader_result.is_leader and not leader_result.acquired:
+                renew_result = self._leader_election.renew()
+                if renew_result.renewed:
+                    leader_result = renew_result
+        else:
+            leader_status = self._leader_election.status()
+            leader_result = LeaderElectionStatusModel(
+                election_name=leader_status.election_name,
+                is_leader=leader_status.is_leader,
+                leader_id=leader_status.leader_id,
+                acquired_at=leader_status.acquired_at,
+                expires_at=leader_status.expires_at,
+                remaining_seconds=leader_status.remaining_seconds,
+                state_path=leader_status.state_path,
+                message=leader_status.message,
+            )
+
+        return CoordinationTickResultModel(
+            is_leader=leader_result.is_leader,
+            leader_id=leader_result.leader_id,
+            acquired_sg_ids=[],
+            renewed_sg_ids=[],
+            released_sg_ids=[],
+            failed_sg_ids=[],
+            message=self.MESSAGE_LEADER_ACTIVE if leader_result.is_leader else self.MESSAGE_NOT_LEADER,
+        )
+
     def release_all(self) -> CoordinationReleaseAllResultModel:
         """
         Release all leases held by this manager and relinquish leadership.
@@ -196,10 +251,12 @@ class CoordinationManager:
             else:
                 failed_sg_ids.append(sg_id)
 
-        leader_release = self._leader_election.release()
+        leader_release = None
+        if self._leader_enabled:
+            leader_release = self._leader_election.release()
 
         return CoordinationReleaseAllResultModel(
-            released_leader=leader_release.released,
+            released_leader=leader_release.released if leader_release is not None else False,
             released_sg_ids=released_sg_ids,
             failed_sg_ids=failed_sg_ids,
             message=self.MESSAGE_RELEASED,

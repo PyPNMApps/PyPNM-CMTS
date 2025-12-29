@@ -14,9 +14,9 @@ from pypnm_cmts.coordination.models import (
     CoordinationStatusModel,
     CoordinationTickResultModel,
 )
-from pypnm_cmts.lib.types import OrchestratorRunId, ServiceGroupId, TickIndex
+from pypnm_cmts.lib.types import OrchestratorRunId, OwnerId, ServiceGroupId, TickIndex
 from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
-from pypnm_cmts.orchestrator.models import WorkResultModel
+from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel, WorkResultModel
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
 
@@ -43,6 +43,21 @@ def _write_system_config_only_disabled(path: Path) -> None:
             ],
             "target_service_groups": 2,
             "shard_mode": "sequential",
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_system_config_multi(path: Path) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "service_groups": [
+                {"sg_id": 1, "name": "sg-1", "enabled": True},
+                {"sg_id": 2, "name": "sg-2", "enabled": True},
+            ],
+            "target_service_groups": 1,
+            "shard_mode": "sequential",
+            "default_tests": ["test-a"],
         }
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -161,6 +176,165 @@ def test_launcher_worker_allows_unbound_mode(tmp_path: Path, monkeypatch: object
     result = launcher.run_once()
     assert result.mode == OrchestratorMode.WORKER
     assert [int(sg_id) for sg_id in result.inventory.sg_ids] == [1, 3]
+
+
+def test_model_a_controller_and_workers_share_inventory_snapshot(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config_multi(config_path)
+
+    controller = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+    controller_result = controller.run_once()
+    assert controller_result.lease_held is False
+    snapshot_path = state_dir / "inventory" / "discovery.json"
+    assert snapshot_path.exists()
+
+    worker_results: list[OrchestratorRunResultModel] = []
+
+    def _collect_worker(result: OrchestratorRunResultModel) -> None:
+        worker_results.append(result)
+
+    worker_1 = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=None,
+        owner_id=OwnerId("worker-1"),
+        state_dir_override=state_dir,
+    )
+    worker_1.run_forever(on_tick=_collect_worker, max_ticks=2, sleeper=lambda _: None)
+
+    worker_2 = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=None,
+        owner_id=OwnerId("worker-2"),
+        state_dir_override=state_dir,
+    )
+    worker_2.run_forever(on_tick=_collect_worker, max_ticks=2, sleeper=lambda _: None)
+
+    assert worker_results
+
+
+def test_worker_does_not_write_leader_record(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=ServiceGroupId(1),
+        state_dir_override=state_dir,
+    )
+
+    launcher.run_once()
+
+    leader_record = state_dir / "cmts-primary.json"
+    assert leader_record.exists() is False
+
+
+def test_controller_overwrites_worker_leader_record(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    leader_record = {
+        "election_name": "cmts-primary",
+        "leader_id": "worker-1",
+        "acquired_at": 1.0,
+        "expires_at": 9999.0,
+    }
+    leader_path = state_dir / "cmts-primary.json"
+    leader_path.parent.mkdir(parents=True, exist_ok=True)
+    leader_path.write_text(json.dumps(leader_record), encoding="utf-8")
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+
+    result = launcher.run_once()
+    assert result.leader_status.is_leader is True
+    assert str(result.leader_status.leader_id).startswith("worker-") is False
+
+    persisted = json.loads(leader_path.read_text(encoding="utf-8"))
+    assert str(persisted.get("leader_id", "")).startswith("worker-") is False
+
+
+def test_controller_overwrites_empty_leader_record(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    leader_record = {
+        "election_name": "cmts-primary",
+        "leader_id": "",
+        "acquired_at": 1.0,
+        "expires_at": 9999.0,
+    }
+    leader_path = state_dir / "cmts-primary.json"
+    leader_path.parent.mkdir(parents=True, exist_ok=True)
+    leader_path.write_text(json.dumps(leader_record), encoding="utf-8")
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        state_dir_override=state_dir,
+    )
+
+    result = launcher.run_once()
+    assert result.leader_status.is_leader is True
+    assert str(result.leader_status.leader_id).strip() != ""
+    assert str(result.leader_status.leader_id).startswith("worker-") is False
+
+    persisted = json.loads(leader_path.read_text(encoding="utf-8"))
+    persisted_id = str(persisted.get("leader_id", "")).strip()
+    assert persisted_id != ""
+    assert persisted_id.startswith("worker-") is False
+
+
+def test_controller_rewrites_worker_prefixed_owner_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+        owner_id=OwnerId("worker-foo"),
+        state_dir_override=state_dir,
+    )
+
+    result = launcher.run_once()
+    leader_id = str(result.leader_status.leader_id)
+    assert leader_id.startswith("controller-")
+    assert leader_id.startswith("worker-") is False
+
+
+def test_worker_rewrites_controller_prefixed_owner_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=ServiceGroupId(1),
+        owner_id=OwnerId("controller-foo"),
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    leader_id = launcher._build_leader_id(OwnerId("controller-foo"))
+    assert str(leader_id).startswith("worker-")
+    assert str(leader_id).startswith("controller-") is False
 
 
 def test_launcher_no_enabled_service_groups_returns_empty_inventory(tmp_path: Path) -> None:
