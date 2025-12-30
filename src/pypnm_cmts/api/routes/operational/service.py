@@ -99,7 +99,7 @@ class OperationalService:
                     failed_check=ReadinessCheck.STATE_DIR_ACCESS,
                     message=f"state_dir subdirectories could not be created: {state_dir}",
                 )
-            if not self._ensure_state_dir_writeable(state_dir):
+            if not self._ensure_state_dir_writable(state_dir):
                 return ReadyResponseModel(
                     status=OperationalStatus.ERROR,
                     timestamp=self._utc_now(),
@@ -184,13 +184,23 @@ class OperationalService:
                 meta.election_name, controller, workers
             )
 
+        workers_sorted = sorted(
+            workers,
+            key=lambda entry: (
+                entry.sg_id is None,
+                entry.sg_id if entry.sg_id is not None else 0,
+                entry.pid if entry.pid is not None else 0,
+                str(entry.pidfile_path) if entry.pidfile_path is not None else "",
+            ),
+        )
+
         status_value = OperationalStatus.OK
         return OperationalStatusResponseModel(
             status=status_value,
             timestamp=self._utc_now(),
             meta=meta,
             controller=controller,
-            workers=workers,
+            workers=workers_sorted,
             pid_records_missing=pid_records_missing,
             pid_records_stale=pid_records_stale,
             fallback_used=fallback_used,
@@ -219,7 +229,7 @@ class OperationalService:
         except Exception:
             return False
 
-    def _ensure_state_dir_writeable(self, state_dir: Path) -> bool:
+    def _ensure_state_dir_writable(self, state_dir: Path) -> bool:
         try:
             test_dir = state_dir / self.READY_PROBE_DIR_NAME
             test_dir.mkdir(parents=True, exist_ok=True)

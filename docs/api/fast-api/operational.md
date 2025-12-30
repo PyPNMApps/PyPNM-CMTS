@@ -1,12 +1,14 @@
-# Operational endpoints
+# Operational Endpoints
 
-Read-only operational endpoints that report process health, readiness, and version.
+Read-Only Operational Endpoints For Health, Readiness, And Version.
+All responses include the common `meta` identity block (mode, election_name, state_dir, sg_id).
 
 ## Endpoints
 
 ### GET /ops/health
 
-Liveness probe. Always returns HTTP 200 if the process is running.
+Liveness Probe.
+Always returns HTTP 200 if the process is running.
 
 Example:
 
@@ -31,7 +33,8 @@ Response shape:
 
 ### GET /ops/ready
 
-Readiness probe. Returns HTTP 200 when local prerequisites are satisfied, otherwise HTTP 503 with a structured body.
+Readiness Probe.
+Returns HTTP 200 when local prerequisites are satisfied, otherwise HTTP 503 with a structured body.
 
 Readiness checks:
 
@@ -80,7 +83,8 @@ Response shape (not ready):
 
 ### GET /ops/status
 
-Read-only operational status snapshot. Reports controller and worker process visibility and PID record state.
+Read-Only Operational Status Snapshot.
+Reports controller and worker process visibility and PID record state.
 
 Example:
 
@@ -127,10 +131,11 @@ Notes:
 - pid_records_missing is true when the pids directory is missing or empty.
 - pid_records_stale is true when pidfiles exist but none of the recorded PIDs are running.
 - fallback_used is true only when fallback discovery finds processes with an exact --election-name match.
+- workers are sorted by sg_id ascending, with unbound workers listed last; ties break by pid then pidfile_path.
 
 ### GET /ops/version
 
-Returns service identity and version information.
+Service Identity, Version, And Runtime Metadata.
 
 Example:
 

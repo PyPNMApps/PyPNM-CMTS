@@ -313,6 +313,7 @@ class CmtsOrchestratorLauncher:
             manager=manager,
             service_groups=service_groups,
             mode=self._mode,
+            sg_id=self._sg_id,
         )
         controller_inventory_source = source
         controller_inventory_initialized = False

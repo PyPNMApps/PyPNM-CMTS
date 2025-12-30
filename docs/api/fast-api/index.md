@@ -2,6 +2,21 @@
 
 FastAPI endpoint documentation for PyPNM-CMTS will live here.
 
+## Running the service
+
+Start the FastAPI service using the CLI:
+
+```
+pypnm-cmts serve --host 127.0.0.1 --port 8000
+```
+
+Example health checks:
+
+```
+curl http://127.0.0.1:8000/ops/health
+curl http://127.0.0.1:8000/ops/ready
+```
+
 ## Current endpoints
 
 - `POST /system/sysDescr` - CMTS sysDescr lookup.

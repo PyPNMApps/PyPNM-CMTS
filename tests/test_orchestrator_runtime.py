@@ -47,6 +47,7 @@ def test_runtime_runs_fixed_ticks_without_sleep(tmp_path: Path) -> None:
         manager=manager,
         service_groups=service_groups,
         mode=OrchestratorMode.STANDALONE,
+        sg_id=None,
     )
 
     results = runtime.run_forever(max_ticks=3, sleeper=lambda _: None)
@@ -71,6 +72,7 @@ def test_runtime_stop_prevents_ticks(tmp_path: Path) -> None:
         manager=manager,
         service_groups=[ServiceGroupId(1)],
         mode=OrchestratorMode.STANDALONE,
+        sg_id=None,
     )
 
     runtime.stop()
@@ -104,6 +106,7 @@ def test_runtime_release_all_called_on_stop(tmp_path: Path, monkeypatch: object)
         manager=manager,
         service_groups=[ServiceGroupId(1)],
         mode=OrchestratorMode.STANDALONE,
+        sg_id=None,
     )
 
     runtime.stop()
@@ -129,6 +132,7 @@ def test_runtime_runs_in_non_main_thread(tmp_path: Path) -> None:
         manager=manager,
         service_groups=[ServiceGroupId(1)],
         mode=OrchestratorMode.STANDALONE,
+        sg_id=None,
     )
 
     results: list[CoordinationTickResultModel] = []
@@ -146,3 +150,72 @@ def test_runtime_runs_in_non_main_thread(tmp_path: Path) -> None:
 
     assert errors == []
     assert len(results) == 1
+
+
+def test_runtime_writes_and_removes_controller_pidfile(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    manager = CoordinationManager(
+        state_dir=settings.state_dir,
+        election_name=CoordinationElectionName("cmts-test"),
+        leader_id=LeaderId("leader-1"),
+        owner_id=OwnerId("owner-1"),
+        leader_ttl_seconds=settings.leader_ttl_seconds,
+        lease_ttl_seconds=settings.lease_ttl_seconds,
+        target_service_groups=1,
+        shard_mode="sequential",
+        leader_enabled=True,
+    )
+
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[ServiceGroupId(1)],
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+    )
+
+    pidfile_path = settings.state_dir / "pids" / "controller.pid"
+    seen_pidfile = {"value": False}
+
+    def _on_tick(_: CoordinationTickResultModel) -> None:
+        if pidfile_path.exists():
+            seen_pidfile["value"] = True
+
+    runtime.run_forever(max_ticks=1, sleeper=lambda _: None, on_tick=_on_tick)
+    assert seen_pidfile["value"] is True
+    assert pidfile_path.exists() is False
+
+
+def test_runtime_writes_and_removes_worker_pidfile(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    manager = CoordinationManager(
+        state_dir=settings.state_dir,
+        election_name=CoordinationElectionName("cmts-test"),
+        leader_id=LeaderId("leader-1"),
+        owner_id=OwnerId("owner-1"),
+        leader_ttl_seconds=settings.leader_ttl_seconds,
+        lease_ttl_seconds=settings.lease_ttl_seconds,
+        target_service_groups=1,
+        shard_mode="sequential",
+        leader_enabled=False,
+    )
+
+    sg_id = ServiceGroupId(7)
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[sg_id],
+        mode=OrchestratorMode.WORKER,
+        sg_id=sg_id,
+    )
+
+    pidfile_path = settings.state_dir / "pids" / "worker_7.pid"
+    seen_pidfile = {"value": False}
+
+    def _on_tick(_: CoordinationTickResultModel) -> None:
+        if pidfile_path.exists():
+            seen_pidfile["value"] = True
+
+    runtime.run_forever(max_ticks=1, sleeper=lambda _: None, on_tick=_on_tick)
+    assert seen_pidfile["value"] is True
+    assert pidfile_path.exists() is False

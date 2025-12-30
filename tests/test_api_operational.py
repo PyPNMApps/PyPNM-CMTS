@@ -117,7 +117,7 @@ def test_ops_ready_controller_not_writable(tmp_path: Path, monkeypatch: object) 
     app = _load_app(settings, monkeypatch)
     from pypnm_cmts.api.routes.operational.service import OperationalService
 
-    monkeypatch.setattr(OperationalService, "_ensure_state_dir_writeable", lambda *_args: False)
+    monkeypatch.setattr(OperationalService, "_ensure_state_dir_writable", lambda *_args: False)
     client = _client(app)
     response = client.get("/ops/ready")
     assert response.status_code == 503
@@ -203,3 +203,55 @@ def test_ops_status_skips_fallback_without_election(tmp_path: Path, monkeypatch:
     assert response.status_code == 200
     payload = response.json()
     assert payload["fallback_used"] is False
+
+
+def test_ops_status_worker_sorting(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    pid_dir = state_dir / "pids"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    (pid_dir / "controller.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_10.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_2.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_unbound.pid").write_text("999999", encoding="utf-8")
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    workers = payload["workers"]
+    assert workers[0]["sg_id"] == 2
+    assert workers[1]["sg_id"] == 10
+    assert workers[2]["sg_id"] is None
+
+
+def test_ops_status_fallback_arg_equals_parsing(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.CONTROLLER,
+        state_dir,
+        [],
+        election_name="ops-demo",
+    )
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fake_fallback(_self: OperationalService, _election: str) -> list[tuple[int, str]]:
+        return [
+            (
+                999999,
+                "pypnm-cmts run-forever --election-name=ops-demo --mode=worker --sg-id=7",
+            )
+        ]
+
+    monkeypatch.setattr(OperationalService, "_fallback_find_processes", _fake_fallback)
+
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fallback_used"] is True
+    workers = payload["workers"]
+    assert len(workers) == 1
+    assert workers[0]["sg_id"] == 7
+    assert workers[0]["pidfile_exists"] is False

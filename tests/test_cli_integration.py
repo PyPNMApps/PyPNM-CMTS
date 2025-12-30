@@ -36,6 +36,18 @@ def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_package(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    cmd = [sys.executable, "-m", "pypnm_cmts", *args]
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        env=_env(),
+        text=True,
+        capture_output=True,
+        timeout=CLI_TIMEOUT_SECONDS,
+    )
+
+
 def _write_system_config(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
@@ -82,6 +94,11 @@ def _write_system_config_multi(path: Path) -> None:
 
 def test_cli_help_root() -> None:
     result = _run_cli(["--help"], cwd=_repo_root())
+    assert result.returncode == SUCCESS_EXIT_CODE
+
+
+def test_cli_help_package_module() -> None:
+    result = _run_package(["--help"], cwd=_repo_root())
     assert result.returncode == SUCCESS_EXIT_CODE
 
 

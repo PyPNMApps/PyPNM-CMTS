@@ -176,6 +176,14 @@ tools/system-test/p4-coordination-harness.sh verify --state-dir ./.state/p4-demo
 tools/system-test/p4-coordination-harness.sh stop --state-dir ./.state/p4-demo
 ```
 
+### tools/system-test/ops-smoke.sh
+
+Checks that the FastAPI service is reachable by calling /ops/health.
+
+```bash
+tools/system-test/ops-smoke.sh --base-url http://127.0.0.1:8000
+```
+
 ## Assets
 
 ### tools/banner.txt
