@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import httpx
+
+
+def _get_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_version(base_url: str, timeout_seconds: float) -> httpx.Response | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            response = httpx.get(f"{base_url}/ops/version", timeout=2.0)
+        except httpx.RequestError:
+            time.sleep(0.1)
+            continue
+
+        if response.status_code == 200:
+            return response
+
+        time.sleep(0.1)
+    return None
+
+
+def test_ops_version_smoke_starts_service() -> None:
+    port = _get_free_port()
+    base_url = f"http://127.0.0.1:{port}"
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "pypnm_cmts.cli",
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+    try:
+        response = _wait_for_version(base_url, timeout_seconds=12.0)
+        assert response is not None
+        payload = response.json()
+        assert payload.get("application") == "pypnm-cmts"
+        assert "version" in payload
+        assert "python_version" in payload
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5.0)
