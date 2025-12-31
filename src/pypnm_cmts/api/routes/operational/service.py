@@ -265,14 +265,14 @@ class OperationalService:
     def _utc_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    @staticmethod
-    def _any_running(controller: OperationalProcessInfoModel, workers: list[OperationalProcessInfoModel]) -> bool:
-        if bool(controller.is_running):
+    def _has_running_process(
+        self,
+        controller: OperationalProcessInfoModel,
+        workers: list[OperationalProcessInfoModel],
+    ) -> bool:
+        if controller.is_running:
             return True
-        for entry in workers:
-            if bool(entry.is_running):
-                return True
-        return False
+        return any(entry.is_running for entry in workers)
 
     def _collect_pidfile_status(
         self, state_dir: Path
