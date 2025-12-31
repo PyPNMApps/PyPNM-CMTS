@@ -478,6 +478,14 @@ class OperationalService:
                 return token[len(arg_name) + 1 :]
         return ""
 
+    def _any_running(
+        self,
+        controller: OperationalProcessInfoModel,
+        workers: list[OperationalProcessInfoModel],
+    ) -> bool:
+        if bool(controller.is_running):
+            return True
+        return any(bool(entry.is_running) for entry in workers)
 
 __all__ = [
     "OperationalService",
