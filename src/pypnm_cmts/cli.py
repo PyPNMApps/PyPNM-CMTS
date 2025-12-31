@@ -52,7 +52,7 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         choices=[mode.value for mode in OrchestratorMode],
         required=True,
-        help="Execution mode: standalone, controller, or worker.",
+        help="Execution mode: standalone, controller, worker, or combined.",
     )
     parser.add_argument(
         "--config",

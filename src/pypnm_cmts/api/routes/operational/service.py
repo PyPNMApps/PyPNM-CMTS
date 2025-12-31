@@ -1,3 +1,4 @@
+
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
@@ -23,6 +24,7 @@ from pypnm_cmts.api.routes.operational.schemas import (
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import CoordinationElectionName, ServiceGroupId
+from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
 
@@ -35,11 +37,6 @@ class OperationalService:
     READY_PROBE_DIR_NAME = ".ready_check"
     READY_PROBE_FILE_PREFIX = "ready.check"
     READY_SUBDIRS = ("pids", "logs", "inventory")
-    PID_DIR_NAME = "pids"
-    CONTROLLER_PID_NAME = "controller.pid"
-    WORKER_PID_PREFIX = "worker_"
-    PID_SUFFIX = ".pid"
-    UNBOUND_WORKER_NAME = "worker_unbound"
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
@@ -82,7 +79,11 @@ class OperationalService:
             )
         state_dir = Path(meta.state_dir)
 
-        if meta.mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.STANDALONE):
+        if meta.mode in (
+            OrchestratorMode.CONTROLLER,
+            OrchestratorMode.STANDALONE,
+            OrchestratorMode.COMBINED,
+        ):
             if not self._ensure_state_dir_exists(state_dir):
                 return ReadyResponseModel(
                     status=OperationalStatus.ERROR,
@@ -174,15 +175,17 @@ class OperationalService:
             )
 
         state_dir = Path(meta.state_dir)
-        controller, workers, pid_records_missing, pid_records_stale = self._collect_pidfile_status(
-            state_dir
-        )
+        controller, workers, pid_records_missing, pid_records_stale = self._collect_pidfile_status(state_dir)
 
         fallback_used = False
         if pid_records_missing or pid_records_stale:
             fallback_used, controller, workers = self._apply_fallback_process_scan(
                 meta.election_name, controller, workers
             )
+
+        effective_running = self._any_running(controller, workers)
+        if fallback_used and effective_running:
+            pid_records_stale = False
 
         workers_sorted = sorted(
             workers,
@@ -195,6 +198,9 @@ class OperationalService:
         )
 
         status_value = OperationalStatus.OK
+        if not effective_running and (pid_records_missing or pid_records_stale):
+            status_value = OperationalStatus.ERROR
+
         return OperationalStatusResponseModel(
             status=status_value,
             timestamp=self._utc_now(),
@@ -218,7 +224,8 @@ class OperationalService:
         try:
             state_dir.mkdir(parents=True, exist_ok=True)
             return True
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("state_dir mkdir failed: %s (%s)", state_dir, exc)
             return False
 
     def _ensure_state_subdirs(self, state_dir: Path) -> bool:
@@ -226,7 +233,8 @@ class OperationalService:
             for name in self.READY_SUBDIRS:
                 (state_dir / name).mkdir(parents=True, exist_ok=True)
             return True
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("state_dir subdir mkdir failed: %s (%s)", state_dir, exc)
             return False
 
     def _ensure_state_dir_writable(self, state_dir: Path) -> bool:
@@ -239,7 +247,8 @@ class OperationalService:
             with contextlib.suppress(Exception):
                 test_dir.rmdir()
             return True
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("state_dir not writable: %s (%s)", state_dir, exc)
             return False
 
     def _ensure_state_dir_readable(self, state_dir: Path) -> bool:
@@ -249,16 +258,26 @@ class OperationalService:
             for _ in state_dir.iterdir():
                 break
             return True
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("state_dir not readable: %s (%s)", state_dir, exc)
             return False
 
     def _utc_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    def _has_running_process(
+        self,
+        controller: OperationalProcessInfoModel,
+        workers: list[OperationalProcessInfoModel],
+    ) -> bool:
+        if controller.is_running:
+            return True
+        return any(entry.is_running for entry in workers)
+
     def _collect_pidfile_status(
         self, state_dir: Path
     ) -> tuple[OperationalProcessInfoModel, list[OperationalProcessInfoModel], bool, bool]:
-        pid_dir = state_dir / self.PID_DIR_NAME
+        pid_dir = state_dir / PidFileRecord.PID_DIR_NAME
         if not pid_dir.exists() or not pid_dir.is_dir():
             return (
                 OperationalProcessInfoModel(),
@@ -281,22 +300,20 @@ class OperationalService:
         running_found = False
 
         for pid_path in pid_files:
-            if pid_path.name == self.CONTROLLER_PID_NAME:
+            if pid_path.name == PidFileRecord.CONTROLLER_PIDFILE:
                 controller_info = self._pidfile_info(pid_path, None)
                 if controller_info.is_running:
                     running_found = True
                 continue
 
-            if pid_path.name == f"{self.UNBOUND_WORKER_NAME}{self.PID_SUFFIX}":
+            if pid_path.name == PidFileRecord.WORKER_UNBOUND_PIDFILE:
                 info = self._pidfile_info(pid_path, None)
                 worker_infos.append(info)
                 if info.is_running:
                     running_found = True
                 continue
 
-            if pid_path.name.startswith(self.WORKER_PID_PREFIX) and pid_path.name.endswith(
-                self.PID_SUFFIX
-            ):
+            if pid_path.name.startswith(PidFileRecord.WORKER_PID_PREFIX) and pid_path.name.endswith(".pid"):
                 sg_value = self._parse_worker_pid_sg(pid_path.name)
                 info = self._pidfile_info(pid_path, sg_value)
                 worker_infos.append(info)
@@ -351,11 +368,11 @@ class OperationalService:
 
     def _parse_worker_pid_sg(self, filename: str) -> ServiceGroupId | None:
         name = filename
-        if not name.startswith(self.WORKER_PID_PREFIX):
+        if not name.startswith(PidFileRecord.WORKER_PID_PREFIX):
             return None
-        if not name.endswith(self.PID_SUFFIX):
+        if not name.endswith(".pid"):
             return None
-        raw = name[len(self.WORKER_PID_PREFIX) : -len(self.PID_SUFFIX)]
+        raw = name[len(PidFileRecord.WORKER_PID_PREFIX) : -len(".pid")]
         if raw == "unbound":
             return None
         try:
@@ -417,7 +434,8 @@ class OperationalService:
                 capture_output=True,
                 text=True,
             )
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("fallback process scan failed: %s", exc)
             return []
 
         stdout = result.stdout or ""
@@ -460,6 +478,14 @@ class OperationalService:
                 return token[len(arg_name) + 1 :]
         return ""
 
+    def _any_running(
+        self,
+        controller: OperationalProcessInfoModel,
+        workers: list[OperationalProcessInfoModel],
+    ) -> bool:
+        if bool(controller.is_running):
+            return True
+        return any(bool(entry.is_running) for entry in workers)
 
 __all__ = [
     "OperationalService",

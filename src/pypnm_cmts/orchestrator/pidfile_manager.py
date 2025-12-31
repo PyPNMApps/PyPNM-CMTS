@@ -70,6 +70,8 @@ class PidFileRecord:
             return cls.for_worker(state_dir, sg_id)
         if mode == OrchestratorMode.STANDALONE:
             return cls.for_controller(state_dir)
+        if mode == OrchestratorMode.COMBINED:
+            return cls.for_controller(state_dir)
         return None
 
     def __enter__(self) -> PidFileRecord:

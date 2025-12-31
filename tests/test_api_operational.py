@@ -70,7 +70,7 @@ def test_ops_health_returns_ok(tmp_path: Path, monkeypatch: object) -> None:
     payload = response.json()
     assert payload["status"] == OperationalStatus.OK.value
     assert payload["timestamp"] != ""
-    assert payload["meta"]["mode"] == OrchestratorMode.STANDALONE
+    assert payload["meta"]["mode"] == OrchestratorMode.STANDALONE.value
     assert payload["meta"]["state_dir"] == str(state_dir)
     assert payload["meta"]["election_name"] == "ops-demo"
 
@@ -160,7 +160,7 @@ def test_ops_status_missing_pid_records(tmp_path: Path, monkeypatch: object) -> 
     response = client.get("/ops/status")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["status"] == OperationalStatus.ERROR.value
     assert payload["pid_records_missing"] is True
     assert payload["pid_records_stale"] is False
     assert payload["fallback_used"] is False
@@ -180,6 +180,7 @@ def test_ops_status_pidfile_parsing(tmp_path: Path, monkeypatch: object) -> None
     payload = response.json()
     assert payload["pid_records_missing"] is False
     assert payload["pid_records_stale"] is True
+    assert payload["status"] == OperationalStatus.ERROR.value
     assert payload["controller"]["pidfile_exists"] is True
     assert payload["controller"]["pid"] == 999999
     assert payload["controller"]["is_running"] is False

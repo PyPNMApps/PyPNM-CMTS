@@ -72,7 +72,7 @@ class OperationalRouter:
             ready_payload = self._service.ready()
             if ready_payload.status != OperationalStatus.OK:
                 return JSONResponse(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
                     content=ready_payload.model_dump(mode="json"),
                 )
             return ready_payload

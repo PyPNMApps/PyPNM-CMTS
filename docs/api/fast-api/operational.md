@@ -150,6 +150,7 @@ Response shape:
   "application": "pypnm-cmts",
   "version": "0.1.0",
   "python_version": "3.10.12",
+  "build_metadata": "",
   "timestamp": "2025-01-01T00:00:00+00:00",
   "meta": {
     "mode": "controller",
