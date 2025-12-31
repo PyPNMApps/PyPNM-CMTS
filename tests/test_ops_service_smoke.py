@@ -34,6 +34,24 @@ def _wait_for_version(base_url: str, timeout_seconds: float) -> httpx.Response |
     return None
 
 
+def _wait_for_status(base_url: str, timeout_seconds: float) -> dict[str, object] | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            response = httpx.get(f"{base_url}/ops/status", timeout=2.0)
+        except httpx.RequestError:
+            time.sleep(0.1)
+            continue
+
+        if response.status_code == 200:
+            payload = response.json()
+            if not payload.get("pid_records_missing", False):
+                return payload
+
+        time.sleep(0.1)
+    return None
+
+
 def test_ops_version_smoke_starts_service() -> None:
     port = _get_free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -64,6 +82,47 @@ def test_ops_version_smoke_starts_service() -> None:
         assert payload.get("application") == "pypnm-cmts"
         assert "version" in payload
         assert "python_version" in payload
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5.0)
+
+
+def test_ops_status_combined_mode_runner_available() -> None:
+    port = _get_free_port()
+    base_url = f"http://127.0.0.1:{port}"
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "pypnm_cmts.cli",
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+            "--with-runner",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+    try:
+        assert _wait_for_version(base_url, timeout_seconds=12.0) is not None
+        payload = _wait_for_status(base_url, timeout_seconds=12.0)
+        assert payload is not None
+        assert payload["pid_records_missing"] is False
+        controller = payload["controller"]
+        assert controller["pidfile_exists"] is True
+        assert controller["is_running"] is True
     finally:
         process.terminate()
         try:

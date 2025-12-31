@@ -21,6 +21,7 @@ from pypnm_cmts.api.routes.operational.schemas import (
     ReadyResponseModel,
     VersionResponseModel,
 )
+from pypnm_cmts.combined_mode import combined_mode_enabled
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import CoordinationElectionName, ServiceGroupId
@@ -46,6 +47,8 @@ class OperationalService:
         Build runtime identity metadata for operational responses.
         """
         settings = CmtsOrchestratorSettings.from_system_config()
+        if combined_mode_enabled():
+            settings = settings.model_copy(update={"mode": OrchestratorMode.COMBINED})
         return OperationalIdentityModel(
             mode=settings.mode,
             election_name=settings.election_name,
@@ -452,9 +455,13 @@ class OperationalService:
             except Exception:
                 continue
             args_text = parts[1]
-            if "pypnm-cmts" not in args_text:
+            args_lower = args_text.lower()
+            if "pypnm-cmts" not in args_lower and "pypnm_cmts.cli" not in args_lower:
                 continue
-            if "run-forever" not in args_text:
+            has_runner_signature = "run-forever" in args_lower
+            if not has_runner_signature:
+                has_runner_signature = "serve" in args_lower and "--with-runner" in args_lower
+            if not has_runner_signature:
                 continue
             election_value = self._extract_arg_value(args_text, "--election-name")
             if election_value == "":

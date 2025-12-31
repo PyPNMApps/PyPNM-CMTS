@@ -256,3 +256,35 @@ def test_ops_status_fallback_arg_equals_parsing(tmp_path: Path, monkeypatch: obj
     assert len(workers) == 1
     assert workers[0]["sg_id"] == 7
     assert workers[0]["pidfile_exists"] is False
+
+
+def test_ops_status_fallback_combined_mode_signature(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.CONTROLLER,
+        state_dir,
+        [],
+        election_name="ops-combined",
+    )
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fake_fallback(_self: OperationalService, _election: str) -> list[tuple[int, str]]:
+        return [
+            (
+                555555,
+                "pypnm-cmts serve --with-runner --election-name=ops-combined",
+            )
+        ]
+
+    monkeypatch.setattr(OperationalService, "_fallback_find_processes", _fake_fallback)
+
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fallback_used"] is True
+    workers = payload["workers"]
+    assert len(workers) == 1
+    assert workers[0]["pid"] == 555555
+    assert workers[0]["sg_id"] is None

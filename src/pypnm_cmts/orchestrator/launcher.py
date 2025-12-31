@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Maurice Garcia
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -110,6 +111,8 @@ class CmtsOrchestratorLauncher:
         self._adapter_write_community = adapter_write_community
         self._adapter_port = adapter_port
         self._state_dir_override = state_dir_override
+        self._runtime: CmtsOrchestratorRuntime | None = None
+        self._runtime_lock = threading.Lock()
 
     def run_once(self) -> OrchestratorRunResultModel:
         """
@@ -128,7 +131,7 @@ class CmtsOrchestratorLauncher:
         leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             service_groups, source = self._build_controller_service_groups(
                 settings=settings,
                 state_dir=state_dir,
@@ -144,7 +147,7 @@ class CmtsOrchestratorLauncher:
 
         desired_sg_ids = list(service_groups)
         worker_count = 0
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             desired_sg_ids, worker_count = self._plan_controller_service_groups(
                 settings=settings,
                 service_groups=service_groups,
@@ -154,7 +157,7 @@ class CmtsOrchestratorLauncher:
             settings=settings,
             inventory_count=len(service_groups),
         )
-        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED) and int(settings.target_service_groups) == 0:
             effective_target = len(desired_sg_ids)
 
         manager = CoordinationManager(
@@ -166,11 +169,13 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
+            leader_enabled=self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED),
+            leader_id_validator=self._leader_id_validator()
+            if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED)
+            else None,
         )
 
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             tick_result = manager.tick_leader_only()
             leader_status = manager.leader_status()
             service_groups, source = self._build_controller_service_groups(
@@ -191,7 +196,7 @@ class CmtsOrchestratorLauncher:
                 settings=settings,
                 inventory_count=len(service_groups),
             )
-            if int(settings.target_service_groups) == 0:
+            if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED) and int(settings.target_service_groups) == 0:
                 effective_target = len(desired_sg_ids)
         else:
             tick_target = service_groups
@@ -200,7 +205,7 @@ class CmtsOrchestratorLauncher:
         tick_index = TickIndex(tick_value if tick_value > 0 else 1)
         acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
         coordination_status = manager.status()
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             held_sg_ids = []
         else:
             held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
@@ -275,7 +280,14 @@ class CmtsOrchestratorLauncher:
         leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings, state_dir)
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
+            service_groups, source = self._build_controller_service_groups(
+                settings=settings,
+                state_dir=state_dir,
+                is_leader=False,
+            )
+        else:
+            service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -283,7 +295,7 @@ class CmtsOrchestratorLauncher:
         )
         desired_sg_ids = list(service_groups)
         worker_count = 0
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             desired_sg_ids, worker_count = self._plan_controller_service_groups(
                 settings=settings,
                 service_groups=service_groups,
@@ -292,7 +304,7 @@ class CmtsOrchestratorLauncher:
             settings=settings,
             inventory_count=len(service_groups),
         )
-        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED) and int(settings.target_service_groups) == 0:
             effective_target = len(desired_sg_ids)
 
         manager = CoordinationManager(
@@ -304,8 +316,10 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
+            leader_enabled=self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED),
+            leader_id_validator=self._leader_id_validator()
+            if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED)
+            else None,
         )
 
         runtime = CmtsOrchestratorRuntime(
@@ -325,7 +339,7 @@ class CmtsOrchestratorLauncher:
             tick_value = TickIndex(int(tick_index))
             acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
             coordination_status = manager.status()
-            if self._mode == OrchestratorMode.CONTROLLER:
+            if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
                 held_sg_ids = []
                 if coordination_status.is_leader and not controller_inventory_initialized:
                     service_groups, controller_inventory_source = self._build_controller_service_groups(
@@ -395,11 +409,26 @@ class CmtsOrchestratorLauncher:
             )
             on_tick(result)
 
-        return runtime.run_forever(
-            max_ticks=max_ticks,
-            sleeper=sleeper,
-            on_tick_indexed=_emit_result,
-        )
+        with self._runtime_lock:
+            self._runtime = runtime
+        try:
+            return runtime.run_forever(
+                max_ticks=max_ticks,
+                sleeper=sleeper,
+                on_tick_indexed=_emit_result,
+            )
+        finally:
+            with self._runtime_lock:
+                self._runtime = None
+
+    def stop_runtime(self) -> None:
+        """
+        Request the runtime to stop if it is running.
+        """
+        with self._runtime_lock:
+            runtime = self._runtime
+        if runtime is not None:
+            runtime.stop()
 
     def build_status_snapshot(self) -> OrchestratorStatusModel:
         """
@@ -418,7 +447,14 @@ class CmtsOrchestratorLauncher:
         leader_id = self._build_leader_id(owner_id)
         election_name = self._build_election_name(settings)
 
-        service_groups, source = self._build_service_groups(settings, state_dir)
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
+            service_groups, source = self._build_controller_service_groups(
+                settings=settings,
+                state_dir=state_dir,
+                is_leader=False,
+            )
+        else:
+            service_groups, source = self._build_service_groups(settings, state_dir)
         inventory = ServiceGroupInventoryModel(
             sg_ids=service_groups,
             count=len(service_groups),
@@ -438,8 +474,10 @@ class CmtsOrchestratorLauncher:
             lease_ttl_seconds=int(settings.lease_ttl_seconds),
             target_service_groups=effective_target,
             shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
+            leader_enabled=self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED),
+            leader_id_validator=self._leader_id_validator()
+            if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED)
+            else None,
         )
 
         return OrchestratorStatusModel(
@@ -471,7 +509,7 @@ class CmtsOrchestratorLauncher:
         owner_value = str(owner_id).strip()
         if owner_value == "":
             owner_value = str(owner_id)
-        if self._mode == OrchestratorMode.CONTROLLER:
+        if self._mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.COMBINED):
             if owner_value.startswith("controller-"):
                 return LeaderId(owner_value)
             if owner_value.startswith("worker-"):
@@ -630,7 +668,7 @@ class CmtsOrchestratorLauncher:
         return [ServiceGroupDescriptor(sg_id=sg_id) for sg_id in service_groups]
 
     def _effective_target_service_groups(self, settings: CmtsOrchestratorSettings, inventory_count: int) -> int:
-        if self._mode == OrchestratorMode.WORKER and self._sg_id is not None:
+        if self._mode in (OrchestratorMode.WORKER, OrchestratorMode.COMBINED) and self._sg_id is not None:
             requested = 1
         else:
             requested = int(settings.target_service_groups)
@@ -646,7 +684,7 @@ class CmtsOrchestratorLauncher:
         acquired_sg_ids: list[ServiceGroupId],
         lease_held: bool,
     ) -> list[WorkResultModel]:
-        if self._mode != OrchestratorMode.WORKER:
+        if self._mode not in (OrchestratorMode.WORKER, OrchestratorMode.COMBINED):
             return []
         if not lease_held:
             return []
@@ -665,7 +703,7 @@ class CmtsOrchestratorLauncher:
         tick_index: TickIndex,
         lease_held: bool,
     ) -> OrchestratorRunId:
-        if self._mode != OrchestratorMode.WORKER:
+        if self._mode not in (OrchestratorMode.WORKER, OrchestratorMode.COMBINED):
             return OrchestratorRunId("")
         if not lease_held:
             return OrchestratorRunId("")
@@ -726,7 +764,7 @@ class CmtsOrchestratorLauncher:
         return sorted(held_sg_ids, key=int)[:1]
 
     def _is_worker_lease_held(self, held_sg_ids: list[ServiceGroupId]) -> bool:
-        if self._mode != OrchestratorMode.WORKER:
+        if self._mode not in (OrchestratorMode.WORKER, OrchestratorMode.COMBINED):
             return False
         return bool(held_sg_ids)
 

@@ -12,6 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pypnm.api.main import app as pypnm_app
 
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
+from pypnm_cmts.combined_mode import CombinedModeRunner, combined_mode_enabled
 from pypnm_cmts.startup.startup import StartUp
 from pypnm_cmts.version import __version__
 
@@ -52,6 +53,18 @@ app = FastAPI(
 )
 
 app.include_router(pypnm_app.router, prefix="/pypnm")
+
+
+_combined_runner: CombinedModeRunner | None = CombinedModeRunner() if combined_mode_enabled() else None
+
+if _combined_runner is not None:
+    @app.on_event("startup")
+    async def _start_combined_runner() -> None:
+        _combined_runner.start()
+
+    @app.on_event("shutdown")
+    async def _stop_combined_runner() -> None:
+        _combined_runner.stop()
 
 
 @app.get("/health", tags=["health"])

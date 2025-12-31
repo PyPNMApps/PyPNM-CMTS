@@ -15,6 +15,7 @@ from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
@@ -210,6 +211,11 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--ssl", action="store_true", help="Enable HTTPS (requires cert and key)")
     serve_parser.add_argument("--cert", default="./certs/cert.pem", help="Path to SSL certificate")
     serve_parser.add_argument("--key", default="./certs/key.pem", help="Path to SSL private key")
+    serve_parser.add_argument(
+        "--with-runner",
+        action="store_true",
+        help="Start the orchestrator runner in-process (combined mode).",
+    )
 
     serve_parser.add_argument(
         "--log-level",
@@ -428,6 +434,12 @@ def _run_cli() -> int:
         return SUCCESS_EXIT_CODE
 
     if args.command == "serve":
+        if args.with_runner and args.reload:
+            print(
+                "ERROR: --with-runner cannot be used with --reload.",
+                file=sys.stderr,
+            )
+            return EXIT_CODE_USAGE
         if args.ssl:
             print(f"🔒 Launching FastAPI with HTTPS on https://{args.host}:{args.port}")
         else:
@@ -460,6 +472,15 @@ def _run_cli() -> int:
                 }
             )
             print(f"🔁 Auto-reload enabled. Watching: {', '.join(reload_dirs)}")
+
+        if args.with_runner:
+            os.environ[COMBINED_MODE_ENV] = "1"
+            print("🔁 Combined mode runner enabled (controller + worker).")
+            if args.workers != DEFAULT_WORKERS:
+                print(
+                    "[WARN] --workers is ignored when --with-runner is enabled; using workers=1 for combined mode."
+                )
+                uvicorn_args["workers"] = DEFAULT_WORKERS
 
         if args.ssl:
             uvicorn_args.update(
