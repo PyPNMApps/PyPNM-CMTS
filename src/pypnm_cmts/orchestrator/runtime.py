@@ -25,7 +25,6 @@ class CmtsOrchestratorRuntime:
 
     STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
-
     def __init__(
         self,
         settings: CmtsOrchestratorSettings,

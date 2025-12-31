@@ -11,6 +11,7 @@ class OrchestratorMode(str, Enum):
     STANDALONE = "standalone"
     CONTROLLER = "controller"
     WORKER = "worker"
+    COMBINED = "combined"
 
 
 class AdapterKind(str, Enum):

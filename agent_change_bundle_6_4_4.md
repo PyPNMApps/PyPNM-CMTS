@@ -1,253 +1,83 @@
-FILE: src/pypnm_cmts/orchestrator/runtime.py
+FILE: src/pypnm_cmts/api/main.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
 from __future__ import annotations
 
-import contextlib
-import signal
-import threading
-import time
-from collections.abc import Callable
-from pathlib import Path
+import pathlib
+import sys
 
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
-from pypnm_cmts.coordination.manager import CoordinationManager
-from pypnm_cmts.coordination.models import CoordinationTickResultModel
-from pypnm_cmts.lib.types import ServiceGroupId, TickIndex
-from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from pypnm.api.main import app as pypnm_app
+
+from pypnm_cmts.api.utils.auto_load import RouterRegistrar
+from pypnm_cmts.startup.startup import StartUp
+from pypnm_cmts.version import __version__
+
+GZIP_MIN_SIZE_BYTES = 100_000
+
+project_root = pathlib.Path(__file__).resolve()
+while project_root.name != "src" and project_root != project_root.parent:
+    project_root = project_root.parent
+
+if project_root.name == "src" and str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+StartUp.initialize()
+
+fast_api_description = """
+**CMTS Operations API for DOCSIS PNM Workflows**
+
+PyPNM-CMTS extends the PyPNM toolkit with CMTS-focused automation and
+operational helpers. Use these APIs to script CMTS telemetry collection,
+validate configuration state, and drive PNM workflows across fleets.
+
+**Core capabilities include:**
+- CMTS inventory and topology context for PNM workflows
+- CMTS-side configuration validation and guardrails
+- Telemetry orchestration for DOCSIS PNM capture workflows
+- CMTS-focused reporting and operational checks
+
+[**PyPNM Homepage**](https://github.com/PyPNMApps/PyPNM)
+"""
+
+app = FastAPI(
+    title="PyPNM-CMTS REST API",
+    version=__version__,
+    description=fast_api_description,
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.include_router(pypnm_app.router, prefix="/pypnm")
 
 
-class CmtsOrchestratorRuntime:
-    """
-    Long-running orchestrator runtime that executes coordination ticks.
-    """
+@app.get("/health", tags=["health"])
+def health() -> dict[str, str]:
+    """Lightweight health endpoint for probes."""
+    return {"status": "ok", "version": __version__}
 
-    STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE_BYTES)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    def __init__(
-        self,
-        settings: CmtsOrchestratorSettings,
-        manager: CoordinationManager,
-        service_groups: list[ServiceGroupId],
-        mode: OrchestratorMode,
-        sg_id: ServiceGroupId | None,
-    ) -> None:
-        """
-        Initialize the orchestrator runtime.
+RouterRegistrar().register(app)
 
-        Args:
-            settings (CmtsOrchestratorSettings): Orchestrator settings instance.
-            manager (CoordinationManager): Coordination manager dependency.
-            service_groups (list[ServiceGroupId]): Service group inventory for ticks.
-            mode (OrchestratorMode): Execution mode (standalone, controller, worker).
-            sg_id (ServiceGroupId | None): Optional bound service group id for worker mode.
-        """
-        self._settings = settings
-        self._manager = manager
-        self._service_groups = service_groups
-        self._mode = mode
-        self._sg_id = sg_id
-        self._stop_requested = False
-
-    def stop(self) -> None:
-        """
-        Request that the runtime stop after the current tick.
-        """
-        self._stop_requested = True
-
-    def run_forever(
-        self,
-        max_ticks: int | None = None,
-        sleeper: Callable[[float], None] | None = None,
-        on_tick: Callable[[CoordinationTickResultModel], None] | None = None,
-        on_tick_indexed: Callable[[int, CoordinationTickResultModel], None] | None = None,
-    ) -> list[CoordinationTickResultModel]:
-        """
-        Execute coordination ticks until stopped or max_ticks is reached.
-
-        Args:
-            max_ticks (int | None): Optional maximum number of ticks to execute.
-            sleeper (Callable[[float], None] | None): Optional sleep function for tests.
-            on_tick (Callable[[CoordinationTickResultModel], None] | None): Optional per-tick callback.
-            on_tick_indexed (Callable[[int, CoordinationTickResultModel], None] | None): Optional per-tick callback with tick index.
-
-        Returns:
-            list[CoordinationTickResultModel]: Collected tick results when max_ticks is provided.
-        """
-        if max_ticks is not None and max_ticks < 0:
-            raise ValueError("max_ticks must be non-negative.")
-
-        pid_record = PidFileRecord.for_runtime(
-            Path(self._settings.state_dir),
-            self._mode,
-            self._sg_id,
-        )
-        pid_ctx = pid_record if pid_record is not None else contextlib.nullcontext()
-
-        if self._stop_requested:
-            with pid_ctx, contextlib.suppress(Exception):
-                self._manager.release_all()
-            return []
-
-        sleep_fn = sleeper if sleeper is not None else time.sleep
-        tick_interval = float(self._settings.tick_interval_seconds)
-        results: list[CoordinationTickResultModel] = []
-        ticks = 0
-        previous_handlers: dict[signal.Signals, object] = {}
-        register_signals = threading.current_thread() is threading.main_thread()
-
-        def _handle_stop(signum: int, frame: object | None) -> None:
-            self.stop()
-
-        with pid_ctx:
-            if register_signals:
-                for sig in self.STOP_SIGNALS:
-                    previous_handlers[sig] = signal.getsignal(sig)
-                    signal.signal(sig, _handle_stop)
-            try:
-                while not self._stop_requested:
-                    if self._mode == OrchestratorMode.CONTROLLER:
-                        tick_result = self._manager.tick_leader_only()
-                    else:
-                        tick_result = self._manager.tick(self._service_groups)
-                    tick_result = tick_result.model_copy(update={"tick_index": TickIndex(ticks + 1)})
-                    if max_ticks is not None:
-                        results.append(tick_result)
-                    if on_tick is not None:
-                        on_tick(tick_result)
-                    if on_tick_indexed is not None:
-                        on_tick_indexed(ticks + 1, tick_result)
-
-                    ticks += 1
-                    if max_ticks is not None and ticks >= max_ticks:
-                        break
-                    if self._stop_requested:
-                        break
-                    sleep_fn(tick_interval)
-            finally:
-                if register_signals:
-                    for sig, handler in previous_handlers.items():
-                        signal.signal(sig, handler)
-                with contextlib.suppress(Exception):
-                    self._manager.release_all()
-
-        return results
-
-__all__ = [
-    "CmtsOrchestratorRuntime",
-]
-
-FILE: src/pypnm_cmts/orchestrator/pidfile_manager.py
+FILE: src/pypnm_cmts/api/__init__.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
+"""PyPNM-CMTS api package."""
 from __future__ import annotations
 
-import contextlib
-import os
-from pathlib import Path
-
-from pypnm_cmts.lib.types import ServiceGroupId
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
-
-
-class PidFileRecord:
-    """
-    Best-effort pidfile lifecycle manager for orchestrator processes.
-    """
-
-    PID_DIR_NAME = "pids"
-    CONTROLLER_PIDFILE = "controller.pid"
-    WORKER_PID_PREFIX = "worker_"
-    WORKER_UNBOUND_PIDFILE = "worker_unbound.pid"
-
-    def __init__(self, state_dir: Path, pidfile_name: str) -> None:
-        """
-        Initialize the pidfile record.
-
-        Args:
-            state_dir (Path): Coordination state directory.
-            pidfile_name (str): Pidfile name to write under the pid directory.
-        """
-        self._pidfile_path = state_dir / self.PID_DIR_NAME / pidfile_name
-
-    @classmethod
-    def for_controller(cls, state_dir: Path) -> PidFileRecord:
-        """
-        Build the controller pidfile record.
-        """
-        return cls(state_dir, cls.CONTROLLER_PIDFILE)
-
-    @classmethod
-    def for_worker(cls, state_dir: Path, sg_id: ServiceGroupId) -> PidFileRecord:
-        """
-        Build the worker pidfile record for a bound service group.
-        """
-        return cls(state_dir, f"{cls.WORKER_PID_PREFIX}{int(sg_id)}.pid")
-
-    @classmethod
-    def for_worker_unbound(cls, state_dir: Path) -> PidFileRecord:
-        """
-        Build the pidfile record for an unbound worker.
-        """
-        return cls(state_dir, cls.WORKER_UNBOUND_PIDFILE)
-
-    @classmethod
-    def for_runtime(
-        cls,
-        state_dir: Path,
-        mode: OrchestratorMode,
-        sg_id: ServiceGroupId | None,
-    ) -> PidFileRecord | None:
-        """
-        Build the pidfile record for the runtime mode.
-        """
-        if mode == OrchestratorMode.CONTROLLER:
-            return cls.for_controller(state_dir)
-        if mode == OrchestratorMode.WORKER:
-            if sg_id is None:
-                return cls.for_worker_unbound(state_dir)
-            return cls.for_worker(state_dir, sg_id)
-        if mode == OrchestratorMode.STANDALONE:
-            return cls.for_controller(state_dir)
-        return None
-
-    def __enter__(self) -> PidFileRecord:
-        """
-        Write the pidfile best-effort.
-        """
-        self._write()
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        """
-        Remove the pidfile best-effort.
-        """
-        self._cleanup()
-
-    def _write(self) -> None:
-        with contextlib.suppress(Exception):
-            self._pidfile_path.parent.mkdir(parents=True, exist_ok=True)
-            self._pidfile_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
-
-    def _cleanup(self) -> None:
-        with contextlib.suppress(Exception):
-            if self._pidfile_path.exists():
-                self._pidfile_path.unlink()
-
-    @property
-    def pidfile_path(self) -> Path:
-        """
-        Return the pidfile path.
-        """
-        return self._pidfile_path
-
-
-__all__ = [
-    "PidFileRecord",
-]
 
 FILE: src/pypnm_cmts/cli.py
 #!/usr/bin/env python3
@@ -263,7 +93,7 @@ from pathlib import Path
 
 import uvicorn
 from pydantic import ValidationError
-from pypnm_cmts.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
@@ -304,7 +134,7 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         choices=[mode.value for mode in OrchestratorMode],
         required=True,
-        help="Execution mode: standalone, controller, worker, or combined.",
+        help="Execution mode: standalone, controller, or worker.",
     )
     parser.add_argument(
         "--config",
@@ -1532,904 +1362,603 @@ __all__ = [
     "DEFAULT_STATE_DIR",
 ]
 
-FILE: src/pypnm_cmts/orchestrator/launcher.py
+FILE: src/pypnm_cmts/orchestrator/runtime.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+
 from __future__ import annotations
 
+import contextlib
+import signal
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
-from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
-
-from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
-from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
-from pypnm_cmts.config.orchestrator_config import (
-    CmtsOrchestratorSettings,
-    ServiceGroupDescriptor,
-)
-from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.coordination.manager import CoordinationManager
-from pypnm_cmts.coordination.models import (
-    CoordinationTickResultModel,
-    ServiceGroupLeaseConflictModel,
-)
-from pypnm_cmts.coordination.service_group_lease import FileServiceGroupLease
-from pypnm_cmts.lib.types import (
-    CoordinationElectionName,
-    CoordinationPath,
-    LeaderId,
-    OrchestratorRunId,
-    OwnerId,
-    ServiceGroupId,
-    TickIndex,
-)
-from pypnm_cmts.orchestrator.models import (
-    OrchestratorRunResultModel,
-    OrchestratorStatusModel,
-    ServiceGroupInventoryModel,
-    WorkResultModel,
-)
-from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
-from pypnm_cmts.orchestrator.sg_shard_planner import ServiceGroupShardPlanner
-from pypnm_cmts.orchestrator.work_runner import WorkRunner
+from pypnm_cmts.coordination.models import CoordinationTickResultModel
+from pypnm_cmts.lib.types import ServiceGroupId, TickIndex
+from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
-DEFAULT_STATE_DIR = ".data/coordination"
-DEFAULT_ELECTION_PREFIX = "cmts"
-DEFAULT_ELECTION_LABEL = "primary"
-INVENTORY_SOURCE_CONFIG = "config"
-INVENTORY_SOURCE_DISCOVERY = "discovery"
-INVENTORY_SOURCE_WORKER = "worker"
-DEFAULT_CONFLICT_REASON = "Lease not acquired."
 
+class CmtsOrchestratorRuntime:
+    """
+    Long-running orchestrator runtime that executes coordination ticks.
+    """
 
-class CmtsOrchestratorLauncher:
-    """
-    One-shot orchestrator launcher for Phase-3 skeleton execution.
-    """
+    STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
     def __init__(
         self,
-        config_path: CoordinationPath | None,
+        settings: CmtsOrchestratorSettings,
+        manager: CoordinationManager,
+        service_groups: list[ServiceGroupId],
         mode: OrchestratorMode,
         sg_id: ServiceGroupId | None,
-        owner_id: OwnerId | None = None,
-        target_service_groups: int | None = None,
-        shard_mode: str | None = None,
-        tick_interval_seconds: float | None = None,
-        leader_ttl_seconds: int | None = None,
-        lease_ttl_seconds: int | None = None,
-        state_dir: CoordinationPath | None = None,
-        election_name: CoordinationElectionName | None = None,
-        adapter_hostname: HostNameStr | None = None,
-        adapter_read_community: SnmpReadCommunity | None = None,
-        adapter_write_community: SnmpWriteCommunity | None = None,
-        adapter_port: int | None = None,
-        state_dir_override: Path | None = None,
     ) -> None:
         """
-        Initialize a one-shot orchestrator launcher.
+        Initialize the orchestrator runtime.
 
         Args:
-            config_path (CoordinationPath | None): Optional system.json path override.
+            settings (CmtsOrchestratorSettings): Orchestrator settings instance.
+            manager (CoordinationManager): Coordination manager dependency.
+            service_groups (list[ServiceGroupId]): Service group inventory for ticks.
             mode (OrchestratorMode): Execution mode (standalone, controller, worker).
-            sg_id (ServiceGroupId | None): Optional service group identifier for worker mode.
-            owner_id (OwnerId | None): Optional explicit owner id override.
-            target_service_groups (int | None): Optional target service group override.
-            shard_mode (str | None): Optional shard mode override.
-            tick_interval_seconds (float | None): Optional tick interval override.
-            leader_ttl_seconds (int | None): Optional leader TTL override.
-            lease_ttl_seconds (int | None): Optional lease TTL override.
-            state_dir (CoordinationPath | None): Optional coordination state directory override.
-            election_name (CoordinationElectionName | None): Optional election name override.
-            adapter_hostname (HostNameStr | None): Optional CMTS hostname override.
-            adapter_read_community (SnmpReadCommunity | None): Optional SNMP read community override.
-            adapter_write_community (SnmpWriteCommunity | None): Optional SNMP write community override.
-            adapter_port (int | None): Optional SNMP port override.
-            state_dir_override (Path | None): Optional state directory override (tests only).
+            sg_id (ServiceGroupId | None): Optional bound service group id for worker mode.
         """
-        self._config_path = config_path
+        self._settings = settings
+        self._manager = manager
+        self._service_groups = service_groups
         self._mode = mode
         self._sg_id = sg_id
-        self._owner_id = owner_id
-        self._target_service_groups = target_service_groups
-        self._shard_mode = shard_mode
-        self._tick_interval_seconds = tick_interval_seconds
-        self._leader_ttl_seconds = leader_ttl_seconds
-        self._lease_ttl_seconds = lease_ttl_seconds
-        self._state_dir = state_dir
-        self._election_name = election_name
-        self._adapter_hostname = adapter_hostname
-        self._adapter_read_community = adapter_read_community
-        self._adapter_write_community = adapter_write_community
-        self._adapter_port = adapter_port
-        self._state_dir_override = state_dir_override
+        self._stop_requested = False
 
-    def run_once(self) -> OrchestratorRunResultModel:
+    def stop(self) -> None:
         """
-        Execute a single orchestration tick and return a structured result.
-
-        Returns:
-            OrchestratorRunResultModel: Structured result for one orchestration tick.
+        Request that the runtime stop after the current tick.
         """
-        settings = CmtsOrchestratorSettings.from_system_config(
-            config_path=self._config_path if self._config_path != "" else None
-        )
-        settings = self._apply_overrides(settings)
-
-        state_dir = self._resolve_state_dir()
-        owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = self._build_leader_id(owner_id)
-        election_name = self._build_election_name(settings)
-
-        if self._mode == OrchestratorMode.CONTROLLER:
-            service_groups, source = self._build_controller_service_groups(
-                settings=settings,
-                state_dir=state_dir,
-                is_leader=False,
-            )
-        else:
-            service_groups, source = self._build_service_groups(settings, state_dir)
-        inventory = ServiceGroupInventoryModel(
-            sg_ids=service_groups,
-            count=len(service_groups),
-            source=source,
-        )
-
-        desired_sg_ids = list(service_groups)
-        worker_count = 0
-        if self._mode == OrchestratorMode.CONTROLLER:
-            desired_sg_ids, worker_count = self._plan_controller_service_groups(
-                settings=settings,
-                service_groups=service_groups,
-            )
-
-        effective_target = self._effective_target_service_groups(
-            settings=settings,
-            inventory_count=len(service_groups),
-        )
-        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
-            effective_target = len(desired_sg_ids)
-
-        manager = CoordinationManager(
-            state_dir=state_dir,
-            election_name=election_name,
-            leader_id=leader_id,
-            owner_id=OwnerId(str(owner_id)),
-            leader_ttl_seconds=int(settings.leader_ttl_seconds),
-            lease_ttl_seconds=int(settings.lease_ttl_seconds),
-            target_service_groups=effective_target,
-            shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
-        )
-
-        if self._mode == OrchestratorMode.CONTROLLER:
-            tick_result = manager.tick_leader_only()
-            leader_status = manager.leader_status()
-            service_groups, source = self._build_controller_service_groups(
-                settings=settings,
-                state_dir=state_dir,
-                is_leader=leader_status.is_leader,
-            )
-            inventory = ServiceGroupInventoryModel(
-                sg_ids=service_groups,
-                count=len(service_groups),
-                source=source,
-            )
-            desired_sg_ids, worker_count = self._plan_controller_service_groups(
-                settings=settings,
-                service_groups=service_groups,
-            )
-            effective_target = self._effective_target_service_groups(
-                settings=settings,
-                inventory_count=len(service_groups),
-            )
-            if int(settings.target_service_groups) == 0:
-                effective_target = len(desired_sg_ids)
-        else:
-            tick_target = service_groups
-            tick_result = manager.tick(tick_target)
-        tick_value = int(tick_result.tick_index)
-        tick_index = TickIndex(tick_value if tick_value > 0 else 1)
-        acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
-        coordination_status = manager.status()
-        if self._mode == OrchestratorMode.CONTROLLER:
-            held_sg_ids = []
-        else:
-            held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
-        conflicts = self._build_conflicts(
-            desired_sg_ids=desired_sg_ids,
-            leased_sg_ids=held_sg_ids,
-            state_dir=state_dir,
-            election_name=election_name,
-            owner_id=OwnerId(str(owner_id)),
-            lease_ttl_seconds=int(settings.lease_ttl_seconds),
-        )
-        tick_result = tick_result.model_copy(
-            update={
-                "enabled_sg_ids": sorted(service_groups, key=int),
-                "desired_sg_ids": sorted(desired_sg_ids, key=int),
-                "leased_sg_ids": sorted(held_sg_ids, key=int),
-                "conflicts": conflicts,
-                "worker_count": worker_count,
-            }
-        )
-        work_sg_ids = self._select_work_sg_ids(
-            acquired_sg_ids=acquired_sg_ids,
-            held_sg_ids=held_sg_ids,
-        )
-        lease_held = self._is_worker_lease_held(held_sg_ids=held_sg_ids)
-        run_id = self._build_run_id(acquired_sg_ids=work_sg_ids, tick_index=tick_index, lease_held=lease_held)
-        work_results = self._run_worker_tests(
-            settings=settings,
-            state_dir=state_dir,
-            tick_index=tick_index,
-            acquired_sg_ids=work_sg_ids,
-            lease_held=lease_held,
-        )
-
-        return OrchestratorRunResultModel(
-            mode=self._mode,
-            tick_index=tick_index,
-            run_id=run_id,
-            lease_held=lease_held,
-            inventory=inventory,
-            coordination_tick=tick_result,
-            coordination_status=coordination_status,
-            leader_status=manager.leader_status(),
-            target_service_groups=effective_target,
-            work_results=work_results,
-        )
+        self._stop_requested = True
 
     def run_forever(
         self,
-        on_tick: Callable[[OrchestratorRunResultModel], None] | None = None,
         max_ticks: int | None = None,
         sleeper: Callable[[float], None] | None = None,
+        on_tick: Callable[[CoordinationTickResultModel], None] | None = None,
+        on_tick_indexed: Callable[[int, CoordinationTickResultModel], None] | None = None,
     ) -> list[CoordinationTickResultModel]:
         """
-        Execute the orchestration runtime tick loop until stopped.
+        Execute coordination ticks until stopped or max_ticks is reached.
 
         Args:
-            on_tick (Callable[[OrchestratorRunResultModel], None] | None): Optional per-tick callback.
-            max_ticks (int | None): Optional maximum ticks to execute (tests only).
-            sleeper (Callable[[float], None] | None): Optional sleep override (tests only).
+            max_ticks (int | None): Optional maximum number of ticks to execute.
+            sleeper (Callable[[float], None] | None): Optional sleep function for tests.
+            on_tick (Callable[[CoordinationTickResultModel], None] | None): Optional per-tick callback.
+            on_tick_indexed (Callable[[int, CoordinationTickResultModel], None] | None): Optional per-tick callback with tick index.
 
         Returns:
             list[CoordinationTickResultModel]: Collected tick results when max_ticks is provided.
         """
-        settings = CmtsOrchestratorSettings.from_system_config(
-            config_path=self._config_path if self._config_path != "" else None
+        if max_ticks is not None and max_ticks < 0:
+            raise ValueError("max_ticks must be non-negative.")
+
+        pid_record = PidFileRecord.for_runtime(
+            Path(self._settings.state_dir),
+            self._mode,
+            self._sg_id,
         )
-        settings = self._apply_overrides(settings)
+        pid_ctx = pid_record if pid_record is not None else contextlib.nullcontext()
 
-        state_dir = self._resolve_state_dir()
-        owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = self._build_leader_id(owner_id)
-        election_name = self._build_election_name(settings)
-
-        service_groups, source = self._build_service_groups(settings, state_dir)
-        inventory = ServiceGroupInventoryModel(
-            sg_ids=service_groups,
-            count=len(service_groups),
-            source=source,
-        )
-        desired_sg_ids = list(service_groups)
-        worker_count = 0
-        if self._mode == OrchestratorMode.CONTROLLER:
-            desired_sg_ids, worker_count = self._plan_controller_service_groups(
-                settings=settings,
-                service_groups=service_groups,
-            )
-        effective_target = self._effective_target_service_groups(
-            settings=settings,
-            inventory_count=len(service_groups),
-        )
-        if self._mode == OrchestratorMode.CONTROLLER and int(settings.target_service_groups) == 0:
-            effective_target = len(desired_sg_ids)
-
-        manager = CoordinationManager(
-            state_dir=state_dir,
-            election_name=election_name,
-            leader_id=leader_id,
-            owner_id=OwnerId(str(owner_id)),
-            leader_ttl_seconds=int(settings.leader_ttl_seconds),
-            lease_ttl_seconds=int(settings.lease_ttl_seconds),
-            target_service_groups=effective_target,
-            shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
-        )
-
-        runtime = CmtsOrchestratorRuntime(
-            settings=settings,
-            manager=manager,
-            service_groups=service_groups,
-            mode=self._mode,
-            sg_id=self._sg_id,
-        )
-        controller_inventory_source = source
-        controller_inventory_initialized = False
-
-        def _emit_result(tick_index: int, tick_result: CoordinationTickResultModel) -> None:
-            if on_tick is None:
-                return
-            nonlocal service_groups, inventory, desired_sg_ids, worker_count, effective_target, controller_inventory_source, controller_inventory_initialized
-            tick_value = TickIndex(int(tick_index))
-            acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
-            coordination_status = manager.status()
-            if self._mode == OrchestratorMode.CONTROLLER:
-                held_sg_ids = []
-                if coordination_status.is_leader and not controller_inventory_initialized:
-                    service_groups, controller_inventory_source = self._build_controller_service_groups(
-                        settings=settings,
-                        state_dir=state_dir,
-                        is_leader=True,
-                    )
-                    inventory = ServiceGroupInventoryModel(
-                        sg_ids=service_groups,
-                        count=len(service_groups),
-                        source=controller_inventory_source,
-                    )
-                    desired_sg_ids, worker_count = self._plan_controller_service_groups(
-                        settings=settings,
-                        service_groups=service_groups,
-                    )
-                    effective_target = self._effective_target_service_groups(
-                        settings=settings,
-                        inventory_count=len(service_groups),
-                    )
-                    if int(settings.target_service_groups) == 0:
-                        effective_target = len(desired_sg_ids)
-                    controller_inventory_initialized = True
-            else:
-                held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
-            conflicts = self._build_conflicts(
-                desired_sg_ids=desired_sg_ids,
-                leased_sg_ids=held_sg_ids,
-                state_dir=state_dir,
-                election_name=election_name,
-                owner_id=OwnerId(str(owner_id)),
-                lease_ttl_seconds=int(settings.lease_ttl_seconds),
-            )
-            tick_result = tick_result.model_copy(
-                update={
-                    "enabled_sg_ids": sorted(service_groups, key=int),
-                    "desired_sg_ids": sorted(desired_sg_ids, key=int),
-                    "leased_sg_ids": sorted(held_sg_ids, key=int),
-                    "conflicts": conflicts,
-                    "worker_count": worker_count,
-                }
-            )
-            work_sg_ids = self._select_work_sg_ids(
-                acquired_sg_ids=acquired_sg_ids,
-                held_sg_ids=held_sg_ids,
-            )
-            lease_held = self._is_worker_lease_held(held_sg_ids=held_sg_ids)
-            run_id = self._build_run_id(acquired_sg_ids=work_sg_ids, tick_index=tick_value, lease_held=lease_held)
-            work_results = self._run_worker_tests(
-                settings=settings,
-                state_dir=state_dir,
-                tick_index=tick_value,
-                acquired_sg_ids=work_sg_ids,
-                lease_held=lease_held,
-            )
-            result = OrchestratorRunResultModel(
-                mode=self._mode,
-                tick_index=tick_value,
-                run_id=run_id,
-                lease_held=lease_held,
-                inventory=inventory,
-                coordination_tick=tick_result,
-                coordination_status=coordination_status,
-                leader_status=manager.leader_status(),
-                target_service_groups=effective_target,
-                work_results=work_results,
-            )
-            on_tick(result)
-
-        return runtime.run_forever(
-            max_ticks=max_ticks,
-            sleeper=sleeper,
-            on_tick_indexed=_emit_result,
-        )
-
-    def build_status_snapshot(self) -> OrchestratorStatusModel:
-        """
-        Build an orchestration status snapshot without executing a tick.
-
-        Returns:
-            OrchestratorStatusModel: Status snapshot including inventory and coordination status.
-        """
-        settings = CmtsOrchestratorSettings.from_system_config(
-            config_path=self._config_path if self._config_path != "" else None
-        )
-        settings = self._apply_overrides(settings)
-
-        state_dir = self._resolve_state_dir()
-        owner_id = OwnerIdResolver.resolve(str(settings.owner_id), state_dir)
-        leader_id = self._build_leader_id(owner_id)
-        election_name = self._build_election_name(settings)
-
-        service_groups, source = self._build_service_groups(settings, state_dir)
-        inventory = ServiceGroupInventoryModel(
-            sg_ids=service_groups,
-            count=len(service_groups),
-            source=source,
-        )
-        effective_target = self._effective_target_service_groups(
-            settings=settings,
-            inventory_count=len(service_groups),
-        )
-
-        manager = CoordinationManager(
-            state_dir=state_dir,
-            election_name=election_name,
-            leader_id=leader_id,
-            owner_id=OwnerId(str(owner_id)),
-            leader_ttl_seconds=int(settings.leader_ttl_seconds),
-            lease_ttl_seconds=int(settings.lease_ttl_seconds),
-            target_service_groups=effective_target,
-            shard_mode=settings.shard_mode,
-            leader_enabled=self._mode == OrchestratorMode.CONTROLLER,
-            leader_id_validator=self._leader_id_validator() if self._mode == OrchestratorMode.CONTROLLER else None,
-        )
-
-        return OrchestratorStatusModel(
-            mode=self._mode,
-            inventory=inventory,
-            coordination_status=manager.status(),
-            leader_status=manager.leader_status(),
-            target_service_groups=effective_target,
-        )
-
-    def _resolve_state_dir(self) -> Path:
-        if self._state_dir_override is not None:
-            state_dir = self._state_dir_override
-        elif self._state_dir is not None and str(self._state_dir).strip() != "":
-            state_dir = Path(self._state_dir)
-        else:
-            state_dir = Path(DEFAULT_STATE_DIR)
-        state_dir.mkdir(parents=True, exist_ok=True)
-        return state_dir
-
-    def _build_election_name(self, settings: CmtsOrchestratorSettings) -> CoordinationElectionName:
-        if str(settings.election_name).strip() != "":
-            return CoordinationElectionName(str(settings.election_name).strip())
-        label = settings.adapter.label.strip() if settings.adapter.label.strip() != "" else DEFAULT_ELECTION_LABEL
-        value = f"{DEFAULT_ELECTION_PREFIX}-{label}"
-        return CoordinationElectionName(value)
-
-    def _build_leader_id(self, owner_id: OwnerId) -> LeaderId:
-        owner_value = str(owner_id).strip()
-        if owner_value == "":
-            owner_value = str(owner_id)
-        if self._mode == OrchestratorMode.CONTROLLER:
-            if owner_value.startswith("controller-"):
-                return LeaderId(owner_value)
-            if owner_value.startswith("worker-"):
-                stripped = owner_value[len("worker-") :]
-                if stripped == "":
-                    stripped = str(owner_id).strip()
-                return LeaderId(f"controller-{stripped}")
-            return LeaderId(f"controller-{owner_value}")
-        if owner_value.startswith("worker-"):
-            return LeaderId(owner_value)
-        if owner_value.startswith("controller-"):
-            stripped = owner_value[len("controller-") :]
-            if stripped == "":
-                stripped = str(owner_id).strip()
-            return LeaderId(f"worker-{stripped}")
-        return LeaderId(f"worker-{owner_value}")
-
-    @staticmethod
-    def _leader_id_validator() -> Callable[[LeaderId], bool]:
-        def _is_controller(leader_id: LeaderId) -> bool:
-            value = str(leader_id).strip()
-            return value != "" and not value.startswith("worker-")
-
-        return _is_controller
-
-    def _build_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
-        if self._mode == OrchestratorMode.WORKER:
-            return self._build_worker_service_groups(settings, state_dir)
-        return self._build_inventory_service_groups(settings, state_dir)
-
-    def _build_worker_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
-        if self._sg_id is None:
-            snapshot = self._load_inventory_snapshot(state_dir)
-            if snapshot is not None:
-                return (sorted(snapshot.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
-            if settings.service_groups:
-                return self._build_config_service_groups(settings)
-            if self._should_discover(settings):
-                raise ValueError("inventory snapshot not found for worker mode.")
-            return ([], INVENTORY_SOURCE_WORKER)
-
-        config_groups = self._build_config_service_groups(settings)[0]
-        if settings.service_groups:
-            if self._sg_id not in config_groups:
-                raise ValueError("worker sg-id is not enabled in configuration.")
-            return ([self._sg_id], INVENTORY_SOURCE_CONFIG)
-
-        return ([self._sg_id], INVENTORY_SOURCE_WORKER)
-
-    def _build_inventory_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
-        if bool(settings.auto_discover) or not settings.service_groups:
-            return self._build_discovered_service_groups(settings, state_dir)
-        return self._build_config_service_groups(settings)
-
-    def _build_controller_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-        is_leader: bool,
-    ) -> tuple[list[ServiceGroupId], str]:
-        if is_leader and self._should_discover(settings):
-            return self._build_discovered_service_groups(settings, state_dir)
-
-        snapshot = self._load_inventory_snapshot(state_dir)
-        if snapshot is not None:
-            return (sorted(snapshot.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
-
-        service_groups, source = self._build_config_service_groups(settings)
-        if is_leader and service_groups:
-            self._persist_inventory_snapshot(settings, state_dir, service_groups)
-        return (service_groups, source)
-
-    def _build_discovered_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
-        result = CmtsInventoryDiscoveryService.run_discovery(
-            cmts_hostname=settings.adapter.hostname,
-            read_community=settings.adapter.community,
-            write_community=settings.adapter.write_community,
-            port=int(settings.adapter.port),
-            state_dir=state_dir,
-        )
-        return (sorted(result.discovered_sg_ids, key=int), INVENTORY_SOURCE_DISCOVERY)
-
-    def _load_inventory_snapshot(self, state_dir: Path) -> InventoryDiscoveryResultModel | None:
-        snapshot_path = state_dir / "inventory" / "discovery.json"
-        if not snapshot_path.exists():
-            return None
-        try:
-            content = snapshot_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            raise ValueError("inventory snapshot could not be read.") from exc
-        try:
-            return InventoryDiscoveryResultModel.model_validate_json(content)
-        except Exception as exc:
-            raise ValueError("inventory snapshot is invalid.") from exc
-
-    def _persist_inventory_snapshot(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-        sg_ids: list[ServiceGroupId],
-    ) -> None:
-        snapshot = InventoryDiscoveryResultModel(
-            cmts_host=HostNameStr(str(settings.adapter.hostname)),
-            discovered_sg_ids=sorted(sg_ids, key=int),
-            per_sg=[],
-        )
-        inventory_dir = state_dir / "inventory"
-        inventory_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_path = inventory_dir / "discovery.json"
-        snapshot_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
-
-    def _build_config_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
-        enabled_ids: list[ServiceGroupId] = []
-        for entry in settings.service_groups:
-            if not entry.enabled:
-                continue
-            enabled_ids.append(entry.sg_id)
-        return (sorted(enabled_ids, key=int), INVENTORY_SOURCE_CONFIG)
-
-    def _plan_controller_service_groups(
-        self,
-        settings: CmtsOrchestratorSettings,
-        service_groups: list[ServiceGroupId],
-    ) -> tuple[list[ServiceGroupId], int]:
-        descriptors = self._build_planner_descriptors(settings, service_groups)
-        return ServiceGroupShardPlanner.plan(
-            descriptors=descriptors,
-            shard_mode=settings.shard_mode,
-            target_service_groups=int(settings.target_service_groups),
-            worker_cap=int(settings.worker_cap),
-        )
-
-    def _build_planner_descriptors(
-        self,
-        settings: CmtsOrchestratorSettings,
-        service_groups: list[ServiceGroupId],
-    ) -> list[ServiceGroupDescriptor]:
-        if settings.service_groups:
-            return list(settings.service_groups)
-        return [ServiceGroupDescriptor(sg_id=sg_id) for sg_id in service_groups]
-
-    def _effective_target_service_groups(self, settings: CmtsOrchestratorSettings, inventory_count: int) -> int:
-        if self._mode == OrchestratorMode.WORKER and self._sg_id is not None:
-            requested = 1
-        else:
-            requested = int(settings.target_service_groups)
-        if inventory_count <= 0:
-            return 0
-        return min(requested, inventory_count)
-
-    def _run_worker_tests(
-        self,
-        settings: CmtsOrchestratorSettings,
-        state_dir: Path,
-        tick_index: TickIndex,
-        acquired_sg_ids: list[ServiceGroupId],
-        lease_held: bool,
-    ) -> list[WorkResultModel]:
-        if self._mode != OrchestratorMode.WORKER:
-            return []
-        if not lease_held:
-            return []
-        if not acquired_sg_ids:
+        if self._stop_requested:
+            with pid_ctx, contextlib.suppress(Exception):
+                self._manager.release_all()
             return []
 
-        tests = [str(test_name) for test_name in settings.default_tests]
-        runner = WorkRunner(state_dir=state_dir)
-        sg_id = sorted(acquired_sg_ids, key=int)[0]
-        run_id = self._build_run_id_for_sg(sg_id=sg_id, tick_index=tick_index)
-        return runner.run_tests(sg_id=sg_id, tests=tests, run_id=run_id)
+        sleep_fn = sleeper if sleeper is not None else time.sleep
+        tick_interval = float(self._settings.tick_interval_seconds)
+        results: list[CoordinationTickResultModel] = []
+        ticks = 0
+        previous_handlers: dict[signal.Signals, object] = {}
+        register_signals = threading.current_thread() is threading.main_thread()
 
-    def _build_run_id(
-        self,
-        acquired_sg_ids: list[ServiceGroupId],
-        tick_index: TickIndex,
-        lease_held: bool,
-    ) -> OrchestratorRunId:
-        if self._mode != OrchestratorMode.WORKER:
-            return OrchestratorRunId("")
-        if not lease_held:
-            return OrchestratorRunId("")
-        if not acquired_sg_ids:
-            return OrchestratorRunId("")
-        sg_id = sorted(acquired_sg_ids, key=int)[0]
-        return self._build_run_id_for_sg(sg_id=sg_id, tick_index=tick_index)
+        def _handle_stop(signum: int, frame: object | None) -> None:
+            self.stop()
 
-    def _build_run_id_for_sg(
-        self,
-        sg_id: ServiceGroupId,
-        tick_index: TickIndex,
-    ) -> OrchestratorRunId:
-        value = f"sg{int(sg_id)}_tick{int(tick_index):06d}"
-        return OrchestratorRunId(value)
+        with pid_ctx:
+            if register_signals:
+                for sig in self.STOP_SIGNALS:
+                    previous_handlers[sig] = signal.getsignal(sig)
+                    signal.signal(sig, _handle_stop)
+            try:
+                while not self._stop_requested:
+                    if self._mode == OrchestratorMode.CONTROLLER:
+                        tick_result = self._manager.tick_leader_only()
+                    else:
+                        tick_result = self._manager.tick(self._service_groups)
+                    tick_result = tick_result.model_copy(update={"tick_index": TickIndex(ticks + 1)})
+                    if max_ticks is not None:
+                        results.append(tick_result)
+                    if on_tick is not None:
+                        on_tick(tick_result)
+                    if on_tick_indexed is not None:
+                        on_tick_indexed(ticks + 1, tick_result)
 
-    def _build_conflicts(
-        self,
-        desired_sg_ids: list[ServiceGroupId],
-        leased_sg_ids: list[ServiceGroupId],
-        state_dir: Path,
-        election_name: CoordinationElectionName,
-        owner_id: OwnerId,
-        lease_ttl_seconds: int,
-    ) -> list[ServiceGroupLeaseConflictModel]:
-        if not desired_sg_ids:
-            return []
+                    ticks += 1
+                    if max_ticks is not None and ticks >= max_ticks:
+                        break
+                    if self._stop_requested:
+                        break
+                    sleep_fn(tick_interval)
+            finally:
+                if register_signals:
+                    for sig, handler in previous_handlers.items():
+                        signal.signal(sig, handler)
+                with contextlib.suppress(Exception):
+                    self._manager.release_all()
 
-        conflicts: list[ServiceGroupLeaseConflictModel] = []
-        for sg_id in sorted(desired_sg_ids, key=int):
-            if sg_id in leased_sg_ids:
-                continue
-            lease = FileServiceGroupLease(
-                state_dir=state_dir,
-                election_name=election_name,
-                sg_id=sg_id,
-                owner_id=owner_id,
-                ttl_seconds=int(lease_ttl_seconds),
-            )
-            status = lease.status()
-            reason = status.message if status.message != "" else DEFAULT_CONFLICT_REASON
-            conflicts.append(
-                ServiceGroupLeaseConflictModel(
-                    sg_id=sg_id,
-                    owner_id=status.owner_id,
-                    reason=reason,
-                )
-            )
-        return conflicts
-
-    def _select_work_sg_ids(
-        self,
-        acquired_sg_ids: list[ServiceGroupId],
-        held_sg_ids: list[ServiceGroupId],
-    ) -> list[ServiceGroupId]:
-        if acquired_sg_ids:
-            return sorted(acquired_sg_ids, key=int)[:1]
-        return sorted(held_sg_ids, key=int)[:1]
-
-    def _is_worker_lease_held(self, held_sg_ids: list[ServiceGroupId]) -> bool:
-        if self._mode != OrchestratorMode.WORKER:
-            return False
-        return bool(held_sg_ids)
-
-    def _should_discover(self, settings: CmtsOrchestratorSettings) -> bool:
-        return bool(settings.auto_discover) or not settings.service_groups
-
-    def _apply_overrides(self, settings: CmtsOrchestratorSettings) -> CmtsOrchestratorSettings:
-        data = settings.model_dump()
-        adapter_data = dict(data.get("adapter", {}))
-
-        if self._owner_id is not None and str(self._owner_id).strip() != "":
-            data["owner_id"] = self._owner_id
-        if self._target_service_groups is not None:
-            data["target_service_groups"] = int(self._target_service_groups)
-        if self._shard_mode is not None and self._shard_mode.strip() != "":
-            data["shard_mode"] = self._shard_mode
-        if self._tick_interval_seconds is not None:
-            data["tick_interval_seconds"] = float(self._tick_interval_seconds)
-        if self._leader_ttl_seconds is not None:
-            data["leader_ttl_seconds"] = int(self._leader_ttl_seconds)
-        if self._lease_ttl_seconds is not None:
-            data["lease_ttl_seconds"] = int(self._lease_ttl_seconds)
-        if self._state_dir is not None and str(self._state_dir).strip() != "":
-            data["state_dir"] = str(self._state_dir)
-        if self._election_name is not None:
-            data["election_name"] = self._election_name
-        if self._adapter_hostname is not None and str(self._adapter_hostname).strip() != "":
-            adapter_data["hostname"] = str(self._adapter_hostname)
-        if self._adapter_read_community is not None and str(self._adapter_read_community).strip() != "":
-            adapter_data["community"] = str(self._adapter_read_community)
-        if self._adapter_write_community is not None:
-            adapter_data["write_community"] = str(self._adapter_write_community)
-        if self._adapter_port is not None:
-            adapter_data["port"] = int(self._adapter_port)
-
-        data["adapter"] = adapter_data
-
-        return CmtsOrchestratorSettings.model_validate(data)
-
-    @staticmethod
-    def _parse_sg_id(value: str) -> ServiceGroupId:
-        trimmed = value.strip()
-        if trimmed == "":
-            raise ValueError("service group id must be non-empty.")
-        try:
-            return ServiceGroupId(int(trimmed))
-        except ValueError as exc:
-            raise ValueError("service group id must be a numeric value.") from exc
-
+        return results
 
 __all__ = [
-    "CmtsOrchestratorLauncher",
-    "DEFAULT_STATE_DIR",
+    "CmtsOrchestratorRuntime",
 ]
 
-FILE: src/pypnm_cmts/api/routes/operational/router.py
+FILE: src/pypnm_cmts/config/orchestrator_config.py
+from __future__ import annotations
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+from pathlib import Path
+
+from pydantic import BaseModel, Field, model_validator
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+
+from pypnm_cmts.config.config_manager import CmtsConfigManager
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    CoordinationPath,
+    OwnerId,
+    ServiceGroupId,
+)
+from pypnm_cmts.types.orchestrator_types import AdapterKind, OrchestratorMode
+
+DEFAULT_CMTS_INDEX: int = 0
+DEFAULT_ORCHESTRATOR_MODE: OrchestratorMode = OrchestratorMode.STANDALONE
+DEFAULT_TESTS: list[str] = ["ds_ofdm_rxmer"]
+DEFAULT_OWNER_ID: OwnerId = OwnerId("")
+DEFAULT_TARGET_SERVICE_GROUPS: int = 0
+DEFAULT_WORKER_CAP: int = 0
+DEFAULT_STATE_DIR = Path(".data/coordination")
+DEFAULT_ELECTION_NAME: CoordinationElectionName = CoordinationElectionName("")
+DEFAULT_LEADER_TTL_SECONDS = 10
+DEFAULT_LEASE_TTL_SECONDS = 10
+DEFAULT_TICK_INTERVAL_SECONDS = 1.0
+DEFAULT_SNMP_COMMUNITY: SnmpReadCommunity = SnmpReadCommunity("public")
+DEFAULT_SNMP_PORT = 161
+SHARD_MODE_SEQUENTIAL = "sequential"
+SHARD_MODE_SCORE = "score"
+SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
+DEFAULT_SHARD_MODE = SHARD_MODE_SEQUENTIAL
+
+
+class CmtsAdapterConfig(BaseModel):
+    """Configuration for CMTS adapter selection and targeting."""
+
+    kind: AdapterKind = Field(default=AdapterKind.SNMP, description="CMTS adapter kind.")
+    cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="Index of the CMTS entry in system.json.")
+    label: str = Field(default="primary", description="Human-friendly adapter label.")
+    hostname: HostNameStr = Field(default=HostNameStr(""), description="CMTS hostname or IP address.")
+    community: SnmpReadCommunity = Field(default=DEFAULT_SNMP_COMMUNITY, description="SNMPv2c read community string.")
+    write_community: SnmpWriteCommunity = Field(default=SnmpWriteCommunity(""), description="Optional SNMPv2c write community string.")
+    port: int = Field(default=DEFAULT_SNMP_PORT, description="SNMP port for CMTS discovery.")
+
+
+class ServiceGroupDescriptor(BaseModel):
+    """Descriptor for a CMTS service group boundary."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    name: str = Field(default="", description="Service group name or label.")
+    cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="CMTS index for the service group.")
+    enabled: bool = Field(default=True, description="Whether the service group is enabled for orchestration.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> ServiceGroupDescriptor:
+        if int(self.sg_id) <= 0:
+            raise ValueError("sg_id must be greater than zero.")
+        return self
+
+
+class CmtsOrchestratorSettings(BaseModel):
+    """Top-level orchestrator settings for CMTS control boundaries."""
+
+    mode: OrchestratorMode = Field(default=DEFAULT_ORCHESTRATOR_MODE, description="Orchestrator execution mode.")
+    adapter: CmtsAdapterConfig = Field(default_factory=CmtsAdapterConfig, description="CMTS adapter configuration.")
+    service_groups: list[ServiceGroupDescriptor] = Field(default_factory=list, description="Service group descriptors.")
+    auto_discover: bool = Field(default=False, description="Enable CMTS-based service group discovery.")
+    default_tests: list[str] = Field(default_factory=list, description="Default test names for orchestration.")
+    owner_id: OwnerId = Field(default=DEFAULT_OWNER_ID, description="Optional explicit owner id for coordination.")
+    target_service_groups: int = Field(default=DEFAULT_TARGET_SERVICE_GROUPS, description="Target number of service groups per replica.")
+    shard_mode: str = Field(default=DEFAULT_SHARD_MODE, description="Service group shard mode: sequential or score.")
+    worker_cap: int = Field(default=DEFAULT_WORKER_CAP, description="Optional cap on worker count (0 means no cap).")
+    tick_interval_seconds: float = Field(default=DEFAULT_TICK_INTERVAL_SECONDS, description="Tick interval in seconds.")
+    leader_ttl_seconds: int = Field(default=DEFAULT_LEADER_TTL_SECONDS, description="Leader election TTL in seconds.")
+    lease_ttl_seconds: int = Field(default=DEFAULT_LEASE_TTL_SECONDS, description="Service group lease TTL in seconds.")
+    state_dir: CoordinationPath = Field(default=DEFAULT_STATE_DIR, description="State directory for coordination files.")
+    election_name: CoordinationElectionName = Field(default=DEFAULT_ELECTION_NAME, description="Optional election name override.")
+
+    @model_validator(mode="after")
+    def _apply_default_tests(self) -> CmtsOrchestratorSettings:
+        if not self.default_tests:
+            self.default_tests = list(DEFAULT_TESTS)
+        if self.shard_mode not in SHARD_MODE_OPTIONS:
+            raise ValueError("shard_mode must be 'sequential' or 'score'.")
+        if int(self.target_service_groups) < 0:
+            raise ValueError("target_service_groups must be non-negative.")
+        if int(self.worker_cap) < 0:
+            raise ValueError("worker_cap must be non-negative.")
+        if float(self.tick_interval_seconds) <= 0:
+            raise ValueError("tick_interval_seconds must be greater than zero.")
+        if int(self.leader_ttl_seconds) <= 0:
+            raise ValueError("leader_ttl_seconds must be greater than zero.")
+        if int(self.lease_ttl_seconds) <= 0:
+            raise ValueError("lease_ttl_seconds must be greater than zero.")
+        min_ttl = min(int(self.leader_ttl_seconds), int(self.lease_ttl_seconds))
+        if float(self.tick_interval_seconds) >= float(min_ttl):
+            raise ValueError("tick_interval_seconds must be less than leader_ttl_seconds and lease_ttl_seconds.")
+        if bool(self.auto_discover):
+            hostname_value = str(self.adapter.hostname).strip()
+            if hostname_value == "":
+                raise ValueError("adapter.hostname must be set when auto_discover is enabled.")
+            community_value = str(self.adapter.community).strip()
+            if community_value == "":
+                raise ValueError("adapter.community must be set when auto_discover is enabled.")
+        if isinstance(self.state_dir, str):
+            if self.state_dir.strip() == "":
+                raise ValueError("state_dir must be non-empty.")
+            self.state_dir = Path(self.state_dir)
+        if str(self.election_name).strip() == "":
+            self.election_name = DEFAULT_ELECTION_NAME
+        return self
+
+    @classmethod
+    def from_system_config(cls, config_path: CoordinationPath | None = None) -> CmtsOrchestratorSettings:
+        """
+        Build orchestrator configuration from system.json.
+
+        TODO (Phase-1): Expand validation once orchestration fields stabilize.
+        """
+        manager = CmtsConfigManager(config_path=config_path)
+        data = manager.get("CmtsOrchestrator")
+        if data is None:
+            return cls()
+        if isinstance(data, dict):
+            return cls.model_validate(data)
+        return cls()
+
+FILE: src/pypnm_cmts/coordination/manager.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
 from __future__ import annotations
 
-import logging
-from http import HTTPStatus
+import hashlib
+from collections.abc import Callable
+from pathlib import Path
 
-from fastapi import APIRouter
-from starlette.responses import JSONResponse
-
-from pypnm_cmts.api.routes.operational.schemas import (
-    HealthResponseModel,
-    OperationalStatusResponseModel,
-    ReadyResponseModel,
-    VersionResponseModel,
+from pypnm_cmts.coordination.leader_election import FileLeaderElection
+from pypnm_cmts.coordination.models import (
+    CoordinationReleaseAllResultModel,
+    CoordinationStatusModel,
+    CoordinationTickResultModel,
+    LeaderElectionStatusModel,
 )
-from pypnm_cmts.api.routes.operational.service import OperationalService
-from pypnm_cmts.lib.constants import OperationalStatus
+from pypnm_cmts.coordination.service_group_lease import FileServiceGroupLease
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    LeaderId,
+    OwnerId,
+    ServiceGroupId,
+)
 
 
-class OperationalRouter:
+class CoordinationManager:
     """
-    FastAPI router for operational endpoints.
+    Coordination manager that wires leader election and service group leases.
     """
+
+    MESSAGE_NOT_LEADER = "Leader not held; lease operations complete."
+    MESSAGE_LEADER_ACTIVE = "Leader active; lease operations complete."
+    MESSAGE_RELEASED = "Leader and leases released."
+    MIN_TARGET_SERVICE_GROUPS = 0
+    SHARD_MODE_SEQUENTIAL = "sequential"
+    SHARD_MODE_SCORE = "score"
+    SHARD_MODE_DEFAULT = SHARD_MODE_SEQUENTIAL
+    SCORE_DIGEST_BYTES = 8
 
     def __init__(
         self,
-        prefix: str = "/ops",
-        tags: list[str] | None = None,
+        state_dir: Path,
+        election_name: CoordinationElectionName,
+        leader_id: LeaderId,
+        owner_id: OwnerId,
+        leader_ttl_seconds: int,
+        lease_ttl_seconds: int,
+        target_service_groups: int,
+        shard_mode: str = SHARD_MODE_DEFAULT,
+        leader_enabled: bool = True,
+        leader_id_validator: Callable[[LeaderId], bool] | None = None,
+        now: Callable[[], float] | None = None,
     ) -> None:
-        if tags is None:
-            tags = ["Operational"]
-        self.router = APIRouter(prefix=prefix, tags=tags)
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
-        self._service = OperationalService()
-        self._register_routes()
+        """
+        Initialize coordination manager with leader election and lease settings.
 
-    def _register_routes(self) -> None:
-        @self.router.get(
-            "/health",
-            response_model=HealthResponseModel,
-            summary="Operational health probe",
-            description="Returns a basic liveness signal and runtime metadata.",
+        Args:
+            state_dir (Path): Base directory for coordination state files.
+            election_name (CoordinationElectionName): Logical election namespace.
+            leader_id (LeaderId): Identifier for leader election ownership.
+            owner_id (OwnerId): Identifier for service group lease ownership.
+            leader_ttl_seconds (int): TTL in seconds for leader election.
+            lease_ttl_seconds (int): TTL in seconds for service group leases.
+            target_service_groups (int): Target number of service groups to hold.
+            shard_mode (str): Sharding mode for candidate ordering.
+            leader_enabled (bool): When false, skip leader election writes.
+            leader_id_validator (Callable[[LeaderId], bool] | None): Optional validator for leader records.
+            now (Callable[[], float] | None): Optional time provider for testing.
+        """
+        if int(target_service_groups) < self.MIN_TARGET_SERVICE_GROUPS:
+            raise ValueError("target_service_groups must be non-negative.")
+        if shard_mode not in (self.SHARD_MODE_SEQUENTIAL, self.SHARD_MODE_SCORE):
+            raise ValueError("shard_mode must be 'sequential' or 'score'.")
+        self._state_dir = state_dir
+        self._election_name = election_name
+        self._leader_id = leader_id
+        self._owner_id = owner_id
+        self._leader_ttl_seconds = int(leader_ttl_seconds)
+        self._lease_ttl_seconds = int(lease_ttl_seconds)
+        self._target_service_groups = int(target_service_groups)
+        self._shard_mode = shard_mode
+        self._leader_enabled = leader_enabled
+        self._now = now
+        self._held_leases: set[ServiceGroupId] = set()
+
+        self._leader_election = FileLeaderElection(
+            state_dir=self._state_dir,
+            election_name=self._election_name,
+            leader_id=self._leader_id,
+            ttl_seconds=self._leader_ttl_seconds,
+            leader_id_validator=leader_id_validator,
+            now=self._now,
         )
-        def health() -> HealthResponseModel:
-            """
-            **Operational Health**
 
-            Returns liveness status and runtime identity metadata.
-            """
-            return self._service.health()
+    def tick(self, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        """
+        Execute one deterministic coordination step.
 
-        @self.router.get(
-            "/ready",
-            response_model=ReadyResponseModel,
-            summary="Operational readiness probe",
-            description="Returns readiness based on local prerequisites.",
-            responses={
-                HTTPStatus.SERVICE_UNAVAILABLE.value: {
-                    "model": ReadyResponseModel,
-                    "description": "Not ready",
-                }
-            },
+        Leader election is acquired or renewed each tick. Service group lease
+        operations occur regardless of leader state. The manager maintains up to
+        target_service_groups leases using deterministic renew, release, and
+        acquire ordering.
+
+        Args:
+            service_groups (list[ServiceGroupId]): Service groups to coordinate.
+
+        Returns:
+            CoordinationTickResultModel: Summary of leader state and lease actions.
+        """
+        acquired_sg_ids: list[ServiceGroupId] = []
+        renewed_sg_ids: list[ServiceGroupId] = []
+        released_sg_ids: list[ServiceGroupId] = []
+        failed_sg_ids: list[ServiceGroupId] = []
+
+        if self._leader_enabled:
+            leader_result = self._leader_election.try_acquire()
+            if leader_result.is_leader and not leader_result.acquired:
+                renew_result = self._leader_election.renew()
+                if renew_result.renewed:
+                    leader_result = renew_result
+        else:
+            leader_status = self._leader_election.status()
+            leader_result = LeaderElectionStatusModel(
+                election_name=leader_status.election_name,
+                is_leader=leader_status.is_leader,
+                leader_id=leader_status.leader_id,
+                acquired_at=leader_status.acquired_at,
+                expires_at=leader_status.expires_at,
+                remaining_seconds=leader_status.remaining_seconds,
+                state_path=leader_status.state_path,
+                message=leader_status.message,
+            )
+
+        held_sorted = self._sorted_held_leases()
+        for sg_id in held_sorted:
+            lease = self._lease_for_sg(sg_id)
+            renew_result = lease.renew()
+            if renew_result.renewed:
+                renewed_sg_ids.append(sg_id)
+            else:
+                self._held_leases.discard(sg_id)
+                failed_sg_ids.append(sg_id)
+
+        target_count = self._target_service_groups
+        if len(self._held_leases) > target_count:
+            for sg_id in self._sorted_held_leases(reverse=True):
+                if len(self._held_leases) <= target_count:
+                    break
+                lease = self._lease_for_sg(sg_id)
+                release_result = lease.release()
+                if release_result.released:
+                    self._held_leases.discard(sg_id)
+                    released_sg_ids.append(sg_id)
+                else:
+                    failed_sg_ids.append(sg_id)
+
+        if len(self._held_leases) < target_count:
+            attempted: set[ServiceGroupId] = set()
+            for sg_id in self._candidate_service_groups(service_groups):
+                if len(self._held_leases) >= target_count:
+                    break
+                if sg_id in self._held_leases:
+                    continue
+                attempted.add(sg_id)
+                lease = self._lease_for_sg(sg_id)
+                acquire_result = lease.try_acquire()
+                if acquire_result.acquired:
+                    self._held_leases.add(sg_id)
+                    acquired_sg_ids.append(sg_id)
+                else:
+                    failed_sg_ids.append(sg_id)
+
+            if len(self._held_leases) < target_count:
+                for sg_id in self._sorted_service_groups(service_groups):
+                    if len(self._held_leases) >= target_count:
+                        break
+                    if sg_id in self._held_leases:
+                        continue
+                    if sg_id in attempted:
+                        continue
+                    lease = self._lease_for_sg(sg_id)
+                    acquire_result = lease.try_acquire()
+                    if acquire_result.acquired:
+                        self._held_leases.add(sg_id)
+                        acquired_sg_ids.append(sg_id)
+                    else:
+                        failed_sg_ids.append(sg_id)
+
+        return CoordinationTickResultModel(
+            is_leader=leader_result.is_leader,
+            leader_id=leader_result.leader_id,
+            acquired_sg_ids=acquired_sg_ids,
+            renewed_sg_ids=renewed_sg_ids,
+            released_sg_ids=released_sg_ids,
+            failed_sg_ids=failed_sg_ids,
+            message=self.MESSAGE_LEADER_ACTIVE if leader_result.is_leader else self.MESSAGE_NOT_LEADER,
         )
-        def ready() -> ReadyResponseModel:
-            """
-            **Operational Readiness**
 
-            Validates local prerequisites for orchestration readiness.
-            """
-            ready_payload = self._service.ready()
-            if ready_payload.status != OperationalStatus.OK:
-                return JSONResponse(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    content=ready_payload.model_dump(mode="json"),
-                )
-            return ready_payload
+    def tick_leader_only(self) -> CoordinationTickResultModel:
+        """
+        Execute a leader-only coordination step without service group leases.
 
-        @self.router.get(
-            "/version",
-            response_model=VersionResponseModel,
-            summary="Operational version probe",
-            description="Returns version and runtime metadata.",
+        Returns:
+            CoordinationTickResultModel: Summary of leader election state with empty lease actions.
+        """
+        if self._leader_enabled:
+            leader_result = self._leader_election.try_acquire()
+            if leader_result.is_leader and not leader_result.acquired:
+                renew_result = self._leader_election.renew()
+                if renew_result.renewed:
+                    leader_result = renew_result
+        else:
+            leader_status = self._leader_election.status()
+            leader_result = LeaderElectionStatusModel(
+                election_name=leader_status.election_name,
+                is_leader=leader_status.is_leader,
+                leader_id=leader_status.leader_id,
+                acquired_at=leader_status.acquired_at,
+                expires_at=leader_status.expires_at,
+                remaining_seconds=leader_status.remaining_seconds,
+                state_path=leader_status.state_path,
+                message=leader_status.message,
+            )
+
+        return CoordinationTickResultModel(
+            is_leader=leader_result.is_leader,
+            leader_id=leader_result.leader_id,
+            acquired_sg_ids=[],
+            renewed_sg_ids=[],
+            released_sg_ids=[],
+            failed_sg_ids=[],
+            message=self.MESSAGE_LEADER_ACTIVE if leader_result.is_leader else self.MESSAGE_NOT_LEADER,
         )
-        def version() -> VersionResponseModel:
-            """
-            **Operational Version**
 
-            Returns package and runtime version metadata.
-            """
-            return self._service.version()
+    def release_all(self) -> CoordinationReleaseAllResultModel:
+        """
+        Release all leases held by this manager and relinquish leadership.
 
-        @self.router.get(
-            "/status",
-            response_model=OperationalStatusResponseModel,
-            summary="Operational process status",
-            description="Returns process and coordination snapshot metadata.",
+        Returns:
+            CoordinationReleaseAllResultModel: Summary of released resources.
+        """
+        released_sg_ids: list[ServiceGroupId] = []
+        failed_sg_ids: list[ServiceGroupId] = []
+
+        for sg_id in list(self._held_leases):
+            lease = self._lease_for_sg(sg_id)
+            release_result = lease.release()
+            if release_result.released:
+                released_sg_ids.append(sg_id)
+                self._held_leases.discard(sg_id)
+            else:
+                failed_sg_ids.append(sg_id)
+
+        leader_release = None
+        if self._leader_enabled:
+            leader_release = self._leader_election.release()
+
+        return CoordinationReleaseAllResultModel(
+            released_leader=leader_release.released if leader_release is not None else False,
+            released_sg_ids=released_sg_ids,
+            failed_sg_ids=failed_sg_ids,
+            message=self.MESSAGE_RELEASED,
         )
-        def status() -> OperationalStatusResponseModel:
-            """
-            **Operational Status**
 
-            Returns process status and coordination metadata.
-            """
-            return self._service.status()
+    def status(self) -> CoordinationStatusModel:
+        """
+        Return a summary of current leader and lease state.
 
-router = OperationalRouter().router
+        Returns:
+            CoordinationStatusModel: Snapshot of leader ownership and held leases.
+        """
+        leader_status = self._leader_election.status()
+        return CoordinationStatusModel(
+            is_leader=leader_status.is_leader,
+            leader_id=leader_status.leader_id,
+            held_sg_ids=sorted(self._held_leases),
+            message=leader_status.message,
+        )
 
-__all__ = [
-    "router",
-]
+    def leader_status(self) -> LeaderElectionStatusModel:
+        """
+        Return the current leader election status.
+
+        Returns:
+            LeaderElectionStatusModel: Snapshot of the leader election record.
+        """
+        return self._leader_election.status()
+
+    def _lease_for_sg(self, sg_id: ServiceGroupId) -> FileServiceGroupLease:
+        return FileServiceGroupLease(
+            state_dir=self._state_dir,
+            election_name=self._election_name,
+            sg_id=sg_id,
+            owner_id=self._owner_id,
+            ttl_seconds=self._lease_ttl_seconds,
+            now=self._now,
+        )
+
+    def _sorted_held_leases(self, reverse: bool = False) -> list[ServiceGroupId]:
+        return sorted(self._held_leases, key=int, reverse=reverse)
+
+    def _candidate_service_groups(self, service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        if self._shard_mode == self.SHARD_MODE_SCORE:
+            return self._score_ordered_service_groups(service_groups)
+        return self._sorted_service_groups(service_groups)
+
+    def _score_ordered_service_groups(self, service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        scored: list[tuple[int, int, ServiceGroupId]] = []
+        for sg_id in service_groups:
+            score = self._score_for_sg(sg_id)
+            scored.append((-score, int(sg_id), sg_id))
+        scored.sort()
+        return [item[2] for item in scored]
+
+    def _score_for_sg(self, sg_id: ServiceGroupId) -> int:
+        payload = f"{self._owner_id}:{int(sg_id)}".encode()
+        digest = hashlib.sha256(payload).digest()
+        slice_bytes = digest[: self.SCORE_DIGEST_BYTES]
+        return int.from_bytes(slice_bytes, byteorder="big", signed=False)
+
+    @staticmethod
+    def _sorted_service_groups(service_groups: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        return sorted(service_groups, key=int)
 
 FILE: src/pypnm_cmts/api/routes/operational/service.py
 # SPDX-License-Identifier: Apache-2.0
@@ -2516,11 +2045,7 @@ class OperationalService:
             )
         state_dir = Path(meta.state_dir)
 
-        if meta.mode in (
-            OrchestratorMode.CONTROLLER,
-            OrchestratorMode.STANDALONE,
-            OrchestratorMode.COMBINED,
-        ):
+        if meta.mode in (OrchestratorMode.CONTROLLER, OrchestratorMode.STANDALONE):
             if not self._ensure_state_dir_exists(state_dir):
                 return ReadyResponseModel(
                     status=OperationalStatus.ERROR,
@@ -2902,147 +2427,6 @@ class OperationalService:
 __all__ = [
     "OperationalService",
 ]
-
-FILE: src/pypnm_cmts/api/routes/operational/schemas.py
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
-
-from __future__ import annotations
-
-from pydantic import BaseModel, Field
-
-from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
-from pypnm_cmts.lib.types import (
-    CoordinationElectionName,
-    CoordinationPath,
-    ServiceGroupId,
-)
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
-
-
-class OperationalIdentityModel(BaseModel):
-    """Runtime identity metadata for operational endpoints."""
-
-    mode: OrchestratorMode = Field(default=OrchestratorMode.STANDALONE, description="Current orchestrator mode.")
-    election_name: CoordinationElectionName | None = Field(default=None, description="Election name for coordination.")
-    state_dir: CoordinationPath | None = Field(default=None, description="Coordination state directory.")
-    sg_id: ServiceGroupId | None = Field(default=None, description="Bound service group id for worker mode.")
-
-
-class HealthResponseModel(BaseModel):
-    """Health endpoint response."""
-
-    status: OperationalStatus = Field(default=OperationalStatus.OK, description="Health status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
-    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
-
-
-class ReadyResponseModel(BaseModel):
-    """Readiness endpoint response."""
-
-    status: OperationalStatus = Field(default=OperationalStatus.OK, description="Readiness status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
-    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
-    failed_check: ReadinessCheck | None = Field(default=None, description="Name of the first failing readiness check.")
-    message: str = Field(default="", description="Human-readable readiness message.")
-
-
-class OperationalProcessInfoModel(BaseModel):
-    """Operational process snapshot for controller and worker processes."""
-
-    pidfile_path: CoordinationPath | None = Field(default=None, description="PID file path for the process.")
-    pidfile_exists: bool = Field(default=False, description="Whether the PID file exists.")
-    pid: int | None = Field(default=None, description="PID value if available.")
-    is_running: bool = Field(default=False, description="Whether the PID is currently running.")
-    sg_id: ServiceGroupId | None = Field(default=None, description="Service group id derived from pidfile naming.")
-
-
-class OperationalStatusResponseModel(BaseModel):
-    """Operational status endpoint response."""
-
-    status: OperationalStatus = Field(default=OperationalStatus.OK, description="Operational status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
-    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
-    controller: OperationalProcessInfoModel = Field(default_factory=OperationalProcessInfoModel, description="Controller process snapshot.")
-    workers: list[OperationalProcessInfoModel] = Field(default_factory=list, description="Worker process snapshots.")
-    pid_records_missing: bool = Field(default=False, description="True when pidfiles are missing from state_dir.")
-    pid_records_stale: bool = Field(default=False, description="True when pidfiles exist but none are running.")
-    fallback_used: bool = Field(default=False, description="True when fallback discovery returns matching processes.")
-
-
-class VersionResponseModel(BaseModel):
-    """Version endpoint response."""
-
-    application: str = Field(default="pypnm-cmts", description="Application name.")
-    version: str = Field(default="", description="Package version string.")
-    python_version: str = Field(default="", description="Python interpreter version.")
-    build_metadata: str = Field(default="", description="Optional build metadata string.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
-    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
-
-
-__all__ = [
-    "OperationalIdentityModel",
-    "HealthResponseModel",
-    "ReadyResponseModel",
-    "OperationalProcessInfoModel",
-    "OperationalStatusResponseModel",
-    "VersionResponseModel",
-]
-
-FILE: tests/test_pidfile_manager.py
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
-
-from __future__ import annotations
-
-from pathlib import Path
-
-from pytest import MonkeyPatch
-
-from pypnm_cmts.lib.types import ServiceGroupId
-from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
-
-
-def test_pidfile_written_and_removed_controller(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("os.getpid", lambda: 12345)
-    record = PidFileRecord.for_controller(tmp_path)
-    with record:
-        assert record.pidfile_path.exists()
-        assert record.pidfile_path.read_text(encoding="utf-8").strip() == "12345"
-    assert not record.pidfile_path.exists()
-
-
-def test_pidfile_written_worker_with_sg_id(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("os.getpid", lambda: 22222)
-    record = PidFileRecord.for_worker(tmp_path, ServiceGroupId(7))
-    with record:
-        assert record.pidfile_path.exists()
-        assert record.pidfile_path.read_text(encoding="utf-8").strip() == "22222"
-    assert not record.pidfile_path.exists()
-
-
-def test_pidfile_cleanup_best_effort_does_not_raise(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    record = PidFileRecord.for_controller(tmp_path)
-    with record:
-        assert record.pidfile_path.exists()
-
-    def _raise_unlink(self: Path) -> None:
-        raise OSError("unlink failed")
-
-    record.pidfile_path.write_text("999\n", encoding="utf-8")
-    monkeypatch.setattr(Path, "unlink", _raise_unlink)
-    record.__exit__(None, None, None)
-    assert record.pidfile_path.exists()
 
 FILE: tests/test_ops_service_smoke.py
 # SPDX-License-Identifier: Apache-2.0
