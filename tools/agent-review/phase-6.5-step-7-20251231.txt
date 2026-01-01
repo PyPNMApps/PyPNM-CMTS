@@ -1,3 +1,4 @@
+# FILE: src/pypnm_cmts/orchestrator/launcher.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 from __future__ import annotations
@@ -198,9 +199,20 @@ class CmtsOrchestratorLauncher:
     def _is_worker_enabled(self) -> bool:
         return self._mode in (OrchestratorMode.WORKER, OrchestratorMode.COMBINED)
 
-    def _should_refresh_leader_inventory(self, settings: CmtsOrchestratorSettings) -> bool:
-        if not self._is_controller_enabled():
-            return False
+    def _sync_runtime_service_groups(
+        self,
+        runtime: CmtsOrchestratorRuntime,
+        service_groups: list[ServiceGroupId],
+    ) -> None:
+        runtime._service_groups = service_groups
+
+    def _should_refresh_leader_inventory(
+        self,
+        settings: CmtsOrchestratorSettings,
+        has_tick_callback: bool,
+    ) -> bool:
+        if has_tick_callback:
+            return True
         if self._should_discover(settings):
             hostname_value = str(settings.adapter.hostname).strip()
             if hostname_value == "":
@@ -371,7 +383,7 @@ class CmtsOrchestratorLauncher:
                 count=len(service_groups),
                 source=controller_inventory_source,
             )
-            runtime.set_service_groups(service_groups)
+            self._sync_runtime_service_groups(runtime, service_groups)
             controller_inventory_initialized = True
 
         def _emit_result(tick_index: int, tick_result: CoordinationTickResultModel) -> None:
@@ -379,13 +391,24 @@ class CmtsOrchestratorLauncher:
             tick_value = TickIndex(int(tick_index))
             acquired_sg_ids = sorted(tick_result.acquired_sg_ids, key=int)
             coordination_status = manager.status()
-            held_sg_ids = [] if self._is_controller_mode() else sorted(coordination_status.held_sg_ids, key=int)
-            if (
-                coordination_status.is_leader
-                and not controller_inventory_initialized
-                and self._should_refresh_leader_inventory(settings)
-            ):
-                _refresh_leader_inventory()
+            if self._is_controller_mode():
+                held_sg_ids = []
+                if (
+                    coordination_status.is_leader
+                    and not controller_inventory_initialized
+                    and self._should_refresh_leader_inventory(settings, on_tick is not None)
+                ):
+                    _refresh_leader_inventory()
+            elif self._is_combined_mode():
+                held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
+                if (
+                    coordination_status.is_leader
+                    and not controller_inventory_initialized
+                    and self._should_refresh_leader_inventory(settings, on_tick is not None)
+                ):
+                    _refresh_leader_inventory()
+            else:
+                held_sg_ids = sorted(coordination_status.held_sg_ids, key=int)
             if on_tick is None:
                 return
             conflicts = self._build_conflicts(
@@ -825,3 +848,207 @@ __all__ = [
     "CmtsOrchestratorLauncher",
     "DEFAULT_STATE_DIR",
 ]
+# FILE: tests/test_orchestrator_runtime_contracts.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.coordination.manager import CoordinationManager
+from pypnm_cmts.coordination.models import (
+    CoordinationStatusModel,
+    CoordinationTickResultModel,
+)
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    LeaderId,
+    OrchestratorRunId,
+    OwnerId,
+    ServiceGroupId,
+)
+from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+from pypnm_cmts.orchestrator.models import WorkResultModel
+from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+
+
+def _write_system_config(path: Path) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "service_groups": [
+                {"sg_id": 1, "name": "sg-1", "enabled": True},
+            ],
+            "target_service_groups": 1,
+            "shard_mode": "sequential",
+            "default_tests": ["test-a"],
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_runtime_controller_tick_with_empty_inventory(tmp_path: Path) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "mode": "controller",
+            "state_dir": str(state_dir),
+            "service_groups": [],
+        }
+    )
+    manager = CoordinationManager(
+        state_dir=state_dir,
+        election_name=CoordinationElectionName("cmts-primary"),
+        leader_id=LeaderId("controller-test"),
+        owner_id=OwnerId("controller-test"),
+        leader_ttl_seconds=int(settings.leader_ttl_seconds),
+        lease_ttl_seconds=int(settings.lease_ttl_seconds),
+        target_service_groups=0,
+        shard_mode=settings.shard_mode,
+        leader_enabled=True,
+        leader_id_validator=None,
+    )
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[],
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+    )
+
+    results = runtime.run_forever(max_ticks=1, sleeper=lambda _: None)
+    assert len(results) == 1
+    assert int(results[0].tick_index) == 1
+
+
+def test_worker_bound_sg_without_lease_returns_empty_work_results(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        lambda self: CoordinationStatusModel(held_sg_ids=[]),
+    )
+
+    called = {"run_tests": False}
+
+    def _fake_run_tests(
+        self: object,
+        sg_id: ServiceGroupId,
+        tests: list[str],
+        run_id: OrchestratorRunId,
+    ) -> list[WorkResultModel]:
+        called["run_tests"] = True
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
+        _fake_run_tests,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=ServiceGroupId(1),
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    result = launcher.run_once()
+    assert result.lease_held is False
+    assert result.run_id == ""
+    assert result.work_results == []
+    assert called["run_tests"] is False
+
+
+def test_run_forever_updates_service_groups_after_leader(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    seen: list[list[int]] = []
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        seen.append([int(sg_id) for sg_id in service_groups])
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    status_calls = {"count": 0}
+
+    def _fake_status(self: object) -> CoordinationStatusModel:
+        status_calls["count"] += 1
+        return CoordinationStatusModel(
+            is_leader=status_calls["count"] >= 2,
+            held_sg_ids=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        _fake_status,
+    )
+
+    def _fake_build_controller_service_groups(
+        self: object,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+        is_leader: bool,
+    ) -> tuple[list[ServiceGroupId], str]:
+        if is_leader:
+            return ([ServiceGroupId(2)], "config")
+        return ([ServiceGroupId(1)], "config")
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher._build_controller_service_groups",
+        _fake_build_controller_service_groups,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.COMBINED,
+        sg_id=None,
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    launcher.run_forever(max_ticks=3, sleeper=lambda _: None)
+
+    assert seen[0] == [1]
+    assert seen[1] == [1]
+    assert seen[2] == [2]
+# FILE: phase-6.5-step-7-20251231.txt
+Phase 6.5 Step 7 Notes (2025-12-31)
+
+What changed
+- Added leader-inventory refresh gating and runtime service group syncing to keep run_forever targets aligned after leadership transitions.
+- Added helper predicates to consolidate controller/combined detection and leader refresh eligibility.
+- Added regression coverage to ensure run_forever updates the runtime service group list after leadership changes.
+
+Why safe
+- Uses existing settings and coordination APIs; only internal helper flow changed.
+- Keeps controller and combined modes following prior behavior when discovery is not configured.
+- All changes are within the launcher/runtime contract paths, without altering public models or CLI surfaces.
+
+How verified
+- ./.venv/bin/pytest -q
+  - ERROR SystemConfigSettings:159 | Empty configuration value for 'PnmFileRetrieval.retrival_method.methods.tftp.remote_dir'; using default ''
+  - 189 passed in 23.30s
+- ./.venv/bin/ruff check .
+  - All checks passed!

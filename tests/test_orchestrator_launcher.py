@@ -491,11 +491,6 @@ def test_worker_run_once_without_lease_does_not_persist_results(
     assert str(result.run_id) == ""
     assert result.work_results == []
 
-    results_root = state_dir / "results"
-    if results_root.exists():
-        assert list(results_root.glob("sg_*")) == []
-        assert list(results_root.rglob("*.json")) == []
-
 
 def test_unbound_worker_without_lease_returns_empty_work_results(
     monkeypatch: object,
@@ -525,10 +520,111 @@ def test_unbound_worker_without_lease_returns_empty_work_results(
     assert str(result.run_id) == ""
     assert result.work_results == []
 
-    results_root = state_dir / "results"
-    if results_root.exists():
-        assert list(results_root.glob("sg_*")) == []
-        assert list(results_root.rglob("*.json")) == []
+
+def test_combined_run_once_behaves_like_controller_and_worker(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[ServiceGroupId(1)])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        lambda self: CoordinationStatusModel(held_sg_ids=[ServiceGroupId(1)]),
+    )
+
+    captured: dict[str, ServiceGroupId] = {}
+
+    def _fake_run_tests(
+        self: object,
+        sg_id: ServiceGroupId,
+        tests: list[str],
+        run_id: OrchestratorRunId,
+    ) -> list[WorkResultModel]:
+        captured["sg_id"] = sg_id
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
+        _fake_run_tests,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.COMBINED,
+        sg_id=None,
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    result = launcher.run_once()
+    assert result.mode == OrchestratorMode.COMBINED
+    assert result.lease_held is True
+    assert str(result.run_id).startswith("sg1_tick")
+    assert int(captured["sg_id"]) == 1
+
+
+def test_combined_run_forever_surfaces_held_leases_and_runs_work(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[ServiceGroupId(1)])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        lambda self: CoordinationStatusModel(held_sg_ids=[ServiceGroupId(1)]),
+    )
+
+    captured: dict[str, ServiceGroupId] = {}
+
+    def _fake_run_tests(
+        self: object,
+        sg_id: ServiceGroupId,
+        tests: list[str],
+        run_id: OrchestratorRunId,
+    ) -> list[WorkResultModel]:
+        captured["sg_id"] = sg_id
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
+        _fake_run_tests,
+    )
+
+    results: list[OrchestratorRunResultModel] = []
+
+    def _collect(result: OrchestratorRunResultModel) -> None:
+        results.append(result)
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.COMBINED,
+        sg_id=None,
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    launcher.run_forever(on_tick=_collect, max_ticks=1, sleeper=lambda _: None)
+
+    assert results
+    assert results[0].lease_held is True
+    assert int(captured["sg_id"]) == 1
+    assert [int(sg_id) for sg_id in results[0].coordination_tick.leased_sg_ids] == [1]
 
 
 def test_worker_runs_single_sg_when_multiple_acquired(

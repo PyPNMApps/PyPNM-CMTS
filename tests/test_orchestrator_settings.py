@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from pypnm_cmts.cli import EXIT_CODE_USAGE, _run_cli
+from pypnm_cmts.cli import EXIT_CODE_USAGE, _build_launcher, _build_parser, _run_cli
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.coordination.models import CoordinationTickResultModel
 from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
@@ -80,6 +81,108 @@ def test_orchestrator_settings_negative_target_service_groups_raises() -> None:
 def test_orchestrator_settings_negative_worker_cap_raises() -> None:
     with pytest.raises(ValueError):
         CmtsOrchestratorSettings(worker_cap=-1)
+
+
+def test_cli_snmp_port_override_passed_to_launcher(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = 1161
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] == 1161
+
+
+def test_cli_snmp_port_omitted_uses_config_default(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = None
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] is None
+
+
+def test_cli_cmts_port_alias_parses_into_snmp_port() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(["run", "--mode", "standalone", "--cmts-port", "1161"])
+    assert args.snmp_port == 1161
+
+
+def test_cli_snmp_port_takes_precedence_over_cmts_port(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pypnm-cmts", "run", "--mode", "standalone", "--snmp-port", "1161", "--cmts-port", "2000"],
+    )
+    monkeypatch.setattr("pypnm_cmts.cli._cmts_port_warned", True)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = 2000
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] == 1161
 
 
 def _write_system_config(path: Path, enabled: bool = True) -> None:

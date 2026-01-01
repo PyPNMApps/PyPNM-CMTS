@@ -45,10 +45,16 @@ class CmtsOrchestratorRuntime:
         """
         self._settings = settings
         self._manager = manager
-        self._service_groups = service_groups
+        self._service_groups = list(service_groups)
         self._mode = mode
         self._sg_id = sg_id
         self._stop_requested = False
+
+    def set_service_groups(self, service_groups: list[ServiceGroupId]) -> None:
+        """
+        Update the runtime's service groups for subsequent ticks.
+        """
+        self._service_groups = list(service_groups)
 
     def stop(self) -> None:
         """

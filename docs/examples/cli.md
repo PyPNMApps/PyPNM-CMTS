@@ -384,7 +384,7 @@ clear && pypnm-cmts run --mode standalone \
   --cmts-hostname 192.168.0.100 \
   --read-community public \
   --write-community private \
-  --cmts-port 161 \
+  --snmp-port 161 \
   --state-dir ./.data/coordination \
   --election-name cmts-primary
 ```

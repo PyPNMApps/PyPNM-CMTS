@@ -97,6 +97,13 @@ def test_cli_help_root() -> None:
     assert result.returncode == SUCCESS_EXIT_CODE
 
 
+def test_cli_help_quiet_and_lists_snmp_port() -> None:
+    result = _run_cli(["run", "--help"], cwd=_repo_root())
+    assert result.returncode == SUCCESS_EXIT_CODE
+    assert "--snmp-port" in result.stdout
+    assert "PnmFileRetrieval.retrival_method.methods.tftp.remote_dir" not in result.stderr
+
+
 def test_cli_help_package_module() -> None:
     result = _run_package(["--help"], cwd=_repo_root())
     assert result.returncode == SUCCESS_EXIT_CODE
@@ -105,6 +112,12 @@ def test_cli_help_package_module() -> None:
 def test_cli_help_run() -> None:
     result = _run_cli(["run", "--help"], cwd=_repo_root())
     assert result.returncode == SUCCESS_EXIT_CODE
+
+
+def test_cli_run_requires_mode() -> None:
+    result = _run_cli(["run"], cwd=_repo_root())
+    assert result.returncode == EXIT_CODE_USAGE
+    assert "the following arguments are required: --mode" in result.stderr
 
 
 def test_cli_help_run_forever() -> None:
@@ -169,6 +182,54 @@ def test_cli_run_single_tick_outputs_json(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert "mode" in payload
     assert "inventory" in payload
+
+
+def test_cli_invalid_snmp_port_reports_value(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    result = _run_cli(
+        [
+            "run",
+            "--mode",
+            "standalone",
+            "--snmp-port",
+            "0",
+            "--config",
+            str(config_path),
+            "--state-dir",
+            str(state_dir),
+        ],
+        cwd=_repo_root(),
+    )
+
+    assert result.returncode == EXIT_CODE_USAGE
+    assert "snmp-port must be greater than zero (got 0)" in result.stderr
+
+
+def test_cli_cmts_port_deprecation_warning(tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    state_dir = tmp_path / "coordination"
+    _write_system_config(config_path)
+
+    result = _run_cli(
+        [
+            "run",
+            "--mode",
+            "standalone",
+            "--cmts-port",
+            "161",
+            "--config",
+            str(config_path),
+            "--state-dir",
+            str(state_dir),
+        ],
+        cwd=_repo_root(),
+    )
+
+    assert result.returncode == SUCCESS_EXIT_CODE
+    assert result.stderr.count("DEPRECATED: --cmts-port is deprecated; use --snmp-port.") == 1
 
 
 def test_cli_run_forever_outputs_jsonl(tmp_path: Path) -> None:

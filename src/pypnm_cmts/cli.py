@@ -8,24 +8,24 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 from pydantic import ValidationError
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
-from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
-from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
-from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     OwnerId,
     ServiceGroupId,
 )
-from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
-from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
+
+if TYPE_CHECKING:
+    from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+    from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
 
 SUCCESS_EXIT_CODE = 0
 EXIT_CODE_USAGE = 2
@@ -36,6 +36,9 @@ LOG_LEVEL_DEFAULT = "info"
 DEFAULT_WORKERS = 1
 TIMEOUT_KEEP_ALIVE_SECONDS = 120
 DEFAULT_SNMP_PORT = 161
+_DEPRECATED_CMTS_PORT_FLAG = "--cmts-port"
+_SNMP_PORT_FLAG = "--snmp-port"
+_cmts_port_warned = False
 
 
 def main() -> int:
@@ -76,10 +79,12 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         help="Optional SNMPv2c write community override (adapter.write_community).",
     )
     parser.add_argument(
+        "--snmp-port",
         "--cmts-port",
+        dest="snmp_port",
         type=int,
         default=None,
-        help="Optional SNMP port override for CMTS discovery (adapter.port).",
+        help="Optional SNMP port override for CMTS discovery (adapter.port). --cmts-port is deprecated.",
     )
     parser.add_argument(
         "--sg-id",
@@ -271,6 +276,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+
     config_value = args.config
     sg_id_value = args.sg_id
     owner_id_value = args.owner_id
@@ -292,6 +299,14 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
     if election_name_value != "":
         election_name = CoordinationElectionName(election_name_value)
 
+    snmp_port_value = _resolve_snmp_port_value(args, sys.argv[1:])
+    if snmp_port_value is not None and int(snmp_port_value) <= 0:
+        raise ValueError(f"snmp-port must be greater than zero (got {snmp_port_value}).")
+    _validate_non_negative(args.target_service_groups, "target-service-groups")
+    _validate_positive(args.tick_interval_seconds, "tick-interval-seconds")
+    _validate_positive(args.leader_ttl_seconds, "leader-ttl-seconds")
+    _validate_positive(args.lease_ttl_seconds, "lease-ttl-seconds")
+
     return CmtsOrchestratorLauncher(
         config_path=config_path,
         mode=mode_value,
@@ -307,13 +322,15 @@ def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
         adapter_hostname=HostNameStr(cmts_hostname_value) if cmts_hostname_value != "" else None,
         adapter_read_community=SnmpReadCommunity(read_community_value) if read_community_value != "" else None,
         adapter_write_community=SnmpWriteCommunity(write_community_value) if write_community_value != "" else None,
-        adapter_port=int(args.cmts_port) if getattr(args, "cmts_port", None) is not None else None,
+        adapter_port=int(snmp_port_value) if snmp_port_value is not None else None,
     )
 
 
 def _resolve_discovery_inputs(
     args: argparse.Namespace,
 ) -> tuple[HostNameStr, SnmpReadCommunity, SnmpWriteCommunity, int, Path]:
+    from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+
     settings = CmtsOrchestratorSettings.from_system_config(
         config_path=Path(args.config) if args.config != "" else None
     )
@@ -362,6 +379,53 @@ def _render_discovery_text(result: InventoryDiscoveryResultModel) -> str:
     return "\n".join(lines)
 
 
+def _extract_flag_value(argv: list[str], flag: str) -> str | None:
+    for idx, token in enumerate(argv):
+        if token == flag:
+            if idx + 1 < len(argv):
+                return argv[idx + 1]
+            return ""
+        if token.startswith(f"{flag}="):
+            return token[len(flag) + 1 :]
+    return None
+
+
+def _warn_deprecated_cmts_port() -> None:
+    global _cmts_port_warned
+    if _cmts_port_warned:
+        return
+    _cmts_port_warned = True
+    print("DEPRECATED: --cmts-port is deprecated; use --snmp-port.", file=sys.stderr)
+
+
+def _resolve_snmp_port_value(
+    args: argparse.Namespace,
+    argv: list[str],
+) -> int | None:
+    snmp_port_value = getattr(args, "snmp_port", None)
+    cmts_value = _extract_flag_value(argv, _DEPRECATED_CMTS_PORT_FLAG)
+    snmp_value = _extract_flag_value(argv, _SNMP_PORT_FLAG)
+    if cmts_value is not None:
+        _warn_deprecated_cmts_port()
+    if snmp_value is not None:
+        snmp_port_value = int(snmp_value)
+    return snmp_port_value
+
+
+def _validate_non_negative(value: int | None, name: str) -> None:
+    if value is None:
+        return
+    if int(value) < 0:
+        raise ValueError(f"{name} must be non-negative (got {value}).")
+
+
+def _validate_positive(value: int | float | None, name: str) -> None:
+    if value is None:
+        return
+    if float(value) <= 0:
+        raise ValueError(f"{name} must be greater than zero (got {value}).")
+
+
 def _run_cli() -> int:
     """
     Execute the CLI.
@@ -408,6 +472,8 @@ def _run_cli() -> int:
         return SUCCESS_EXIT_CODE
 
     if args.command == "discover":
+        from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+
         try:
             cmts_hostname, read_community, write_community, port, state_dir = _resolve_discovery_inputs(args)
             result = CmtsInventoryDiscoveryService.run_discovery(
@@ -434,6 +500,8 @@ def _run_cli() -> int:
         return SUCCESS_EXIT_CODE
 
     if args.command == "serve":
+        from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
+
         if args.with_runner and args.reload:
             print(
                 "ERROR: --with-runner cannot be used with --reload.",

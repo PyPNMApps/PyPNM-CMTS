@@ -95,6 +95,7 @@ Current behavior:
 - Lease acquisition: yes, the same leases protocols as worker mode are applied
 - Test execution: worker tests run whenever a lease is held, so combined behaves like `worker` once it is leasing
 - Activation: `serve --with-runner` enables this combined controller + worker process without launching a separate runner
+- Runner commands: `run` or `run-forever` executed with `--mode=combined` now also drive leader election, lease acquisition, and work execution, matching the inline runner semantics.
 
 Net: controller and worker responsibilities execute in a single process so the API service now owns both coordination and execution.
 

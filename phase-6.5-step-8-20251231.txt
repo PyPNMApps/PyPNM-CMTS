@@ -1,0 +1,18 @@
+Phase 6.5 Step 8 Notes (2025-12-31)
+
+What changed
+- Added `CmtsOrchestratorRuntime.set_service_groups` so the runtime owns its inventory list and no longer relies on private attribute mutation.
+- Simplified the leader-refresh gating in `CmtsOrchestratorLauncher.run_forever` (single predicate, shared held-lease handling, and runtime updates via the new API).
+- Hardened `test_run_forever_updates_service_groups_after_leader` with an explicit length check and deterministic leadership transition.
+
+Why safe
+- The runtime exposes the new helper internally only, and the launcher calls it wherever the inventory is refreshed.
+- The refresh predicate now only depends on controller-like modes and valid discovery configuration, so we skip forced discovery when no hostname exists.
+- The regression test ensures the new flow still switches service groups once leadership is gained.
+
+How verified
+- ./.venv/bin/pytest -q
+  - ERROR SystemConfigSettings:159 | Empty configuration value for 'PnmFileRetrieval.retrival_method.methods.tftp.remote_dir'; using default ''
+  - 189 passed in 23.08s
+- ./.venv/bin/ruff check .
+  - All checks passed!

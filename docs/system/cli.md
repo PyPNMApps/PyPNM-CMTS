@@ -136,7 +136,7 @@ Example:
 
 ```bash
 pypnm-cmts run-forever --mode standalone --owner-id replica-1 --target-service-groups 2 --shard-mode score \
-  --cmts-hostname 192.168.0.100 --read-community public --cmts-port 161 \
+  --cmts-hostname 192.168.0.100 --read-community public --snmp-port 161 \
   --state-dir ./.data/coordination --election-name cmts-primary
 ```
 
@@ -152,7 +152,9 @@ Flags:
 - --cmts-hostname <str>
 - --read-community <str>
 - --write-community <str>
-- --cmts-port <int>
+- --snmp-port <int> (SNMP port override; --cmts-port is deprecated)
+
+If both `--snmp-port` and `--cmts-port` are supplied, `--snmp-port` takes precedence and the deprecated alias emits a warning.
 
 ## Serve Options
 
