@@ -1,3 +1,18 @@
+# FILE: phase-6.5-step-9-20251231.txt
+Phase 6.5 Step 9 Notes (2025-12-31)
+
+What changed
+- CLI smoke tests now wait up to 30 s for `/ops/version`/`/ops/status` so GitHub runners have time to bring up the FastAPI service before the assertions run.
+- Reused the same timeout constant for both smoke test helpers to keep the behavior consistent.
+
+Why safe
+- Only the smoke tests were updated; production code paths remain untouched.
+- Timeout extension just affords more headroom on slower runners without impacting local runs.
+
+How verified
+- ./.venv/bin/pytest -q (189 passed, same SystemConfigSettings warning logged)
+- ./.venv/bin/ruff check . (passed)
+# FILE: tests/test_ops_service_smoke.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
