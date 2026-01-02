@@ -1,3 +1,4 @@
+# FILE: docs/architecture/architecture.md
 # PyPNM-CMTS Architecture and Implementation Burndown
 
 This document defines the software-centric architecture, execution modes, and a deterministic implementation checklist for PyPNM-CMTS.
@@ -291,3 +292,4 @@ Done Criteria:
 - [ ] No database introduced
 - [ ] PyPNM core not modified unintentionally
 - [ ] Changes aligned with AGENTS.md
+
