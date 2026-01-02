@@ -8,6 +8,7 @@ from pypnm_cmts.config.orchestrator_config import (
     CmtsAdapterConfig,
     CmtsOrchestratorSettings,
     ServiceGroupDescriptor,
+    SgwSettings,
 )
 from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
 
@@ -16,4 +17,5 @@ __all__ = [
     "CmtsOrchestratorSettings",
     "OwnerIdResolver",
     "ServiceGroupDescriptor",
+    "SgwSettings",
 ]

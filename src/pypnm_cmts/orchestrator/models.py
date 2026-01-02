@@ -19,6 +19,8 @@ from pypnm_cmts.lib.types import (
 )
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
+SGW_LAST_ERROR_MAX_LENGTH = 256
+
 
 class ServiceGroupInventoryModel(BaseModel):
     """Inventory of service groups supplied to orchestration."""
@@ -54,6 +56,25 @@ class WorkResultModel(BaseModel):
     error_message: str = Field(default="", description="Optional error message for failed work.")
 
 
+class SgwRefreshState(str, Enum):
+    """Refresh state values for SGW cache metadata."""
+
+    OK = "OK"
+    STALE = "STALE"
+    ERROR = "ERROR"
+
+
+class SgwCacheMetadataModel(BaseModel):
+    """Snapshot metadata for serving group worker caches."""
+
+    snapshot_time: str = Field(default="", description="ISO-8601 snapshot timestamp.")
+    age_seconds: float = Field(default=0.0, ge=0.0, description="Age of the snapshot in seconds.")
+    last_heavy_refresh: str | None = Field(default=None, description="ISO-8601 timestamp for the last heavy refresh.")
+    last_light_refresh: str | None = Field(default=None, description="ISO-8601 timestamp for the last light refresh.")
+    refresh_state: SgwRefreshState = Field(default=SgwRefreshState.OK, description="Refresh state for the cache entry.")
+    last_error: str | None = Field(default=None, max_length=SGW_LAST_ERROR_MAX_LENGTH, description="Optional bounded error message.")
+
+
 class OrchestratorRunResultModel(BaseModel):
     """Result payload for a single orchestrator tick."""
 
@@ -82,6 +103,9 @@ class OrchestratorStatusModel(BaseModel):
 __all__ = [
     "OrchestratorRunResultModel",
     "OrchestratorStatusModel",
+    "SgwCacheMetadataModel",
+    "SgwRefreshState",
+    "SGW_LAST_ERROR_MAX_LENGTH",
     "ServiceGroupInventoryModel",
     "WorkItemModel",
     "WorkResultModel",
