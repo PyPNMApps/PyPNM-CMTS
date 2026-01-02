@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable
 
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
@@ -11,13 +12,21 @@ from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
 from pypnm_cmts.sgw.models import (
     DEFAULT_AGE_SECONDS,
+    SgwCableModemModel,
     SgwCacheEntryModel,
     SgwRefreshErrorModel,
     SgwRefreshResultModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
 )
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 JITTER_MIN_SECONDS = 0
+
+HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
+LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
+Clock = Callable[[], float]
+Sleeper = Callable[[float], None]
 
 
 class SgwManager:
@@ -29,6 +38,8 @@ class SgwManager:
         store: SgwCacheStore | None = None,
         service_groups: list[ServiceGroupId] | None = None,
         jitter_provider: Callable[[ServiceGroupId, int], int] | None = None,
+        heavy_poller: HeavyPoller | None = None,
+        light_poller: LightPoller | None = None,
     ) -> None:
         """
         Initialize the SGW manager.
@@ -38,15 +49,71 @@ class SgwManager:
             store (SgwCacheStore | None): Optional cache store.
             service_groups (list[ServiceGroupId] | None): Initial service group identifiers.
             jitter_provider (Callable[[ServiceGroupId, int], int] | None): Optional jitter provider.
+            heavy_poller (HeavyPoller | None): Optional heavy refresh poller.
+            light_poller (LightPoller | None): Optional light refresh poller.
         """
         self._settings = settings
         self._store = store if store is not None else SgwCacheStore()
         self._service_groups = list(service_groups) if service_groups is not None else []
         self._jitter_provider = jitter_provider if jitter_provider is not None else self._default_jitter
+        self._heavy_poller = heavy_poller if heavy_poller is not None else self._default_heavy_poller
+        self._light_poller = light_poller if light_poller is not None else self._default_light_poller
+        self._jitter_by_sg: dict[ServiceGroupId, int] = {}
+        self._stop_requested = False
+        if self._service_groups:
+            self._initialize_jitter(self._service_groups)
 
     def set_service_groups(self, service_groups: list[ServiceGroupId]) -> None:
         """Update the service groups managed by this instance."""
         self._service_groups = list(service_groups)
+        self._initialize_jitter(self._service_groups)
+
+    def get_store(self) -> SgwCacheStore:
+        """
+        Return the cache store associated with this manager.
+        """
+        return self._store
+
+    def stop(self) -> None:
+        """Request that the refresh loop stop."""
+        self._stop_requested = True
+
+    def refresh_forever(
+        self,
+        sleeper: Sleeper | None = None,
+        clock: Clock | None = None,
+        max_cycles: int | None = None,
+    ) -> list[SgwRefreshResultModel]:
+        """
+        Execute refresh cycles until stopped or max_cycles is reached.
+
+        Args:
+            sleeper (Sleeper | None): Optional sleep function for tests.
+            clock (Clock | None): Optional clock function for tests.
+            max_cycles (int | None): Optional maximum number of cycles to execute.
+
+        Returns:
+            list[SgwRefreshResultModel]: Collected refresh results when max_cycles is provided.
+        """
+        if max_cycles is not None and int(max_cycles) < 0:
+            raise ValueError("max_cycles must be non-negative.")
+        sleep_fn = sleeper if sleeper is not None else time.sleep
+        clock_fn = clock if clock is not None else self._default_clock
+        interval_seconds = float(self._settings.sgw.poll_light_seconds)
+        results: list[SgwRefreshResultModel] = []
+        cycles = 0
+        while not self._stop_requested:
+            now_epoch = float(clock_fn())
+            result = self.refresh_once(now_epoch)
+            if max_cycles is not None:
+                results.append(result)
+            cycles += 1
+            if max_cycles is not None and cycles >= int(max_cycles):
+                break
+            if self._stop_requested:
+                break
+            sleep_fn(interval_seconds)
+        return results
 
     def refresh_once(self, now_epoch: float) -> SgwRefreshResultModel:
         """
@@ -69,7 +136,7 @@ class SgwManager:
 
         for sg_id in list(self._service_groups):
             entry = self._ensure_entry(sg_id, now_epoch)
-            metadata = entry.metadata
+            metadata = entry.snapshot.metadata
             jitter_seconds = self._resolve_jitter_seconds(sg_id)
 
             try:
@@ -80,7 +147,8 @@ class SgwManager:
                     now_epoch,
                 )
                 if heavy_due:
-                    self._refresh_heavy(sg_id, now_epoch)
+                    payload = self._heavy_poller(sg_id, self._settings)
+                    self._refresh_heavy(sg_id, now_epoch, payload)
                     heavy_refreshed.append(sg_id)
                     light_refreshed.append(sg_id)
                 else:
@@ -91,14 +159,19 @@ class SgwManager:
                         now_epoch,
                     )
                     if light_due:
-                        self._refresh_light(sg_id, now_epoch)
+                        updated_modems = self._light_poller(
+                            sg_id,
+                            self._settings,
+                            list(entry.snapshot.cable_modems),
+                        )
+                        self._refresh_light(sg_id, now_epoch, updated_modems)
                         light_refreshed.append(sg_id)
             except Exception as exc:
                 metadata = self._store.mark_error(sg_id, str(exc), now_epoch)
                 errors.append(SgwRefreshErrorModel(sg_id=sg_id, message=metadata.last_error or ""))
 
             entry = self._store.get_entry(sg_id) or entry
-            metadata = entry.metadata
+            metadata = entry.snapshot.metadata
             age_seconds = max(DEFAULT_AGE_SECONDS, float(now_epoch) - float(metadata.snapshot_time_epoch))
             metadata = metadata.model_copy(update={"age_seconds": age_seconds})
 
@@ -108,7 +181,7 @@ class SgwManager:
                 else:
                     metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.OK})
 
-            entry.metadata = metadata
+            entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
             self._store.upsert_entry(entry)
 
         return SgwRefreshResultModel(
@@ -126,13 +199,19 @@ class SgwManager:
             snapshot_time_epoch=float(now_epoch),
             age_seconds=DEFAULT_AGE_SECONDS,
         )
-        entry = SgwCacheEntryModel(sg_id=sg_id, metadata=metadata)
+        snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+        entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
         self._store.upsert_entry(entry)
         return entry
 
-    def _refresh_heavy(self, sg_id: ServiceGroupId, now_epoch: float) -> None:
+    def _refresh_heavy(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        payload: SgwSnapshotPayloadModel,
+    ) -> None:
         entry = self._ensure_entry(sg_id, now_epoch)
-        metadata = entry.metadata.model_copy(
+        metadata = entry.snapshot.metadata.model_copy(
             update={
                 "snapshot_time_epoch": float(now_epoch),
                 "age_seconds": DEFAULT_AGE_SECONDS,
@@ -142,12 +221,24 @@ class SgwManager:
                 "last_error": None,
             }
         )
-        entry.metadata = metadata
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "ds_channels": payload.ds_channels,
+                "us_channels": payload.us_channels,
+                "cable_modems": list(payload.cable_modems),
+                "metadata": metadata,
+            }
+        )
         self._store.upsert_entry(entry)
 
-    def _refresh_light(self, sg_id: ServiceGroupId, now_epoch: float) -> None:
+    def _refresh_light(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        cable_modems: list[SgwCableModemModel],
+    ) -> None:
         entry = self._ensure_entry(sg_id, now_epoch)
-        metadata = entry.metadata.model_copy(
+        metadata = entry.snapshot.metadata.model_copy(
             update={
                 "snapshot_time_epoch": float(now_epoch),
                 "age_seconds": DEFAULT_AGE_SECONDS,
@@ -156,7 +247,12 @@ class SgwManager:
                 "last_error": None,
             }
         )
-        entry.metadata = metadata
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "cable_modems": list(cable_modems),
+                "metadata": metadata,
+            }
+        )
         self._store.upsert_entry(entry)
 
     def _is_refresh_due(
@@ -172,14 +268,16 @@ class SgwManager:
         return elapsed >= float(interval_seconds + jitter_seconds)
 
     def _resolve_jitter_seconds(self, sg_id: ServiceGroupId) -> int:
+        cached = self._jitter_by_sg.get(sg_id)
+        if cached is not None:
+            return cached
         max_jitter = int(self._settings.sgw.refresh_jitter_seconds)
         if max_jitter <= 0:
+            self._jitter_by_sg[sg_id] = JITTER_MIN_SECONDS
             return JITTER_MIN_SECONDS
         jitter_value = int(self._jitter_provider(sg_id, max_jitter))
-        if jitter_value < JITTER_MIN_SECONDS:
-            return JITTER_MIN_SECONDS
-        if jitter_value > max_jitter:
-            return max_jitter
+        jitter_value = self._clamp_jitter(jitter_value, max_jitter)
+        self._jitter_by_sg[sg_id] = jitter_value
         return jitter_value
 
     @staticmethod
@@ -187,6 +285,38 @@ class SgwManager:
         if max_jitter_seconds <= 0:
             return JITTER_MIN_SECONDS
         return random.randint(JITTER_MIN_SECONDS, max_jitter_seconds)
+
+    @staticmethod
+    def _default_heavy_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+    ) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    @staticmethod
+    def _default_light_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    @staticmethod
+    def _default_clock() -> float:
+        return float(time.time())
+
+    def _initialize_jitter(self, service_groups: list[ServiceGroupId]) -> None:
+        self._jitter_by_sg = {}
+        for sg_id in service_groups:
+            self._jitter_by_sg[sg_id] = self._resolve_jitter_seconds(sg_id)
+
+    @staticmethod
+    def _clamp_jitter(jitter_value: int, max_jitter: int) -> int:
+        if jitter_value < JITTER_MIN_SECONDS:
+            return JITTER_MIN_SECONDS
+        if jitter_value > max_jitter:
+            return max_jitter
+        return jitter_value
 
 
 __all__ = [

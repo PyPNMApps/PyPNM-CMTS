@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from pypnm.lib.types import IPv4Str, IPv6Str, MacAddressStr
 
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import (
@@ -11,16 +12,48 @@ from pypnm_cmts.orchestrator.models import (
     SgwCacheMetadataModel,
 )
 
-JsonScalar = str | int | float | bool | None
 DEFAULT_AGE_SECONDS = 0.0
+DEFAULT_CHANNEL_COUNT = 0
+
+
+class SgwChannelSummaryModel(BaseModel):
+    """Summary of channel inventory for a service group."""
+
+    count: int = Field(default=DEFAULT_CHANNEL_COUNT, description="Number of channels in the summary.")
+    channel_ids: list[int] = Field(default_factory=list, description="Channel identifiers in the summary.")
+
+
+class SgwCableModemModel(BaseModel):
+    """Minimal cable modem identity for SGW snapshots."""
+
+    mac: MacAddressStr = Field(default=MacAddressStr(""), description="Cable modem MAC address.")
+    ipv4: IPv4Str = Field(default=IPv4Str(""), description="Cable modem IPv4 address.")
+    ipv6: IPv6Str = Field(default=IPv6Str(""), description="Cable modem IPv6 address.")
+
+
+class SgwSnapshotModel(BaseModel):
+    """Snapshot payload for a service group cache entry."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier for the snapshot.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+    cable_modems: list[SgwCableModemModel] = Field(default_factory=list, description="Cable modem membership list.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+
+
+class SgwSnapshotPayloadModel(BaseModel):
+    """Snapshot payload components from a heavy refresh."""
+
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+    cable_modems: list[SgwCableModemModel] = Field(default_factory=list, description="Cable modem membership list.")
 
 
 class SgwCacheEntryModel(BaseModel):
     """Cache entry for serving group worker data."""
 
     sg_id: ServiceGroupId = Field(..., description="Service group identifier for the cache entry.")
-    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the entry.")
-    payload: dict[str, JsonScalar] = Field(default_factory=dict, description="JSON-safe placeholder payload for cached SGW data.")
+    snapshot: SgwSnapshotModel = Field(..., description="Snapshot payload for the cache entry.")
 
 
 class SgwRefreshErrorModel(BaseModel):
@@ -41,6 +74,10 @@ class SgwRefreshResultModel(BaseModel):
 
 __all__ = [
     "SgwCacheEntryModel",
+    "SgwCableModemModel",
+    "SgwChannelSummaryModel",
+    "SgwSnapshotModel",
+    "SgwSnapshotPayloadModel",
     "SgwRefreshErrorModel",
     "SgwRefreshResultModel",
 ]

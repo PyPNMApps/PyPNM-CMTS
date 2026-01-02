@@ -9,7 +9,7 @@ from pypnm_cmts.orchestrator.models import (
     SgwCacheMetadataModel,
     SgwRefreshState,
 )
-from pypnm_cmts.sgw.models import SgwCacheEntryModel
+from pypnm_cmts.sgw.models import SgwCacheEntryModel, SgwSnapshotModel
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 
@@ -17,7 +17,8 @@ def test_sgw_store_upsert_and_update_metadata() -> None:
     sg_id = ServiceGroupId(1)
     now_epoch = 1000.0
     metadata = SgwCacheMetadataModel(snapshot_time_epoch=now_epoch)
-    entry = SgwCacheEntryModel(sg_id=sg_id, metadata=metadata)
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
     store = SgwCacheStore()
 
     store.upsert_entry(entry)
@@ -28,7 +29,7 @@ def test_sgw_store_upsert_and_update_metadata() -> None:
     store.update_metadata(sg_id, updated)
     stored = store.get_entry(sg_id)
     assert stored is not None
-    assert stored.metadata.snapshot_time_epoch == now_epoch + 1.0
+    assert stored.snapshot.metadata.snapshot_time_epoch == now_epoch + 1.0
 
 
 def test_sgw_store_update_metadata_creates_entry() -> None:
@@ -40,7 +41,7 @@ def test_sgw_store_update_metadata_creates_entry() -> None:
     store.update_metadata(sg_id, metadata)
     stored = store.get_entry(sg_id)
     assert stored is not None
-    assert stored.metadata.snapshot_time_epoch == now_epoch
+    assert stored.snapshot.metadata.snapshot_time_epoch == now_epoch
 
 
 def test_sgw_store_mark_error_bounds_message() -> None:

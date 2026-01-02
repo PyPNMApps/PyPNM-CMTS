@@ -1,21 +1,21 @@
-# PyPNM-CMTS Architecture and Implementation Burndown
+# PyPNM-CMTS Architecture And Implementation Burndown
 
-This document defines the software-centric architecture, execution modes, and a deterministic implementation checklist for PyPNM-CMTS.
+This Document Defines The Software-Centric Architecture, Execution Modes, And A Deterministic Implementation Checklist For PyPNM-CMTS.
 
-The goal is to support a standalone-first deployment model that can later migrate cleanly to Kubernetes without redesign.
+The Goal Is To Support A Standalone-First Deployment Model That Can Later Migrate Cleanly To Kubernetes Without Redesign.
 
 ## Architecture Overview
 
-PyPNM-CMTS is designed to service one CMTS instance and dynamically discover service groups (SGs) and cable modems (CMs) using SNMP.
+PyPNM-CMTS Is Designed To Service One CMTS Instance And Dynamically Discover Service Groups (SGs) And Cable Modems (CMs) Using SNMP.
 
-The system is divided into four logical layers:
+The System Is Divided Into Four Logical Layers:
 
 1. Discovery & Control Plane
 2. Scheduling & Execution
 3. Persistence & Indexing
 4. API & Observability
 
-All layers are implemented in Python and rely on filesystem-based persistence. No database is used.
+All Layers Are Implemented In Python And Rely On Filesystem-Based Persistence. No Database Is Used.
 
 ## Execution Modes
 
@@ -39,13 +39,13 @@ All layers are implemented in Python and rely on filesystem-based persistence. N
 - Intended for Kubernetes worker pods
 - Polls inventory directly until message bus is introduced
 
-## Core Principle: Service Group Workers And Cache-First Endpoints
+## Core Principle: Serving Group Workers And Cache-First Endpoints
 
-Phase 7 introduces Service Group Workers (SGWs) that continuously maintain an in-memory cache of service-group topology and cable-modem membership.
+Phase 7 Introduces Serving Group Workers (SGWs) That Continuously Maintain An In-Memory Cache Of Serving-Group Topology And Cable-Modem Membership.
 
-A core design constraint is that SG worker count scales with the number of service groups. Each SGW is responsible for exactly one sg_id and owns that SG’s cached state.
+A Core Design Constraint Is That SG Worker Count Scales With The Number Of Service Groups. Each SGW Is Responsible For Exactly One sg_id And Owns That SG’s Cached State.
 
-Endpoints are cache-first and must not trigger implicit live SNMP walks. Any live refresh must be explicit, rate-limited, and bounded.
+Endpoints Are Cache-First And Must Not Trigger Implicit Live SNMP Walks. Any Live Refresh Must Be Explicit, Rate-Limited, And Bounded.
 
 ## Persistence Model
 
@@ -66,7 +66,6 @@ An append-only JSONL index is maintained per SG/day:
 ## Phase 7 Operating Model
 
 - Cache-first reads: endpoints return SGW cache by default, including snapshot_time_epoch, age_seconds, and refresh_state.
-- Cache metadata timestamps are stored as epoch seconds (snapshot_time_epoch, last_heavy_refresh_epoch, last_light_refresh_epoch).
 - Two refresh lanes:
   - Heavy refresh (inventory): DS/US channels + full cable-modem membership/topology; expensive SNMP walks; runs on a configurable interval.
   - Light refresh (state): registration/online state deltas for known modems; cheaper polling; runs more frequently than heavy refresh and can be decoupled.
@@ -112,16 +111,11 @@ Status Markers:
 
 - [ ] Discovery controller
 - [ ] Reconciler
-- [x] In-process launcher
+- [ ] In-process launcher
 - [ ] SG worker lifecycle
 - [ ] Global executor
-- [x] Standalone boot path
+- [ ] Standalone boot path
 - [ ] Docs updated (topology)
-
-Notes:
-- Launcher and runtime support run/run-forever modes with controller, worker, and combined execution paths.
-- Combined mode runs coordination plus worker tests when leases are held, persisting results under the state directory.
-- Inventory discovery integrates via snapshot or config, with controller leadership driving discovery flow.
 
 ### Phase 4 — Scheduling & Pipelines
 
@@ -134,9 +128,6 @@ Notes:
 - [ ] Pytest coverage
 - [ ] Docs updated
 
-Notes:
-- WorkRunner executes default tests and persists per-SG results, but eligibility filtering and concurrency controls are not implemented.
-
 ### Phase 5 — API Exposure
 
 - [ ] /cmts/status
@@ -145,24 +136,17 @@ Notes:
 - [ ] /results/getTransaction
 - [ ] API schemas documented
 
-Notes:
-- Operational endpoints exist under /ops for health, readiness, status, and version.
-- Orchestrator endpoints exist for run/status responses, but CMTS/SG result endpoints are not implemented.
-
 ### Phase 6 — Kubernetes Readiness Validation
 
-- [x] Controller-only mode runs
-- [x] Worker-only mode runs
+- [ ] Controller-only mode runs
+- [ ] Worker-only mode runs
 - [ ] No in-process assumptions in core logic
 - [ ] K8 backends isolated
 - [ ] Docs updated (deployment modes)
 
-Notes:
-- Controller/worker/combined modes are exercised via CLI and ops endpoints, but K8-specific backends are not implemented.
-
 ### Phase 7 — Serving Group Worker Endpoint Layer
 
-Phase 7 focuses on CMTS endpoint calls backed by SGWs. The SGW layer continuously maintains an in-memory view of service-group topology and cable-modem membership so endpoint reads are cache-first and low-latency.
+Phase 7 Focuses On CMTS Endpoint Calls Backed By SGWs. The SGW Layer Continuously Maintains An In-Memory View Of Serving-Group Topology And Cable-Modem Membership So Endpoint Reads Are Cache-First And Low-Latency.
 
 #### Phase 7.1 Configuration, Types, And Contracts
 
@@ -190,25 +174,30 @@ Notes:
 #### Phase 7.3 SG Discovery At Startup
 
 Objective:
-Perform SG discovery at startup and initialize SGW workers based on discovered SG inventory.
+Perform SG discovery at startup, prime the SGW cache, and gate /ops/ready on discovery + cache priming.
 
 Tasks:
-- [ ] Implement startup flow (service entrypoint and/or orchestrator integration):
-  - Connect to CMTS adapter
-  - Discover serving groups (via discovery service)
-  - Build discovered sg_id list
-  - Start SGW manager with that list (subject to sgw.max_workers cap)
-- [ ] Define readiness gating:
-  - Ready when discovery succeeded and each SGW has at least one snapshot
-  - Allow a bounded timeout to permit partial readiness if desired (explicit and testable)
-- [ ] Add integration test with monkeypatched discovery returning deterministic SG list:
-  - Validates worker count scaling with discovered inventory
-  - Validates readiness transitions based on snapshot population
+- [x] Implement startup flow on FastAPI serve startup:
+  - Load CmtsOrchestratorSettings.from_system_config()
+  - Discover serving groups via CmtsInventoryDiscoveryService.run_discovery(...)
+  - Start an SGW cache store + SGW manager bound to the discovered sg_id list
+  - Prime the SGW cache with a single refresh_once(now_epoch) to ensure at least one snapshot per SG
+- [x] Publish SGW startup status for operational endpoints:
+  - startup_completed / discovery_ok / discovered_sg_ids / last_refresh_epoch / bounded error_message
+  - Accessors for store + manager for endpoint and readiness checks
+- [x] Gate /ops/ready on SGW discovery + cache priming:
+  - Fail with SGW_DISCOVERY when startup completed and discovery_ok is false
+  - Fail with SGW_CACHE when discovery_ok is true but one or more SGs lack a primed cache snapshot
+  - Return explicit readiness fields: discovery_ok, discovered_sg_ids, sgw_ready, missing_sg_ids
+- [x] Add deterministic tests:
+  - Success path: discovery returns stable SG list and cache is primed
+  - Failure path: discovery raises and /ops/ready returns 503 with SGW_DISCOVERY
+  - No real sleeps (inject _now_epoch and monkeypatch discovery)
 
 Done Criteria:
-- Startup logs show discovered SG list and worker spawn count.
-- Readiness indicates whether SGW cache is populated (and how many SGWs are ready).
-- Tests pass under pytest -q without real sleeps (use injected clocks/sleepers).
+- Serve startup logs show the discovered SG list and SGW initialization summary.
+- /ops/ready reflects SGW readiness with explicit discovery/cache fields.
+- Tests pass under pytest -q.
 
 #### Phase 7.4 SGW Polling Loop And Cache Models
 

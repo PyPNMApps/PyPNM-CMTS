@@ -13,6 +13,12 @@ from pypnm_cmts.config.orchestrator_config import (
     ServiceGroupDescriptor,
 )
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
 
@@ -53,6 +59,14 @@ def _build_settings(
     if election_name is not None:
         payload["election_name"] = election_name
     return CmtsOrchestratorSettings.model_validate(payload)
+
+
+def _mark_sgw_ready(settings: CmtsOrchestratorSettings) -> None:
+    now_epoch = 0.0
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    manager = SgwManager(settings=settings, store=store, service_groups=[])
+    set_sgw_startup_success([], store, manager, now_epoch)
 
 
 def test_ops_health_returns_ok(tmp_path: Path, monkeypatch: object) -> None:
@@ -99,6 +113,7 @@ def test_ops_version_returns_metadata(tmp_path: Path, monkeypatch: object) -> No
 def test_ops_ready_controller_creates_state_dir(tmp_path: Path, monkeypatch: object) -> None:
     state_dir = tmp_path / "coordination"
     settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    _mark_sgw_ready(settings)
     app = _load_app(settings, monkeypatch)
     client = _client(app)
     response = client.get("/ops/ready")
@@ -114,6 +129,7 @@ def test_ops_ready_controller_creates_state_dir(tmp_path: Path, monkeypatch: obj
 def test_ops_ready_controller_not_writable(tmp_path: Path, monkeypatch: object) -> None:
     state_dir = tmp_path / "coordination"
     settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    _mark_sgw_ready(settings)
     app = _load_app(settings, monkeypatch)
     from pypnm_cmts.api.routes.operational.service import OperationalService
 
@@ -130,6 +146,7 @@ def test_ops_ready_worker_requires_sg(tmp_path: Path, monkeypatch: object) -> No
     state_dir = tmp_path / "coordination"
     state_dir.mkdir(parents=True, exist_ok=True)
     settings = _build_settings(OrchestratorMode.WORKER, state_dir, [])
+    _mark_sgw_ready(settings)
     app = _load_app(settings, monkeypatch)
     client = _client(app)
     response = client.get("/ops/ready")
@@ -143,6 +160,7 @@ def test_ops_ready_worker_ok(tmp_path: Path, monkeypatch: object) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
     service_groups = [ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True)]
     settings = _build_settings(OrchestratorMode.WORKER, state_dir, service_groups)
+    _mark_sgw_ready(settings)
     app = _load_app(settings, monkeypatch)
     client = _client(app)
     response = client.get("/ops/ready")
@@ -150,6 +168,26 @@ def test_ops_ready_worker_ok(tmp_path: Path, monkeypatch: object) -> None:
     payload = response.json()
     assert payload["status"] == OperationalStatus.OK.value
     assert payload["meta"]["sg_id"] == service_groups[0].sg_id
+
+
+def test_ops_ready_rejects_blank_state_dir(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
+    _mark_sgw_ready(settings)
+    blank_settings = settings.model_copy(update={"state_dir": "   "})
+    app = _load_app(blank_settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fail_if_called(_self: OperationalService, _path: Path) -> bool:
+        raise AssertionError("state_dir check should fail before directory creation")
+
+    monkeypatch.setattr(OperationalService, "_ensure_state_dir_exists", _fail_if_called)
+
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["failed_check"] == ReadinessCheck.STATE_DIR.value
 
 
 def test_ops_status_missing_pid_records(tmp_path: Path, monkeypatch: object) -> None:

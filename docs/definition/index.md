@@ -37,6 +37,7 @@ Table Of Contents in alphabetical order.
 - [Service Group Descriptor](#service-group-descriptor)
 - [Service Group ID](#service-group-id)
 - [Service Group Shard Planner](#service-group-shard-planner)
+- [Serving Group Worker (SGW)](#serving-group-worker-sgw)
 - [Shard Mode](#shard-mode)
 - [Standalone](#standalone)
 - [Target Service Groups](#target-service-groups)
@@ -158,6 +159,9 @@ An integer identifier for a service group (`ServiceGroupId`). Used as the primar
 
 ### Service Group Shard Planner
 The deterministic planner that orders enabled service groups and computes the worker count for controller planning.
+
+### Serving Group Worker (SGW)
+The serving group worker layer that manages per-service-group cache snapshots and refresh scheduling.
 
 ### Shard Mode
 The strategy used to select which service groups to target per tick when the inventory is larger than the target count. Current options:

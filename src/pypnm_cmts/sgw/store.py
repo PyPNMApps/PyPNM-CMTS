@@ -9,7 +9,11 @@ from pypnm_cmts.orchestrator.models import (
     SgwCacheMetadataModel,
     SgwRefreshState,
 )
-from pypnm_cmts.sgw.models import DEFAULT_AGE_SECONDS, SgwCacheEntryModel
+from pypnm_cmts.sgw.models import (
+    DEFAULT_AGE_SECONDS,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+)
 
 
 class SgwCacheStore:
@@ -34,19 +38,21 @@ class SgwCacheStore:
         """Update or create metadata for a service group entry."""
         entry = self._entries.get(sg_id)
         if entry is None:
-            self._entries[sg_id] = SgwCacheEntryModel(sg_id=sg_id, metadata=metadata)
+            snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+            self._entries[sg_id] = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
             return
-        entry.metadata = metadata
+        entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
 
     def mark_error(self, sg_id: ServiceGroupId, error_message: str, now_epoch: float) -> SgwCacheMetadataModel:
         """Mark a cache entry as errored and update its metadata."""
         entry = self._entries.get(sg_id)
         if entry is None:
-            entry = SgwCacheEntryModel(sg_id=sg_id)
+            snapshot = SgwSnapshotModel(sg_id=sg_id)
+            entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
             self._entries[sg_id] = entry
 
         trimmed = error_message[:SGW_LAST_ERROR_MAX_LENGTH]
-        metadata = entry.metadata.model_copy(
+        metadata = entry.snapshot.metadata.model_copy(
             update={
                 "snapshot_time_epoch": float(now_epoch),
                 "age_seconds": DEFAULT_AGE_SECONDS,
@@ -54,7 +60,7 @@ class SgwCacheStore:
                 "last_error": trimmed,
             }
         )
-        entry.metadata = metadata
+        entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
         return metadata
 
     @staticmethod

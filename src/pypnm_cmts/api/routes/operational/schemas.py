@@ -39,6 +39,10 @@ class ReadyResponseModel(BaseModel):
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     failed_check: ReadinessCheck | None = Field(default=None, description="Name of the first failing readiness check.")
     message: str = Field(default="", description="Human-readable readiness message.")
+    discovery_ok: bool = Field(default=False, description="Whether SG discovery completed successfully.")
+    discovered_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Discovered service group identifiers.")
+    sgw_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups missing cache priming.")
 
 
 class OperationalProcessInfoModel(BaseModel):
