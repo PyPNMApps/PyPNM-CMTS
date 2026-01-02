@@ -17,6 +17,7 @@ Table Of Contents in alphabetical order.
 - [Coordination Manager](#coordination-manager)
 - [Coordination State Directory](#coordination-state-directory)
 - [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
+- [Epoch Seconds](#epoch-seconds)
 - [Inventory Discovery](#inventory-discovery)
 - [Leader ID](#leader-id)
 - [Leader TTL](#leader-ttl)
@@ -89,6 +90,10 @@ The filesystem directory used for shared coordination state (leader-election rec
 
 ### Discovery (CMTS Inventory)
 The process of querying a CMTS via SNMP to determine the current service group inventory and the registered cable modems per service group.
+
+### Epoch Seconds
+Numeric timestamps represented as seconds since the Unix epoch (UTC). Stored timestamps use epoch seconds; ISO-8601 conversion happens only when
+displaying or returning external responses.
 
 ### Inventory Discovery
 The typed result of a CMTS discovery operation, including the discovered service group identifiers and the per-SG list of registered cable

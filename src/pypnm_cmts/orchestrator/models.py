@@ -67,10 +67,10 @@ class SgwRefreshState(str, Enum):
 class SgwCacheMetadataModel(BaseModel):
     """Snapshot metadata for serving group worker caches."""
 
-    snapshot_time: str = Field(default="", description="ISO-8601 snapshot timestamp.")
+    snapshot_time_epoch: float = Field(default=0.0, ge=0.0, description="Snapshot timestamp in epoch seconds.")
     age_seconds: float = Field(default=0.0, ge=0.0, description="Age of the snapshot in seconds.")
-    last_heavy_refresh: str | None = Field(default=None, description="ISO-8601 timestamp for the last heavy refresh.")
-    last_light_refresh: str | None = Field(default=None, description="ISO-8601 timestamp for the last light refresh.")
+    last_heavy_refresh_epoch: float | None = Field(default=None, ge=0.0, description="Epoch timestamp for the last heavy refresh.")
+    last_light_refresh_epoch: float | None = Field(default=None, ge=0.0, description="Epoch timestamp for the last light refresh.")
     refresh_state: SgwRefreshState = Field(default=SgwRefreshState.OK, description="Refresh state for the cache entry.")
     last_error: str | None = Field(default=None, max_length=SGW_LAST_ERROR_MAX_LENGTH, description="Optional bounded error message.")
 
