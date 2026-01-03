@@ -1,0 +1,178 @@
+# FILE: docs/api/fast-api/index.md
+# FastAPI reference
+
+FastAPI endpoint documentation for PyPNM-CMTS will live here.
+
+## Running the service
+
+Start the FastAPI service using the CLI:
+
+```
+pypnm-cmts serve --host 127.0.0.1 --port 8000
+```
+
+Example health checks:
+
+```
+curl http://127.0.0.1:8000/ops/health
+curl http://127.0.0.1:8000/ops/ready
+```
+
+## Current endpoints
+
+- `POST /system/sysDescr` - CMTS sysDescr lookup.
+- `POST /system/serviceGroupTopology` - CMTS service-group topology lookup.
+- `POST /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
+- `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
+- `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
+- `GET /ops/health` - Liveness probe.
+- `GET /ops/ready` - Readiness probe.
+- `GET /ops/version` - Service identity and version.
+- `GET /ops/status` - Operational process status snapshot.
+
+## Operational endpoints
+
+- [Operational endpoints](operational.md)
+- [Serving group endpoints](serving-group.md)
+
+## Next steps
+
+- Add endpoint summaries as routes are added.
+- Link each route section to the owning module under `src/pypnm_cmts/api`.
+
+
+# FILE: docs/api/fast-api/serving-group.md
+# Serving Group Endpoints
+
+Cache-first serving group endpoints backed by SGW snapshots. These endpoints do not trigger discovery or refresh; they return the latest cached snapshot and metadata.
+
+## Common Fields
+
+Response metadata includes:
+- `timestamp` ISO-8601 response timestamp
+- `metadata.snapshot_time_epoch` epoch seconds for the cached snapshot
+- `metadata.age_seconds` elapsed seconds since snapshot time
+- `metadata.refresh_state` one of `OK`, `STALE`, or `ERROR`
+- `metadata.last_error` bounded error message when present
+
+## POST /cmts/servingGroup/get/ids
+
+Return discovered service group identifiers and per-SG cache summaries.
+
+Request body:
+
+```json
+{}
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "discovered_sg_ids": [1, 2],
+  "sgw_ready": true,
+  "summaries": [
+    {
+      "sg_id": 1,
+      "metadata": {
+        "snapshot_time_epoch": 1767416694.071116,
+        "age_seconds": 0,
+        "last_heavy_refresh_epoch": 1767416694.071116,
+        "last_light_refresh_epoch": 1767416694.071116,
+        "refresh_state": "OK",
+        "last_error": null
+      }
+    }
+  ]
+}
+```
+
+## POST /cmts/servingGroup/get/cableModems
+
+Return cached cable modem membership for a service group. Requires `sg_id`. Pagination is stable and deterministic.
+
+Request body:
+
+```json
+{
+  "sg_id": 1,
+  "page": 1,
+  "page_size": 100
+}
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T06:39:23.046738+00:00",
+  "sg_id": 1,
+  "page": 1,
+  "page_size": 100,
+  "total_count": 1,
+  "items": [
+    {
+      "mac": "aa:bb:cc:dd:ee:ff",
+      "ipv4": "192.168.0.100",
+      "ipv6": ""
+    }
+  ],
+  "metadata": {
+    "snapshot_time_epoch": 1767417069.3638031,
+    "age_seconds": 0,
+    "last_heavy_refresh_epoch": 1767417069.3638031,
+    "last_light_refresh_epoch": 1767417069.3638031,
+    "refresh_state": "OK",
+    "last_error": null
+  }
+}
+```
+
+## POST /cmts/servingGroup/get/topology
+
+Return cached topology summary for a service group. Requires `sg_id`.
+
+Request body:
+
+```json
+{
+  "sg_id": 1
+}
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "sg_id": 1,
+  "topology": {
+    "sg_id": 1,
+    "ds_channels": {
+      "count": 0,
+      "channel_ids": []
+    },
+    "us_channels": {
+      "count": 0,
+      "channel_ids": []
+    }
+  },
+  "metadata": {
+    "snapshot_time_epoch": 1767416694.071116,
+    "age_seconds": 0,
+    "last_heavy_refresh_epoch": 1767416694.071116,
+    "last_light_refresh_epoch": 1767416694.071116,
+    "refresh_state": "OK",
+    "last_error": null
+  }
+}
+```
+
+

@@ -25,7 +25,7 @@ class SgwStartupService:
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         """
         Discover SGs and prime SGW cache at startup.
         """
@@ -53,13 +53,13 @@ class SgwStartupService:
                 return
 
             try:
-                result = CmtsInventoryDiscoveryService.run_discovery(
+                service = CmtsInventoryDiscoveryService(
                     cmts_hostname=settings.adapter.hostname,
                     read_community=settings.adapter.community,
                     write_community=settings.adapter.write_community,
                     port=int(settings.adapter.port),
-                    state_dir=Path(state_dir_value),
                 )
+                result = await service.discover_inventory(state_dir=Path(state_dir_value))
                 discovered_sg_ids = sorted(result.discovered_sg_ids, key=int)
             except Exception as exc:
                 message = str(exc)

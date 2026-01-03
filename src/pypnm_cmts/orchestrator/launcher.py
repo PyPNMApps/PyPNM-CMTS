@@ -588,7 +588,9 @@ class CmtsOrchestratorLauncher:
         is_leader: bool,
     ) -> tuple[list[ServiceGroupId], str]:
         if is_leader and self._should_discover(settings):
-            return self._build_discovered_service_groups(settings, state_dir)
+            hostname_value = str(settings.adapter.hostname).strip()
+            if hostname_value != "":
+                return self._build_discovered_service_groups(settings, state_dir)
 
         snapshot = self._load_inventory_snapshot(state_dir)
         if snapshot is not None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
@@ -39,6 +40,9 @@ SHARD_MODE_SEQUENTIAL = "sequential"
 SHARD_MODE_SCORE = "score"
 SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
 DEFAULT_SHARD_MODE = SHARD_MODE_SEQUENTIAL
+ENV_ADAPTER_HOSTNAME = "PYPNM_CMTS_ADAPTER_HOSTNAME"
+ENV_ADAPTER_READ_COMMUNITY = "PYPNM_CMTS_ADAPTER_READ_COMMUNITY"
+ENV_ADAPTER_WRITE_COMMUNITY = "PYPNM_CMTS_ADAPTER_WRITE_COMMUNITY"
 
 
 class CmtsAdapterConfig(BaseModel):
@@ -159,8 +163,21 @@ class CmtsOrchestratorSettings(BaseModel):
         """
         manager = CmtsConfigManager(config_path=config_path)
         data = manager.get("CmtsOrchestrator")
-        if data is None:
-            return cls()
+        payload: dict[str, object] = {}
         if isinstance(data, dict):
-            return cls.model_validate(data)
-        return cls()
+            payload = dict(data)
+
+        adapter_data = dict(payload.get("adapter", {}))
+        hostname_value = os.environ.get(ENV_ADAPTER_HOSTNAME, "").strip()
+        if hostname_value != "":
+            adapter_data["hostname"] = hostname_value
+        read_community_value = os.environ.get(ENV_ADAPTER_READ_COMMUNITY, "").strip()
+        if read_community_value != "":
+            adapter_data["community"] = read_community_value
+        write_community_value = os.environ.get(ENV_ADAPTER_WRITE_COMMUNITY, "").strip()
+        if write_community_value != "":
+            adapter_data["write_community"] = write_community_value
+        if adapter_data:
+            payload["adapter"] = adapter_data
+
+        return cls.model_validate(payload)

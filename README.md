@@ -89,7 +89,10 @@ If you used the installer defaults, activate the `.env` environment:
 ### 5) Run the FastAPI service
 
   ```bash
-  pypnm-cmts
+  pypnm-cmts serve  --cmts-hostname <hostname>    \
+                    --read-community <community>  \
+                    --write-community <community> \
+                    --reload
   ```
 
 ## Documentation

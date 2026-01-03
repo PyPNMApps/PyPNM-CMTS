@@ -185,8 +185,8 @@ class OperationalService:
                     discovery_ok=sgw_status.discovery_ok,
                     discovered_sg_ids=discovered_sg_ids,
                     sgw_ready=sgw_ready,
-                missing_sg_ids=missing_sg_ids,
-            )
+                    missing_sg_ids=missing_sg_ids,
+                )
 
         if sgw_status.prime_failed:
             failed_check = ReadinessCheck.SGW_PRIME

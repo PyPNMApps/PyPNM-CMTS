@@ -80,6 +80,7 @@ log_cli_date_format = "%H:%M:%S"
 markers = [
   "asyncio: mark test as asyncio-based (requires pytest-asyncio)",
   "cm_it: cable modem integration tests (enable with -m cm_it)",
+  "integration: live CMTS integration tests (enable with -m integration)",
   "slow: slow tests",
   "net: network-required tests",
   "pnm: PNM file parsing tests",

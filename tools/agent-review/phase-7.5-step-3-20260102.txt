@@ -1,3 +1,4 @@
+# FILE: src/pypnm_cmts/cli.py
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
@@ -56,27 +57,27 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         choices=[mode.value for mode in OrchestratorMode],
         required=True,
-        help="Execution mode: standalone (coordination only), controller (leader only), worker (lease + tests), combined (controller + worker).",
+        help="Execution mode: standalone, controller, worker, or combined.",
     )
     parser.add_argument(
         "--config",
         default="",
-        help="Optional path to system.json configuration file (defaults to built-in config).",
+        help="Optional path to system.json configuration file.",
     )
     parser.add_argument(
         "--cmts-hostname",
         default="",
-        help="Override adapter.hostname for discovery/runtime (IP or hostname).",
+        help="Optional CMTS hostname/IP override for auto-discovery (adapter.hostname).",
     )
     parser.add_argument(
         "--read-community",
         default="",
-        help="Override adapter.community (SNMPv2c read community).",
+        help="Optional SNMPv2c read community override (adapter.community).",
     )
     parser.add_argument(
         "--write-community",
         default="",
-        help="Override adapter.write_community (SNMPv2c write community).",
+        help="Optional SNMPv2c write community override (adapter.write_community).",
     )
     parser.add_argument(
         "--snmp-port",
@@ -84,57 +85,57 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         dest="snmp_port",
         type=int,
         default=None,
-        help="Override adapter.port (SNMP port). --cmts-port is deprecated.",
+        help="Optional SNMP port override for CMTS discovery (adapter.port). --cmts-port is deprecated.",
     )
     parser.add_argument(
         "--sg-id",
         default="",
-        help="Service group id for worker mode (required for bound workers).",
+        help="Optional service group identifier (bound worker mode).",
     )
     parser.add_argument(
         "--owner-id",
         default="",
-        help="Override coordination owner id (affects leader/lease identity).",
+        help="Optional owner id override for coordination.",
     )
     parser.add_argument(
         "--target-service-groups",
         type=int,
         default=None,
-        help="Override target service groups per replica (0 means all).",
+        help="Optional target service groups override.",
     )
     parser.add_argument(
         "--shard-mode",
         default=None,
         choices=["sequential", "score"],
-        help="Shard mode override: sequential (default) or score.",
+        help="Shard mode override: sequential or score.",
     )
     parser.add_argument(
         "--tick-interval-seconds",
         type=float,
         default=None,
-        help="Override tick interval in seconds (must be less than TTLs).",
+        help="Optional tick interval override (seconds).",
     )
     parser.add_argument(
         "--leader-ttl-seconds",
         type=int,
         default=None,
-        help="Override leader TTL in seconds.",
+        help="Optional leader TTL override (seconds).",
     )
     parser.add_argument(
         "--lease-ttl-seconds",
         type=int,
         default=None,
-        help="Override service group lease TTL in seconds.",
+        help="Optional lease TTL override (seconds).",
     )
     parser.add_argument(
         "--state-dir",
         default="",
-        help="Override coordination state directory.",
+        help="Optional coordination state directory override.",
     )
     parser.add_argument(
         "--election-name",
         default="",
-        help="Override leader election namespace.",
+        help="Optional election name override.",
     )
 
 
@@ -142,7 +143,7 @@ def _add_discover_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cmts-hostname",
         default="",
-        help="CMTS hostname or IP address (required if not in config).",
+        help="CMTS hostname or IP address.",
     )
     parser.add_argument(
         "--read-community",
@@ -152,7 +153,7 @@ def _add_discover_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--write-community",
         default="",
-        help="Optional SNMPv2c write community (defaults to read community when empty).",
+        help="Optional SNMPv2c write community string (defaults to read community when empty).",
     )
     parser.add_argument(
         "--port",
@@ -163,12 +164,12 @@ def _add_discover_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         default="",
-        help="Optional path to system.json configuration file (defaults to built-in config).",
+        help="Optional path to system.json configuration file.",
     )
     parser.add_argument(
         "--state-dir",
         default="",
-        help="Override coordination state directory for snapshot persistence.",
+        help="Optional coordination state directory override.",
     )
     parser.add_argument(
         "--text",
@@ -193,8 +194,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  pypnm-cmts serve --host 0.0.0.0 --port 8080\n"
             "  pypnm-cmts serve --reload\n"
             "\n"
-            "Use \"pypnm-cmts <command> --help\" for command-specific options.\n"
-            "Man page: docs/system/pypnm-cmts-manpage.md"
+            "Use \"pypnm-cmts <command> --help\" for command-specific options."
         ),
     )
 
@@ -217,7 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-ticks",
         type=int,
         default=None,
-        help="Stop after N ticks (optional; for tests or bounded runs).",
+        help="Optional maximum number of ticks to execute.",
     )
 
     discover_parser = subparsers.add_parser("discover", help="Discover CMTS service groups and registered cable modems.")
@@ -226,24 +226,9 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_parser = subparsers.add_parser("serve", help="Start the FastAPI service (Uvicorn).")
     serve_parser.add_argument("--host", default=HOST_DEFAULT, help=f"Host to bind (default: {HOST_DEFAULT})")
     serve_parser.add_argument("--port", default=PORT_DEFAULT, type=int, help=f"Port to bind (default: {PORT_DEFAULT})")
-    serve_parser.add_argument("--ssl", action="store_true", help="Enable HTTPS (requires cert and key).")
-    serve_parser.add_argument("--cert", default="./certs/cert.pem", help="Path to SSL certificate (PEM).")
-    serve_parser.add_argument("--key", default="./certs/key.pem", help="Path to SSL private key (PEM).")
-    serve_parser.add_argument(
-        "--cmts-hostname",
-        default="",
-        help="Override adapter.hostname for SGW startup discovery.",
-    )
-    serve_parser.add_argument(
-        "--read-community",
-        default="",
-        help="Override adapter.community for SGW startup discovery.",
-    )
-    serve_parser.add_argument(
-        "--write-community",
-        default="",
-        help="Override adapter.write_community for SGW startup discovery.",
-    )
+    serve_parser.add_argument("--ssl", action="store_true", help="Enable HTTPS (requires cert and key)")
+    serve_parser.add_argument("--cert", default="./certs/cert.pem", help="Path to SSL certificate")
+    serve_parser.add_argument("--key", default="./certs/key.pem", help="Path to SSL private key")
     serve_parser.add_argument(
         "--with-runner",
         action="store_true",
@@ -281,7 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="reload_dirs",
         action="append",
         default=[],
-        help="Directory to watch for changes (repeatable). Default: src (when --reload).",
+        help="Directory to watch for changes. Can be passed multiple times. Default: src (when --reload)",
     )
 
     serve_parser.add_argument(
@@ -289,7 +274,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="reload_includes",
         action="append",
         default=["*.py"],
-        help="Glob pattern(s) to include for reload (repeatable). Default: *.py.",
+        help="Glob pattern(s) to include for reload. Can be passed multiple times. Default: *.py",
     )
 
     serve_parser.add_argument(
@@ -297,7 +282,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="reload_excludes",
         action="append",
         default=["*.pyc", "*__pycache__*", "*.tmp", "*.log"],
-        help="Glob pattern(s) to exclude from reload (repeatable).",
+        help="Glob pattern(s) to exclude from reload. Can be passed multiple times.",
     )
 
     return parser
@@ -529,11 +514,6 @@ def _run_cli() -> int:
 
     if args.command == "serve":
         from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
-        from pypnm_cmts.config.orchestrator_config import (
-            ENV_ADAPTER_HOSTNAME,
-            ENV_ADAPTER_READ_COMMUNITY,
-            ENV_ADAPTER_WRITE_COMMUNITY,
-        )
 
         if args.with_runner and args.reload:
             print(
@@ -547,12 +527,6 @@ def _run_cli() -> int:
             print(f"🌐 Launching FastAPI with HTTP on http://{args.host}:{args.port}")
 
         os.environ["PYTHONPATH"] = os.getcwd() + "/src:" + os.environ.get("PYTHONPATH", "")
-        if str(args.cmts_hostname).strip() != "":
-            os.environ[ENV_ADAPTER_HOSTNAME] = str(args.cmts_hostname).strip()
-        if str(args.read_community).strip() != "":
-            os.environ[ENV_ADAPTER_READ_COMMUNITY] = str(args.read_community).strip()
-        if str(args.write_community).strip() != "":
-            os.environ[ENV_ADAPTER_WRITE_COMMUNITY] = str(args.write_community).strip()
 
         uvicorn_args = {
             "app": "pypnm_cmts.api.main:app",
@@ -622,3 +596,4 @@ def _print_validation_errors(exc: ValidationError) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
