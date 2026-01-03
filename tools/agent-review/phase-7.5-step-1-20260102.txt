@@ -1,0 +1,570 @@
+# FILE: src/pypnm_cmts/api/routes/serving_group/schemas.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, model_validator
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
+
+DEFAULT_PAGE_NUMBER = 1
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 1000
+DEFAULT_TOPOLOGY_SG_ID = ServiceGroupId(0)
+
+
+class CacheResponseBase(BaseModel):
+    """Base response model for cache-backed endpoints."""
+
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
+    message: str = Field(default="", description="Informational or error message.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+
+
+class GetServingGroupIdsRequest(BaseModel):
+    """Request model for serving group id retrieval."""
+
+
+class ServingGroupCacheSummaryModel(BaseModel):
+    """Cache summary for a serving group snapshot."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    metadata: SgwCacheMetadataModel | None = Field(default=None, description="Cache metadata for the snapshot.")
+
+
+class GetServingGroupIdsResponse(CacheResponseBase):
+    """Response model for serving group id retrieval."""
+
+    discovered_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Discovered service group identifiers.")
+    sgw_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    summaries: list[ServingGroupCacheSummaryModel] = Field(default_factory=list, description="Per-SG cache summary entries.")
+
+
+class GetServingGroupCableModemsRequest(BaseModel):
+    """Request model for serving group cable modem retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupCableModemsRequest:
+        if int(self.sg_id) <= 0:
+            raise ValueError("sg_id must be greater than zero.")
+        return self
+
+
+class GetServingGroupCableModemsResponse(CacheResponseBase):
+    """Response model for serving group cable modem retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, description="Current page number.")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, description="Requested page size.")
+    total_count: int = Field(default=0, description="Total number of cable modems for the service group.")
+    items: list[SgwCableModemModel] = Field(default_factory=list, description="Paged cable modem entries.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+
+
+class GetServingGroupTopologyRequest(BaseModel):
+    """Request model for serving group topology retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupTopologyRequest:
+        if int(self.sg_id) <= 0:
+            raise ValueError("sg_id must be greater than zero.")
+        return self
+
+
+class ServingGroupTopologyModel(BaseModel):
+    """Topology summary payload for a serving group."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+
+
+class GetServingGroupTopologyResponse(CacheResponseBase):
+    """Response model for serving group topology retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    topology: ServingGroupTopologyModel = Field(default_factory=lambda: ServingGroupTopologyModel(sg_id=DEFAULT_TOPOLOGY_SG_ID), description="Cached topology summary.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+
+
+__all__ = [
+    "CacheResponseBase",
+    "DEFAULT_PAGE_NUMBER",
+    "DEFAULT_PAGE_SIZE",
+    "DEFAULT_TOPOLOGY_SG_ID",
+    "MAX_PAGE_SIZE",
+    "GetServingGroupIdsRequest",
+    "GetServingGroupIdsResponse",
+    "GetServingGroupCableModemsRequest",
+    "GetServingGroupCableModemsResponse",
+    "GetServingGroupTopologyRequest",
+    "GetServingGroupTopologyResponse",
+    "ServingGroupCacheSummaryModel",
+    "ServingGroupTopologyModel",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/service.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+    GetServingGroupCableModemsResponse,
+    GetServingGroupIdsResponse,
+    GetServingGroupTopologyRequest,
+    GetServingGroupTopologyResponse,
+    ServingGroupCacheSummaryModel,
+    ServingGroupTopologyModel,
+)
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.models import SgwCableModemModel
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    get_sgw_startup_status,
+    get_sgw_store,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+class ServingGroupCacheService:
+    """Service layer for cache-backed serving group endpoints."""
+
+    def get_ids(self) -> GetServingGroupIdsResponse:
+        """Return discovered service group identifiers and cache summaries."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        sgw_ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+        summaries: list[ServingGroupCacheSummaryModel] = []
+        for sg_id in discovered_sg_ids:
+            metadata = self._resolve_metadata(sg_id, store)
+            summaries.append(ServingGroupCacheSummaryModel(sg_id=sg_id, metadata=metadata))
+        response_status = ServiceStatusCode.SUCCESS if sgw_ready else ServiceStatusCode.FAILURE
+        message = "" if sgw_ready else "sgw cache not ready"
+        return GetServingGroupIdsResponse(
+            status=response_status,
+            message=message,
+            timestamp=self._utc_now(),
+            discovered_sg_ids=discovered_sg_ids,
+            sgw_ready=sgw_ready,
+            summaries=summaries,
+        )
+
+    def get_cable_modems(
+        self,
+        request: GetServingGroupCableModemsRequest,
+    ) -> GetServingGroupCableModemsResponse:
+        """Return paged cable modem membership for a service group."""
+        sg_id = request.sg_id
+        store = get_sgw_store()
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store)
+        if entry is None:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+            )
+
+        items = self._paginate_modems(entry.snapshot.cable_modems, request.page, request.page_size)
+        total_count = len(entry.snapshot.cable_modems)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            page=request.page,
+            page_size=request.page_size,
+            total_count=total_count,
+            items=items,
+            metadata=metadata,
+        )
+
+    def get_topology(
+        self,
+        request: GetServingGroupTopologyRequest,
+    ) -> GetServingGroupTopologyResponse:
+        """Return cached topology summary for a service group."""
+        sg_id = request.sg_id
+        store = get_sgw_store()
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store)
+        if entry is None:
+            topology = ServingGroupTopologyModel(sg_id=sg_id)
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                topology=topology,
+                metadata=metadata,
+            )
+
+        topology = ServingGroupTopologyModel(
+            sg_id=sg_id,
+            ds_channels=entry.snapshot.ds_channels,
+            us_channels=entry.snapshot.us_channels,
+        )
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            topology=topology,
+            metadata=metadata,
+        )
+
+    def _resolve_metadata(
+        self,
+        sg_id: ServiceGroupId,
+        store: SgwCacheStore | None,
+    ) -> SgwCacheMetadataModel:
+        if store is None:
+            return SgwCacheMetadataModel()
+        entry = store.get_entry(sg_id)
+        if entry is None:
+            return SgwCacheMetadataModel()
+        return entry.snapshot.metadata
+
+    @staticmethod
+    def _paginate_modems(
+        modems: list[SgwCableModemModel],
+        page: int,
+        page_size: int,
+    ) -> list[SgwCableModemModel]:
+        ordered = sorted(modems, key=lambda modem: str(modem.mac))
+        start = (int(page) - 1) * int(page_size)
+        end = start + int(page_size)
+        if start >= len(ordered):
+            return []
+        return ordered[start:end]
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+
+__all__ = [
+    "ServingGroupCacheService",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/router.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+from enum import Enum
+
+from fastapi import APIRouter
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+    GetServingGroupCableModemsResponse,
+    GetServingGroupIdsRequest,
+    GetServingGroupIdsResponse,
+    GetServingGroupTopologyRequest,
+    GetServingGroupTopologyResponse,
+)
+from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+
+
+class ServingGroupRouter:
+    """
+    FastAPI router for cache-backed serving group endpoints.
+    """
+
+    def __init__(
+        self,
+        prefix: str = "/cmts/servingGroup",
+        tags: list[str | Enum] | None = None,
+    ) -> None:
+        if tags is None:
+            tags = ["CMTS Serving Group"]
+        self.router = APIRouter(prefix=prefix, tags=tags)
+        self.logger = logging.getLogger(__name__)
+        self._service = ServingGroupCacheService()
+        self._register_routes()
+
+    def _register_routes(self) -> None:
+        @self.router.post(
+            "/get/ids",
+            response_model=GetServingGroupIdsResponse,
+            summary="Retrieve discovered serving group ids",
+            description="Returns discovered serving group ids and cache summaries.",
+        )
+        def get_ids(_request: GetServingGroupIdsRequest) -> GetServingGroupIdsResponse:
+            """
+            **Serving Group Ids**
+
+            Returns discovered SG ids and cache readiness metadata.
+            """
+            return self._service.get_ids()
+
+        @self.router.post(
+            "/get/cableModems",
+            response_model=GetServingGroupCableModemsResponse,
+            summary="Retrieve cable modems for a serving group",
+            description="Returns cached cable modem membership for a serving group.",
+        )
+        def get_cable_modems(
+            request: GetServingGroupCableModemsRequest,
+        ) -> GetServingGroupCableModemsResponse:
+            """
+            **Serving Group Cable Modems**
+
+            Returns a paged list of cable modems for the specified service group.
+            """
+            return self._service.get_cable_modems(request)
+
+        @self.router.post(
+            "/get/topology",
+            response_model=GetServingGroupTopologyResponse,
+            summary="Retrieve serving group topology",
+            description="Returns cached topology summary for a serving group.",
+        )
+        def get_topology(
+            request: GetServingGroupTopologyRequest,
+        ) -> GetServingGroupTopologyResponse:
+            """
+            **Serving Group Topology**
+
+            Returns cached topology summary for the specified service group.
+            """
+            return self._service.get_topology(request)
+
+
+router = ServingGroupRouter().router
+
+__all__ = [
+    "router",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/__init__.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+"""PyPNM-CMTS serving group API routes."""
+from __future__ import annotations
+
+from pypnm_cmts.api.routes.serving_group.router import router
+
+__all__ = [
+    "router",
+]
+
+# FILE: src/pypnm_cmts/api/utils/auto_load.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+
+from pypnm_cmts.api.routes.operational.router import router as operational_router
+from pypnm_cmts.api.routes.orchestrator.router import router as orchestrator_router
+from pypnm_cmts.api.routes.serving_group.router import router as serving_group_router
+from pypnm_cmts.api.routes.system.router import router as system_router
+
+
+class RouterRegistrar:
+    """Register API routers for the PyPNM-CMTS FastAPI app."""
+
+    def register(self, app: FastAPI) -> FastAPI:
+        """Attach API routers to the FastAPI application."""
+        app.include_router(operational_router)
+        app.include_router(orchestrator_router)
+        app.include_router(serving_group_router)
+        app.include_router(system_router)
+        return app
+
+# FILE: tests/test_sgw_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+)
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+SG_ID_ONE = ServiceGroupId(1)
+SG_ID_TWO = ServiceGroupId(2)
+DISCOVERED_SG_IDS = [SG_ID_ONE, SG_ID_TWO]
+SNAPSHOT_TIME_EPOCH = 1000.0
+AGE_SECONDS = 10.0
+
+
+def _disable_startup(monkeypatch: object) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", lambda: None)
+
+
+def _seed_store(
+    store: SgwCacheStore,
+    sg_id: ServiceGroupId,
+    modems: list[SgwCableModemModel],
+    ds_channels: SgwChannelSummaryModel | None = None,
+    us_channels: SgwChannelSummaryModel | None = None,
+) -> None:
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=SNAPSHOT_TIME_EPOCH,
+        age_seconds=AGE_SECONDS,
+    )
+    snapshot = SgwSnapshotModel(
+        sg_id=sg_id,
+        ds_channels=ds_channels or SgwChannelSummaryModel(),
+        us_channels=us_channels or SgwChannelSummaryModel(),
+        cable_modems=modems,
+        metadata=metadata,
+    )
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+
+def _configure_runtime_state(store: SgwCacheStore, sg_ids: list[ServiceGroupId]) -> None:
+    settings = CmtsOrchestratorSettings()
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, SNAPSHOT_TIME_EPOCH)
+
+
+def test_serving_group_ids_returns_cache_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _seed_store(store, SG_ID_TWO, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/ids", json={})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert payload["sgw_ready"] is True
+        summaries = payload["summaries"]
+        assert len(summaries) == 2
+        assert summaries[0]["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_cable_modems_requires_sg_id(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/cableModems", json={})
+        assert response.status_code == 422
+
+
+def test_serving_group_cable_modems_pagination(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    page_one = 1
+    page_two = 2
+    page_size = 2
+    total_count = 3
+    modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:03"),
+    ]
+    _seed_store(store, sg_id, modems)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_one, "page_size": page_size},
+        )
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["total_count"] == total_count
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:01",
+            "aa:bb:cc:dd:ee:02",
+        ]
+
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_two, "page_size": page_size},
+        )
+        payload = response.json()
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:03",
+        ]
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_topology_requires_sg_id(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={})
+        assert response.status_code == 422
+
+
+def test_serving_group_topology_returns_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_TWO
+    ds_channel_count = 1
+    us_channel_count = 2
+    ds_channel_id = 100
+    us_channel_id_primary = 200
+    us_channel_id_secondary = 201
+    ds_channels = SgwChannelSummaryModel(count=ds_channel_count, channel_ids=[ds_channel_id])
+    us_channels = SgwChannelSummaryModel(count=us_channel_count, channel_ids=[us_channel_id_primary, us_channel_id_secondary])
+    _seed_store(store, sg_id, [], ds_channels=ds_channels, us_channels=us_channels)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={"sg_id": int(sg_id)})
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["topology"]["ds_channels"]["count"] == ds_channel_count
+        assert payload["topology"]["us_channels"]["count"] == us_channel_count
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+

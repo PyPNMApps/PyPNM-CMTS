@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -54,9 +55,13 @@ def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: P
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        _ = state_dir
+        return _build_discovery_result(sg_ids)
+
     monkeypatch.setattr(
-        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
-        lambda **_kwargs: _build_discovery_result(sg_ids),
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
+        _fake_discover,
     )
     monkeypatch.setattr(
         "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
@@ -85,9 +90,13 @@ def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: P
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        _ = state_dir
+        return _build_discovery_result(sg_ids)
+
     monkeypatch.setattr(
-        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
-        lambda **_kwargs: _build_discovery_result(sg_ids),
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
+        _fake_discover,
     )
     monkeypatch.setattr(
         "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
@@ -114,11 +123,12 @@ def test_readiness_false_when_discovery_fails(monkeypatch: object, tmp_path: Pat
         classmethod(lambda cls: settings),
     )
 
-    def _raise_discovery(**_kwargs: object) -> InventoryDiscoveryResultModel:
+    async def _raise_discovery(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        _ = state_dir
         raise RuntimeError("discovery failed")
 
     monkeypatch.setattr(
-        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
         _raise_discovery,
     )
 
@@ -151,7 +161,7 @@ def test_startup_disabled_mode_uses_coherent_store_and_manager(monkeypatch: obje
         staticmethod(lambda: now_epoch),
     )
 
-    SgwStartupService().initialize()
+    asyncio.run(SgwStartupService().initialize())
 
     store = get_sgw_store()
     manager = get_sgw_manager()
@@ -171,9 +181,13 @@ def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Pa
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        _ = state_dir
+        return _build_discovery_result(sg_ids)
+
     monkeypatch.setattr(
-        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.run_discovery",
-        lambda **_kwargs: _build_discovery_result(sg_ids),
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
+        _fake_discover,
     )
 
     def _raise_refresh(self: SgwManager, _now_epoch: float) -> None:

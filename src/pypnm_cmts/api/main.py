@@ -6,6 +6,7 @@ from __future__ import annotations
 import pathlib
 import sys
 from contextlib import asynccontextmanager
+from inspect import isawaitable
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +54,9 @@ _sgw_startup_service = SgwStartupService()
 async def _lifespan(_app: FastAPI) -> object:
     if _combined_runner is not None:
         _combined_runner.start()
-    _sgw_startup_service.initialize()
+    init_result = _sgw_startup_service.initialize()
+    if isawaitable(init_result):
+        await init_result
     try:
         yield
     finally:
