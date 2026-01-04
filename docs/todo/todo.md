@@ -87,6 +87,7 @@ This is the running, repo-wide TODO list for **PyPNM-CMTS**. Items are written s
   - [ ] Startup service in enabled/disabled modes (already partial)
 - [ ] Add minimal integration test harness for “simulated CMTS” behavior (fake SNMP agent or stub service).
 - [ ] Add CI test matrix (Python 3.10–3.13) and enforce `-W error` selectively where safe.
+- [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite.
 
 ## Logging, Metrics, And Observability
 
