@@ -5,8 +5,8 @@ PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group
 
 ## New to PyPNM-CMTS? (start here)
 
-- [Project overview](../README.md) - what PyPNM-CMTS provides and how to run the CLI.
-- [Install flow](../README.md#getting-started) - clone, run `./install.sh`, and activate `.env`.
+- [Project overview](architecture/index.md) - what PyPNM-CMTS provides and how to run the CLI.
+- [Install flow](install/index.md) - clone, run `./install.sh`, and activate `.env`.
 - [CLI examples](examples/cli.md) - quick starts for CMTS sysDescr lookups.
 
 ## Configure and operate

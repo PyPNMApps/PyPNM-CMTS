@@ -1,3 +1,23 @@
+Summary:
+- Added all previously unlisted docs to mkdocs nav so --strict passes.
+- Replaced README links in docs/index.md with in-docs links.
+Modified files:
+- /home/dev01/Projects/PyPNM-CMTS/mkdocs.yml
+- /home/dev01/Projects/PyPNM-CMTS/docs/index.md
+Commands:
+python3 -m pip install -e ".[docs]"
+mkdocs build --strict
+mkdocs build --strict output:
+INFO    -  MERMAID2  - Initialization arguments: {}
+INFO    -  MERMAID2  - Using specified javascript library: assets/vendor/mermaid/mermaid.esm.min.mjs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/dev01/Projects/PyPNM-CMTS/site
+INFO    -  MERMAID2  - Found superfences config: {'custom_fences': [{'name': 'mermaid', 'class': 'mermaid', 'format': <function fence_mermaid at 0x7210e2db29e0>}]}
+INFO    -  MERMAID2  - Page 'Mode Contract': found 1 diagrams, adding scripts
+INFO    -  MERMAID2  - Page 'Overview': found 8 diagrams, adding scripts
+INFO    -  MERMAID2  - Page 'Mermaid Examples': found 2 diagrams, adding scripts
+INFO    -  Documentation built in 2.60 seconds
+# FILE: /home/dev01/Projects/PyPNM-CMTS/mkdocs.yml
 site_name: PyPNM-CMTS
 site_description: CMTS operations toolkit documentation for PyPNM-CMTS.
 site_url: https://pypnm.io
@@ -83,3 +103,35 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:mermaid2.fence_mermaid
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/index.md
+# PyPNM-CMTS documentation hub
+
+Use this page to get to the right guide for installs, operations, API references, and examples.
+PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group (SG). Deployments are supported via Docker; Kubernetes is a planned option.
+
+## New to PyPNM-CMTS? (start here)
+
+- [Project overview](architecture/index.md) - what PyPNM-CMTS provides and how to run the CLI.
+- [Install flow](install/index.md) - clone, run `./install.sh`, and activate `.env`.
+- [CLI examples](examples/cli.md) - quick starts for CMTS sysDescr lookups.
+
+## Configure and operate
+
+- [System configuration](system/index.md) - how system settings and defaults are organized.
+- [Operational tools](tools/index.md) - helpers in `tools/`.
+- [Scripts](scripts/index.md) - repository scripts and setup helpers.
+
+## Develop and automate
+
+- [API reference](api/index.md) - FastAPI endpoints and Python helpers.
+- [Examples](examples/index.md) - runnable workflows.
+- [Tests](tests/index.md) - how to run and extend automated tests.
+
+## Release and support
+
+- [Release notes](release/index.md) - version tracking and changes.
+- [Issues and support bundles](issues/index.md) - how to capture diagnostics and report issues.
+
+## Need more context?
+
+- [Style guide](style-guide.md) - documentation writing conventions.
