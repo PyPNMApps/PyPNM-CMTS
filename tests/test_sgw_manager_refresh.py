@@ -207,7 +207,7 @@ def test_sgw_manager_refresh_forever_uses_clock_and_stops() -> None:
         clock_calls["idx"] += 1
         return value
 
-    results = manager.refresh_forever(clock=_clock, sleeper=lambda *_args: None, max_cycles=2)
+    results = manager.refresh_forever(clock=_clock, max_cycles=2)
 
     assert len(results) == 2
     assert results[0].snapshot_time_epoch == times[0]

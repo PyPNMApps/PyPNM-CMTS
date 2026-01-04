@@ -185,9 +185,17 @@ Zero-Touch Still Requires A Minimal Configuration Baseline:
 
 ## Implementation Notes
 
+Serving Group Workers Maintain Cache Snapshots With Heavy And Light Refresh Lanes And Expose Cache-First Reads.
+
 To Reach And Maintain The 0T End-State, These Design Rules Apply:
 
 - Do Not Bind SG Assignment At Process Startup Unless Explicitly Requested.
 - Treat Coordination Output As The Source Of Truth For Work Eligibility.
 - Separate "Enabled Inventory" (what could be worked) From "Acquired Assignment" (what is worked this tick).
 - Keep Persistence Strictly Lease-Gated To Avoid Duplicate Or Conflicting Outputs.
+
+## Startup Integration
+
+- On Serve Or Combined Startup, Discover The Enabled SG Set Before Spawning SGWs.
+- SGW Manager Starts One Worker Per sg_id (Capped By Max Workers) And Primes Each Cache Before Readiness Is Reported.
+- Cache-First API Responses Must Not Trigger Implicit SNMP Walks; Discovery + SGW Priming Are The Gate For /ops/ready.

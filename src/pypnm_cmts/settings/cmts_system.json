@@ -37,7 +37,7 @@
         ]
     },
     "PnmFileRetrieval": {
-        "retrival_method": {
+        "retrieval_method": {
             "methods": {}
         }
     }

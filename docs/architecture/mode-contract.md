@@ -43,61 +43,23 @@ Validator guarantees (high level):
 - `tick_interval_seconds > 0`
 - `state_dir` non-empty and coerced to `Path`
 
-## Runtime Responsibilities by Mode (Current Behavior)
+## Runtime Responsibilities By Mode (Current Behavior)
 
 ### Controller
 
-Primary responsibility: leader-election tick only.
-
-- Leader election: enabled
-- Tick: `tick_leader_only()`
-- Inventory source:
-  - If leader and discovery is needed: discovery occurs and snapshot is available
-  - If not leader: uses snapshot if present; else config SG list
-- Worker planning: computes `worker_count` via shard planner
-- Test execution: does not run tests
-
-Output includes `coordination_tick` with leadership and lease details.
+Leader-election tick only. Discovers inventory when leader; otherwise reuses snapshot or configured SG list. Computes `worker_count` for planning and never runs tests. Output includes `coordination_tick` with leadership and lease details.
 
 ### Worker
 
-Primary responsibility: acquire a lease and run tests for exactly one SG per tick.
-
-- Leader election: not enabled
-- Inventory / SG selection:
-  - If `--sg-id` provided:
-    - If config SG list exists: sg-id must be enabled, else error
-    - If no config SG list: sg-id becomes the sole SG
-  - If `--sg-id` not provided (unbound worker):
-    - Load `state_dir/inventory/discovery.json` if present
-    - Else use configured enabled SGs if available
-    - Else if “should discover”: error (snapshot not found for worker mode)
-    - Else SG list empty
-- Lease behavior: attempts to lease desired SGs; executes against the first held SG
-- Test execution: runs tests only if a lease is held
-- Persistence: writes `state_dir/results/sg_<id>/<run_id>_<test>.json`
+No leader election. Inventory priority: discovery snapshot -> enabled SG config -> error when discovery is required but no snapshot exists. Bound workers target one SG; unbound workers target the enabled SG set. Requests leases and runs tests only when a lease is held; writes results under `state_dir/results/sg_<id>/`.
 
 ### Standalone
 
-Current behavior:
-- Leader election: disabled
-- Tick: `manager.tick(service_groups)` (not leader-only)
-- Test execution: does not run tests (worker-only gating)
-
-Net: coordination-only without leader election.
+Coordination-only tick without leader election. Uses config/discovery for SGs. Useful for coordination validation; does not run worker tests.
 
 ### Combined
 
-Current behavior:
-- Leader election: enabled (the controller loop runs inside the API process, just like controller mode)
-- Tick: `manager.tick(service_groups)` (leases are renewed/acquired as part of the worker loop)
-- Inventory: mirrors the controller discovery flow and updates when leadership settles
-- Lease acquisition: yes, the same leases protocols as worker mode are applied
-- Test execution: worker tests run whenever a lease is held, so combined behaves like `worker` once it is leasing
-- Activation: `serve --with-runner` enables this combined controller + worker process without launching a separate runner
-- Runner commands: `run` or `run-forever` executed with `--mode=combined` now also drive leader election, lease acquisition, and work execution, matching the inline runner semantics.
-
-Net: controller and worker responsibilities execute in a single process so the API service now owns both coordination and execution.
+Controller and worker loops in one process. Activated via `serve --with-runner` or `--mode combined` on runner commands. Runs leader election, acquires leases, writes `pids/` records, and executes tests whenever a lease is held.
 
 ## State Directory Contract
 
@@ -140,7 +102,7 @@ Clarify:
 ### CLI Warning on TFTP remote_dir During --help
 
 Message observed:
-- `Empty configuration value for 'PnmFileRetrieval.retrival_method.methods.tftp.remote_dir'; using default ''`
+- `Empty configuration value for 'PnmFileRetrieval.retrieval_method.methods.tftp.remote_dir'; using default ''`
 
 Likely issues:
 - path typo: `retrival_method` vs `retrieval_method`
@@ -154,6 +116,40 @@ Likely issues:
 | worker      | No               | discovery snapshot or config SG list              | Yes              | Yes       | Distributed execution |
 | standalone  | No               | config/discovery                                  | Yes              | No        | Coordination-only (today) |
 | combined    | Yes              | config/discovery (controller-style)               | Yes              | Yes       | Controller + worker inside `serve --with-runner` |
+
+## Startup Flow And SGW Interaction
+
+Startup is deterministic across commands: parse CLI, load config and env overrides, resolve mode, then follow the chosen command path. SGW startup is gated on discovery output so cache-first endpoints never issue implicit SNMP walks.
+
+```mermaid
+flowchart TD
+  start([CLI Entry]) --> cfg[Load Config + Env Overrides]
+  cfg --> cmd{Command}
+
+  cmd --> discover["discover<br/>SNMP Inventory"]
+  discover --> snap["Write discovery.json under state_dir"]
+  snap --> exit1([Return snapshot path and exit])
+
+  cmd --> run["run / run-forever"]
+  run --> mode{mode flag}
+  mode --> ctrl["controller<br/>Leader election + discovery when leader<br/>Plan worker_count"]
+  mode --> work["worker<br/>Target bound or enabled SG set<br/>Lease -> run tests when held"]
+  mode --> comb["combined<br/>Leader election + worker loop"]
+  ctrl --> emit[Emit run JSON snapshot]
+  work --> emit
+  comb --> emit
+
+  cmd --> serve[serve]
+  serve --> api["Start FastAPI + routers"]
+  api --> withRunner{--with-runner?}
+  withRunner --> apiOnly["No -> API only<br/>Reads cache/state files"]
+  withRunner --> runner["Yes -> start controller + worker loop"]
+  runner --> sgwDisc["Discover SGs (config or snapshot)"]
+  sgwDisc --> sgwStart["Start SGW manager per sg_id"]
+  sgwStart --> heavyLight["Heavy/Light refresh loops"]
+  heavyLight --> cache["Cache-first responses from SGW store"]
+  cache --> ready[/ops/ready reflects discovery + cache readiness/]
+```
 
 ## Recommended Next Step (Concrete)
 

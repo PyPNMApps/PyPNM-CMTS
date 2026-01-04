@@ -54,7 +54,7 @@
         "operation_db": ".data/db/operation_capture.json",
         "json_transaction_db": ".data/db/json_transactions.json",
         "retries": 5,
-        "retrival_method": {
+        "retrieval_method": {
             "method": "local",
             "methods": {
                 "local": {

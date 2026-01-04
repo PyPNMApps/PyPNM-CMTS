@@ -23,7 +23,14 @@ class ReadinessCheck(str, Enum):
     SGW_CACHE = "sgw_cache"
 
 
+class CacheRefreshMode(str, Enum):
+    NONE = "none"
+    LIGHT = "light"
+    HEAVY = "heavy"
+
+
 __all__ = [
+    "CacheRefreshMode",
     "OperationalStatus",
     "ReadinessCheck",
 ]

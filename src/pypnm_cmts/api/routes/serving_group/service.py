@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
@@ -14,19 +15,23 @@ from pypnm_cmts.api.routes.serving_group.schemas import (
     GetServingGroupTopologyRequest,
     GetServingGroupTopologyResponse,
     ServingGroupCacheSummaryModel,
+    ServingGroupStatusResponse,
     ServingGroupTopologyModel,
 )
+from pypnm_cmts.lib.constants import CacheRefreshMode
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import (
     SGW_LAST_ERROR_MAX_LENGTH,
     SgwCacheMetadataModel,
     SgwRefreshState,
 )
-from pypnm_cmts.sgw.models import SgwCableModemModel
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
 from pypnm_cmts.sgw.runtime_state import (
     compute_sgw_cache_ready,
+    get_sgw_manager,
     get_sgw_startup_status,
     get_sgw_store,
+    is_sgw_refresh_running,
 )
 from pypnm_cmts.sgw.store import SgwCacheStore
 
@@ -36,6 +41,9 @@ class ServingGroupCacheService:
 
     STORE_UNAVAILABLE_MESSAGE = "sgw store not available"
     SNAPSHOT_MISSING_TEMPLATE = "sgw snapshot missing for sg_id={sg_id}"
+    SG_NOT_FOUND_TEMPLATE = "sg_id not found: {sg_id}"
+    NO_DISCOVERED_MESSAGE = "no discovered service groups"
+    WAIT_POLL_SECONDS = 0.2
 
     def get_ids(self) -> GetServingGroupIdsResponse:
         """Return discovered service group identifiers and cache summaries."""
@@ -58,41 +66,107 @@ class ServingGroupCacheService:
             summaries=summaries,
         )
 
+    def get_status(self) -> ServingGroupStatusResponse:
+        """Return SGW startup and cache readiness status."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        cache_ready, missing_sg_ids = compute_sgw_cache_ready(discovered_sg_ids, store)
+        message = "" if cache_ready else "sgw cache not ready"
+        return ServingGroupStatusResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            startup_status=status,
+            refresh_running=is_sgw_refresh_running(),
+            discovered_count=len(discovered_sg_ids),
+            cache_ready=cache_ready,
+            missing_sg_ids=missing_sg_ids,
+        )
+
     def get_cable_modems(
         self,
         request: GetServingGroupCableModemsRequest,
     ) -> GetServingGroupCableModemsResponse:
         """Return paged cable modem membership for a service group."""
         sg_id = request.sg_id
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
         store = get_sgw_store()
-        entry = store.get_entry(sg_id) if store is not None else None
         now_epoch = self._now_epoch()
-        metadata = self._resolve_metadata(sg_id, store, now_epoch)
-        if entry is None:
+        if int(sg_id) == 0:
+            return self._get_cable_modems_aggregate(
+                request=request,
+                discovered_sg_ids=discovered_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+            )
+        if discovered_sg_ids and sg_id not in discovered_sg_ids:
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)))
             return GetServingGroupCableModemsResponse(
                 status=ServiceStatusCode.FAILURE,
-                message=f"sgw snapshot not available for sg_id={int(sg_id)}",
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)),
                 timestamp=self._utc_now(),
                 sg_id=sg_id,
+                sg_ids=[sg_id],
                 page=request.page,
                 page_size=request.page_size,
                 total_count=0,
                 items=[],
                 metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        refresh_applied, failure_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        if entry is None:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
             )
 
         items = self._paginate_modems(entry.snapshot.cable_modems, request.page, request.page_size)
         total_count = len(entry.snapshot.cable_modems)
         return GetServingGroupCableModemsResponse(
             status=ServiceStatusCode.SUCCESS,
-            message="",
+            message=message,
             timestamp=self._utc_now(),
             sg_id=sg_id,
+            sg_ids=[sg_id],
             page=request.page,
             page_size=request.page_size,
             total_count=total_count,
             items=items,
             metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
         )
 
     def get_topology(
@@ -101,19 +175,61 @@ class ServingGroupCacheService:
     ) -> GetServingGroupTopologyResponse:
         """Return cached topology summary for a service group."""
         sg_id = request.sg_id
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
         store = get_sgw_store()
-        entry = store.get_entry(sg_id) if store is not None else None
         now_epoch = self._now_epoch()
+        if int(sg_id) == 0:
+            return self._get_topology_aggregate(
+                request=request,
+                discovered_sg_ids=discovered_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+            )
+        if discovered_sg_ids and sg_id not in discovered_sg_ids:
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)))
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)),
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                topology=ServingGroupTopologyModel(sg_id=sg_id),
+                metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        refresh_applied, failure_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
         metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
         if entry is None:
             topology = ServingGroupTopologyModel(sg_id=sg_id)
             return GetServingGroupTopologyResponse(
                 status=ServiceStatusCode.FAILURE,
-                message=f"sgw snapshot not available for sg_id={int(sg_id)}",
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
                 timestamp=self._utc_now(),
                 sg_id=sg_id,
+                sg_ids=[sg_id],
                 topology=topology,
                 metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
             )
 
         topology = ServingGroupTopologyModel(
@@ -123,12 +239,284 @@ class ServingGroupCacheService:
         )
         return GetServingGroupTopologyResponse(
             status=ServiceStatusCode.SUCCESS,
-            message="",
+            message=message,
             timestamp=self._utc_now(),
             sg_id=sg_id,
+            sg_ids=[sg_id],
             topology=topology,
             metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
         )
+
+    def _get_cable_modems_aggregate(
+        self,
+        request: GetServingGroupCableModemsRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> GetServingGroupCableModemsResponse:
+        refresh_applied, failure_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        if not discovered_sg_ids:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.SUCCESS,
+                message=self.NO_DISCOVERED_MESSAGE,
+                timestamp=self._utc_now(),
+                sg_id=ServiceGroupId(0),
+                sg_ids=[],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+        modems = self._aggregate_modems(discovered_sg_ids, store)
+        items = self._paginate_modems(modems, request.page, request.page_size)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            page=request.page,
+            page_size=request.page_size,
+            total_count=len(modems),
+            items=items,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _get_topology_aggregate(
+        self,
+        request: GetServingGroupTopologyRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> GetServingGroupTopologyResponse:
+        refresh_applied, failure_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        topology = self._aggregate_topology(discovered_sg_ids, store)
+        if not discovered_sg_ids:
+            message = self.NO_DISCOVERED_MESSAGE
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            topology=topology,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _resolve_aggregate_metadata(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> tuple[SgwCacheMetadataModel, str]:
+        if store is None:
+            return (self._build_error_metadata(self.STORE_UNAVAILABLE_MESSAGE), self.STORE_UNAVAILABLE_MESSAGE)
+        missing: list[ServiceGroupId] = []
+        entries = []
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                missing.append(sg_id)
+                continue
+            entries.append(entry)
+        if missing:
+            message = self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(missing[0]))
+            return (self._build_error_metadata(message), message)
+        if not entries:
+            return (self._build_error_metadata(self.NO_DISCOVERED_MESSAGE), self.NO_DISCOVERED_MESSAGE)
+        newest = max(entries, key=lambda entry: float(entry.snapshot.metadata.snapshot_time_epoch))
+        metadata = self._resolve_metadata(newest.sg_id, store, now_epoch)
+        return (metadata, "")
+
+    def _aggregate_modems(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> list[SgwCableModemModel]:
+        if store is None:
+            return []
+        seen: dict[str, SgwCableModemModel] = {}
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            for modem in entry.snapshot.cable_modems:
+                key = str(modem.mac)
+                if key in seen:
+                    continue
+                seen[key] = modem
+        return self._sort_modems(list(seen.values()))
+
+    def _aggregate_topology(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> ServingGroupTopologyModel:
+        if store is None:
+            return ServingGroupTopologyModel(sg_id=ServiceGroupId(0))
+        ds_channels: set[int] = set()
+        us_channels: set[int] = set()
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            ds_channels.update(entry.snapshot.ds_channels.channel_ids)
+            us_channels.update(entry.snapshot.us_channels.channel_ids)
+        return ServingGroupTopologyModel(
+            sg_id=ServiceGroupId(0),
+            ds_channels=SgwChannelSummaryModel(count=len(ds_channels), channel_ids=sorted(ds_channels)),
+            us_channels=SgwChannelSummaryModel(count=len(us_channels), channel_ids=sorted(us_channels)),
+        )
+
+    def _request_refresh(
+        self,
+        sg_ids: list[ServiceGroupId],
+        refresh: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        manager = get_sgw_manager()
+        if manager is None or refresh == CacheRefreshMode.NONE:
+            return (False, "")
+        applied = False
+        failure_reasons: list[str] = []
+        seen: set[str] = set()
+        for sg_id in sg_ids:
+            accepted, reason = manager.request_refresh(sg_id, refresh, now_epoch)
+            if accepted:
+                applied = True
+            if reason and reason not in seen and len(failure_reasons) < 3:
+                seen.add(reason)
+                failure_reasons.append(reason)
+        failure_message = "; ".join(failure_reasons) if failure_reasons else ""
+        return (applied, failure_message)
+
+    def _wait_for_refresh(
+        self,
+        request: GetServingGroupCableModemsRequest | GetServingGroupTopologyRequest,
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        refresh_applied: bool,
+    ) -> float:
+        if not refresh_applied:
+            return 0.0
+        if not bool(request.require_fresh):
+            return 0.0
+        if float(request.max_wait_seconds) <= 0:
+            return 0.0
+        if store is None:
+            return 0.0
+        is_aggregate = int(request.sg_id) == 0
+        frozen_ids: list[ServiceGroupId]
+        if is_aggregate:
+            manager = get_sgw_manager()
+            if manager is None:
+                frozen_ids = list(sg_ids)
+            else:
+                frozen_ids = manager.get_service_groups()
+        else:
+            frozen_ids = list(sg_ids)
+        if not frozen_ids:
+            return 0.0
+        baseline = self._snapshot_baseline(frozen_ids, store)
+        start = self._monotonic()
+        max_wait_seconds = float(request.max_wait_seconds)
+        while True:
+            if is_aggregate:
+                advanced = self._all_snapshots_advanced(frozen_ids, store, baseline)
+            else:
+                advanced = self._snapshot_advanced(frozen_ids, store, baseline)
+            if advanced:
+                return max(0.0, self._monotonic() - start)
+            elapsed = self._monotonic() - start
+            if elapsed >= max_wait_seconds:
+                return max(0.0, elapsed)
+            self._sleep(self.WAIT_POLL_SECONDS)
+
+    @staticmethod
+    def _snapshot_baseline(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+    ) -> dict[ServiceGroupId, float]:
+        baseline: dict[ServiceGroupId, float] = {}
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            snapshot_epoch = 0.0
+            if entry is not None:
+                snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline[sg_id] = snapshot_epoch
+        return baseline
+
+    @staticmethod
+    def _snapshot_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            if snapshot_epoch > float(baseline.get(sg_id, 0.0)) and snapshot_epoch > 0:
+                return True
+        return False
+
+    @staticmethod
+    def _all_snapshots_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                return False
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline_epoch = float(baseline.get(sg_id, 0.0))
+            if snapshot_epoch <= baseline_epoch or snapshot_epoch <= 0:
+                return False
+        return True
 
     def _resolve_metadata(
         self,
@@ -150,12 +538,16 @@ class ServingGroupCacheService:
         return metadata.model_copy(update={"age_seconds": age_seconds})
 
     @staticmethod
+    def _sort_modems(modems: list[SgwCableModemModel]) -> list[SgwCableModemModel]:
+        return sorted(modems, key=lambda modem: (str(modem.mac), str(modem.ipv4), str(modem.ipv6)))
+
     def _paginate_modems(
+        self,
         modems: list[SgwCableModemModel],
         page: int,
         page_size: int,
     ) -> list[SgwCableModemModel]:
-        ordered = sorted(modems, key=lambda modem: str(modem.mac))
+        ordered = self._sort_modems(modems)
         start = (int(page) - 1) * int(page_size)
         end = start + int(page_size)
         if start >= len(ordered):
@@ -171,12 +563,33 @@ class ServingGroupCacheService:
         return datetime.now(timezone.utc).timestamp()
 
     @staticmethod
+    def _sleep(seconds: float) -> None:
+        time.sleep(float(seconds))
+
+    @staticmethod
+    def _monotonic() -> float:
+        return float(time.monotonic())
+
+    @staticmethod
     def _build_error_metadata(message: str) -> SgwCacheMetadataModel:
         bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
         return SgwCacheMetadataModel(
             snapshot_time_epoch=0.0,
             refresh_state=SgwRefreshState.ERROR,
             last_error=bounded,
+        )
+
+    @staticmethod
+    def _apply_metadata_error(
+        metadata: SgwCacheMetadataModel,
+        message: str,
+    ) -> SgwCacheMetadataModel:
+        bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
+        return metadata.model_copy(
+            update={
+                "refresh_state": SgwRefreshState.ERROR,
+                "last_error": bounded,
+            }
         )
 
 

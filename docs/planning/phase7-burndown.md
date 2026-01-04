@@ -2,9 +2,7 @@
 
 ## Scope
 
-Phase 7 focuses on CMTS endpoint (EP) calls backed by Serving Group Workers (SGW). The SGW layer continuously maintains an in-memory view of serving-group topology and cable-modem membership so endpoint reads are cache-first and low-latency.
-
-A core design constraint for Phase 7 is that **SG worker count scales with the number of service groups**. Each SGW is responsible for exactly one `sg_id` and owns that SG’s cached state.
+Phase 7 focuses on CMTS endpoint (EP) calls backed by Serving Group Workers (SGW). The SGW layer continuously maintains an in-memory view of serving-group topology and cable-modem membership so endpoint reads are cache-first and low-latency. One SGW owns exactly one `sg_id`, keeping worker count aligned with discovered SGs (capped by configuration). See [Architecture – Service Group Workers](../architecture/service-group-workers.md) for the full contract.
 
 ## Operating Model
 
@@ -12,7 +10,7 @@ A core design constraint for Phase 7 is that **SG worker count scales with the n
 - **Two refresh lanes:**
   - **Heavy refresh (inventory):** DS/US channels + full cable-modem membership/topology; expensive SNMP walks; runs on a configurable interval.
   - **Light refresh (state):** registration/online state deltas for known modems; cheaper polling; runs more frequently than heavy refresh and can be decoupled.
-- **Explicit on-demand refresh:** Optional endpoint actions can request refresh, but must be rate-limited and bounded (paging and caps).
+- **Explicit on-demand refresh:** Optional endpoint actions can request refresh, but must be rate-limited and bounded (paging and caps); cache-first reads stay offline until SGW priming completes.
 
 ## Deliverables Summary
 

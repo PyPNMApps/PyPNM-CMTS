@@ -1,12 +1,12 @@
 # PyPNM-CMTS documentation hub
 
 Use this page to get to the right guide for installs, operations, API references, and examples.
-PyPNM-CMTS is designed to service a single CMTS instance; scale horizontally using Docker or Kubernetes.
+PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group (SG). Deployments are supported via Docker; Kubernetes is a planned option.
 
 ## New to PyPNM-CMTS? (start here)
 
-- [Project overview](https://github.com/PyPNMApps/PyPNM-CMTS/blob/main/README.md) - what PyPNM-CMTS provides and how to run the CLI.
-- [Install flow](https://github.com/PyPNMApps/PyPNM-CMTS/blob/main/README.md#getting-started) - clone, run `./install.sh`, and activate `.env`.
+- [Project overview](../README.md) - what PyPNM-CMTS provides and how to run the CLI.
+- [Install flow](../README.md#getting-started) - clone, run `./install.sh`, and activate `.env`.
 - [CLI examples](examples/cli.md) - quick starts for CMTS sysDescr lookups.
 
 ## Configure and operate

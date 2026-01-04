@@ -16,6 +16,7 @@ from pypnm_cmts.api.routes.system.schemas import (
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
 )
+from pypnm_cmts.cmts.service_group_topology_collector import CmtsTopologyCollector
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
     CmtsServiceGroupTopologyModel,
@@ -122,40 +123,15 @@ class SystemCmtsSnmpService:
                 results=[],
             )
 
-        resolved_ip = InetAddressStr("")
-        inet: Inet
-        try:
-            inet = Inet(hostname_value)
-            resolved_ip = InetAddressStr(hostname_value)
-        except ValueError:
-            resolved_ip = SystemCmtsSnmpService._resolve_hostname(hostname_value)
-            if resolved_ip == "":
-                return CmtsServiceGroupTopologyResponse(
-                    hostname=hostname_value,
-                    ip_address=resolved_ip,
-                    status=ServiceStatusCode.FAILURE,
-                    message=f"Failed to resolve hostname: {hostname_value}",
-                    results=[],
-                )
-            try:
-                inet = Inet(resolved_ip)
-            except ValueError as exc:
-                return CmtsServiceGroupTopologyResponse(
-                    hostname=hostname_value,
-                    ip_address=resolved_ip,
-                    status=ServiceStatusCode.FAILURE,
-                    message=f"Invalid CMTS IP address: {exc}",
-                    results=[],
-                )
-
         topology: list[CmtsServiceGroupTopologyModel]
+        resolved_ip = InetAddressStr("")
         try:
-            operation = CmtsOperation(
-                inet=inet,
+            topology, resolved_ip = await CmtsTopologyCollector.fetch_service_group_topology(
+                cmts_hostname=HostNameStr(hostname_value),
+                read_community=request.snmp.snmp_v2c.community,
                 write_community=request.snmp.snmp_v2c.community,
                 port=request.snmp.port,
             )
-            topology = await operation.getServiceGroupTopology()
         except Exception as exc:
             logger.error(f"Failed to retrieve topology: {exc}", exc_info=True)
             return CmtsServiceGroupTopologyResponse(

@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.types import ChannelId, InterfaceIndex
+from pypnm.lib.types import ChannelId, InetAddressStr, InterfaceIndex
 
 from pypnm_cmts.api.routes.system.schemas import CmtsServiceGroupTopologyRequest
 from pypnm_cmts.api.routes.system.service import SystemCmtsSnmpService
@@ -17,9 +17,12 @@ from pypnm_cmts.lib.types import ChSetId, MdCmSgId, MdDsSgId, MdUsSgId
 
 
 def test_service_group_topology_endpoint(monkeypatch: object) -> None:
-    class _DummyOperation:
-        async def getServiceGroupTopology(self) -> list[CmtsServiceGroupTopologyModel]:
-            return [
+    async def _fake_fetch_topology(*_args: object, **_kwargs: object) -> tuple[
+        list[CmtsServiceGroupTopologyModel],
+        InetAddressStr,
+    ]:
+        return (
+            [
                 CmtsServiceGroupTopologyModel(
                     if_index=InterfaceIndex(1049),
                     node_name="NODE-1",
@@ -33,11 +36,13 @@ def test_service_group_topology_endpoint(monkeypatch: object) -> None:
                     ds_channels=[ChannelId(1), ChannelId(2)],
                     us_channels=[ChannelId(3), ChannelId(4)],
                 )
-            ]
+            ],
+            InetAddressStr("192.168.0.100"),
+        )
 
     monkeypatch.setattr(
-        "pypnm_cmts.api.routes.system.service.CmtsOperation",
-        lambda inet, write_community, port: _DummyOperation(),
+        "pypnm_cmts.cmts.service_group_topology_collector.CmtsTopologyCollector.fetch_service_group_topology",
+        _fake_fetch_topology,
     )
 
     request = CmtsServiceGroupTopologyRequest(

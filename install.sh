@@ -25,9 +25,19 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    --*)
+      echo "ERROR: Unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
     *)
-      if [[ -n "${VENV_DIR}" && "${VENV_DIR}" != ".env" ]]; then
+      if [[ "${VENV_DIR}" != ".env" ]]; then
         echo "ERROR: Multiple venv directories provided." >&2
+        usage
+        exit 1
+      fi
+      if [[ "$1" == -* ]]; then
+        echo "ERROR: Invalid venv directory: $1" >&2
         usage
         exit 1
       fi
@@ -37,8 +47,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found in PATH." >&2
+  exit 1
+fi
+
+SETUP_SCRIPT="${SCRIPT_DIR}/scripts/setup-and-test.sh"
+if [[ ! -f "${SETUP_SCRIPT}" ]]; then
+  echo "ERROR: Missing script: ${SETUP_SCRIPT}" >&2
+  exit 1
+fi
+if [[ ! -x "${SETUP_SCRIPT}" ]]; then
+  echo "ERROR: Script is not executable: ${SETUP_SCRIPT}" >&2
+  exit 1
+fi
+
 if [[ ! -d "${VENV_DIR}" ]]; then
   python3 -m venv "${VENV_DIR}"
 fi
 
-"${SCRIPT_DIR}/scripts/setup-and-test.sh" "${VENV_DIR}" "${UPDATE_PYPNM_DOCSIS}"
+"${SETUP_SCRIPT}" "${VENV_DIR}" "${UPDATE_PYPNM_DOCSIS}"

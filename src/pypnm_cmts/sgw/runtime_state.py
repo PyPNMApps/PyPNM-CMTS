@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field
 
 from pypnm_cmts.lib.types import ServiceGroupId
@@ -11,6 +14,8 @@ from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 DEFAULT_SGW_STARTUP_ERROR = "sgw startup failed"
+DEFAULT_SGW_REFRESH_STOP_TIMEOUT_SECONDS = 5.0
+SGW_REFRESH_THREAD_NAME = "pypnm-cmts-sgw-refresh"
 
 
 class SgwStartupStatusModel(BaseModel):
@@ -27,11 +32,15 @@ class SgwStartupStatusModel(BaseModel):
 _sgw_status = SgwStartupStatusModel()
 _sgw_store: SgwCacheStore | None = None
 _sgw_manager: SgwManager | None = None
+_sgw_refresh_thread: threading.Thread | None = None
+_sgw_refresh_running = False
+_sgw_refresh_lock = threading.Lock()
 
 
 def reset_sgw_runtime_state() -> None:
     """Reset SGW runtime state (tests only)."""
     global _sgw_status, _sgw_store, _sgw_manager
+    stop_sgw_background_refresh()
     _sgw_status = SgwStartupStatusModel()
     _sgw_store = None
     _sgw_manager = None
@@ -113,6 +122,68 @@ def get_sgw_manager() -> SgwManager | None:
     return _sgw_manager
 
 
+def start_sgw_background_refresh(
+    clock: Callable[[], float] | None = None,
+) -> bool:
+    """Start the SGW background refresh loop if startup succeeded."""
+    global _sgw_refresh_thread, _sgw_refresh_running
+    status = _sgw_status
+    manager = _sgw_manager
+    if not status.startup_completed or not status.discovery_ok or status.prime_failed:
+        return False
+    if manager is None:
+        return False
+    with _sgw_refresh_lock:
+        if _sgw_refresh_thread is not None and _sgw_refresh_thread.is_alive():
+            return True
+        _sgw_refresh_running = True
+        _sgw_refresh_thread = threading.Thread(
+            target=_run_sgw_refresh_loop,
+            name=SGW_REFRESH_THREAD_NAME,
+            daemon=True,
+            args=(manager, clock),
+        )
+        _sgw_refresh_thread.start()
+    return True
+
+
+def stop_sgw_background_refresh(
+    timeout_seconds: float = DEFAULT_SGW_REFRESH_STOP_TIMEOUT_SECONDS,
+) -> None:
+    """Stop the SGW background refresh loop if it is running."""
+    global _sgw_refresh_thread, _sgw_refresh_running
+    manager = _sgw_manager
+    if manager is not None:
+        manager.stop()
+    with _sgw_refresh_lock:
+        thread = _sgw_refresh_thread
+    if thread is not None:
+        thread.join(timeout=float(timeout_seconds))
+    with _sgw_refresh_lock:
+        if _sgw_refresh_thread is thread and (thread is None or not thread.is_alive()):
+            _sgw_refresh_thread = None
+            _sgw_refresh_running = False
+
+
+def is_sgw_refresh_running() -> bool:
+    """Return whether the SGW background refresh loop is running."""
+    with _sgw_refresh_lock:
+        return bool(_sgw_refresh_running)
+
+
+def _run_sgw_refresh_loop(
+    manager: SgwManager,
+    clock: Callable[[], float] | None,
+) -> None:
+    global _sgw_refresh_thread, _sgw_refresh_running
+    try:
+        manager.refresh_forever(clock=clock)
+    finally:
+        with _sgw_refresh_lock:
+            _sgw_refresh_running = False
+            _sgw_refresh_thread = None
+
+
 def compute_sgw_cache_ready(
     discovered_sg_ids: list[ServiceGroupId],
     store: SgwCacheStore | None,
@@ -136,7 +207,10 @@ __all__ = [
     "get_sgw_manager",
     "get_sgw_startup_status",
     "get_sgw_store",
+    "is_sgw_refresh_running",
     "reset_sgw_runtime_state",
+    "start_sgw_background_refresh",
+    "stop_sgw_background_refresh",
     "set_sgw_startup_failure",
     "set_sgw_startup_prime_failure",
     "set_sgw_startup_success",

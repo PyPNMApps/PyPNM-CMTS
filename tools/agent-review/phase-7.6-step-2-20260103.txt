@@ -1,0 +1,2 @@
+# FILE: tests/integration/test_endpoints_live.py
+$(cat tests/integration/test_endpoints_live.py)

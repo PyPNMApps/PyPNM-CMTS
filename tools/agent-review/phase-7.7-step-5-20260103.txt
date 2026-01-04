@@ -1,0 +1,1199 @@
+# FILE: src/pypnm_cmts/api/routes/serving_group/service.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+    GetServingGroupCableModemsResponse,
+    GetServingGroupIdsResponse,
+    GetServingGroupTopologyRequest,
+    GetServingGroupTopologyResponse,
+    ServingGroupCacheSummaryModel,
+    ServingGroupTopologyModel,
+)
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import (
+    SGW_LAST_ERROR_MAX_LENGTH,
+    SgwCacheMetadataModel,
+    SgwRefreshState,
+)
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    get_sgw_manager,
+    get_sgw_startup_status,
+    get_sgw_store,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+class ServingGroupCacheService:
+    """Service layer for cache-backed serving group endpoints."""
+
+    STORE_UNAVAILABLE_MESSAGE = "sgw store not available"
+    SNAPSHOT_MISSING_TEMPLATE = "sgw snapshot missing for sg_id={sg_id}"
+    SG_NOT_FOUND_TEMPLATE = "sg_id not found: {sg_id}"
+    NO_DISCOVERED_MESSAGE = "no discovered service groups"
+    WAIT_POLL_SECONDS = 0.2
+
+    def get_ids(self) -> GetServingGroupIdsResponse:
+        """Return discovered service group identifiers and cache summaries."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        sgw_ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+        summaries: list[ServingGroupCacheSummaryModel] = []
+        now_epoch = self._now_epoch()
+        for sg_id in discovered_sg_ids:
+            metadata = self._resolve_metadata(sg_id, store, now_epoch)
+            summaries.append(ServingGroupCacheSummaryModel(sg_id=sg_id, metadata=metadata))
+        message = "" if sgw_ready else "sgw cache not ready"
+        return GetServingGroupIdsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            discovered_sg_ids=discovered_sg_ids,
+            sgw_ready=sgw_ready,
+            summaries=summaries,
+        )
+
+    def get_cable_modems(
+        self,
+        request: GetServingGroupCableModemsRequest,
+    ) -> GetServingGroupCableModemsResponse:
+        """Return paged cable modem membership for a service group."""
+        sg_id = request.sg_id
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        now_epoch = self._now_epoch()
+        if int(sg_id) == 0:
+            return self._get_cable_modems_aggregate(
+                request=request,
+                discovered_sg_ids=discovered_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+            )
+        if discovered_sg_ids and sg_id not in discovered_sg_ids:
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)))
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)),
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        refresh_applied, refresh_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            now_epoch,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if refresh_message != "":
+            metadata = self._apply_metadata_error(metadata, refresh_message)
+            message = refresh_message
+        if entry is None:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+
+        items = self._paginate_modems(entry.snapshot.cable_modems, request.page, request.page_size)
+        total_count = len(entry.snapshot.cable_modems)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            sg_ids=[sg_id],
+            page=request.page,
+            page_size=request.page_size,
+            total_count=total_count,
+            items=items,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def get_topology(
+        self,
+        request: GetServingGroupTopologyRequest,
+    ) -> GetServingGroupTopologyResponse:
+        """Return cached topology summary for a service group."""
+        sg_id = request.sg_id
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        now_epoch = self._now_epoch()
+        if int(sg_id) == 0:
+            return self._get_topology_aggregate(
+                request=request,
+                discovered_sg_ids=discovered_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+            )
+        if discovered_sg_ids and sg_id not in discovered_sg_ids:
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)))
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)),
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                topology=ServingGroupTopologyModel(sg_id=sg_id),
+                metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        refresh_applied, refresh_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            now_epoch,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if refresh_message != "":
+            metadata = self._apply_metadata_error(metadata, refresh_message)
+            message = refresh_message
+        if entry is None:
+            topology = ServingGroupTopologyModel(sg_id=sg_id)
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                topology=topology,
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+
+        topology = ServingGroupTopologyModel(
+            sg_id=sg_id,
+            ds_channels=entry.snapshot.ds_channels,
+            us_channels=entry.snapshot.us_channels,
+        )
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            sg_ids=[sg_id],
+            topology=topology,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _get_cable_modems_aggregate(
+        self,
+        request: GetServingGroupCableModemsRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> GetServingGroupCableModemsResponse:
+        refresh_applied, refresh_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            now_epoch,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if refresh_message != "":
+            metadata = self._apply_metadata_error(metadata, refresh_message)
+            message = refresh_message
+        if not discovered_sg_ids:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.SUCCESS,
+                message=self.NO_DISCOVERED_MESSAGE,
+                timestamp=self._utc_now(),
+                sg_id=ServiceGroupId(0),
+                sg_ids=[],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+        modems = self._aggregate_modems(discovered_sg_ids, store)
+        items = self._paginate_modems(modems, request.page, request.page_size)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            page=request.page,
+            page_size=request.page_size,
+            total_count=len(modems),
+            items=items,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _get_topology_aggregate(
+        self,
+        request: GetServingGroupTopologyRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> GetServingGroupTopologyResponse:
+        refresh_applied, refresh_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            now_epoch,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if refresh_message != "":
+            metadata = self._apply_metadata_error(metadata, refresh_message)
+            message = refresh_message
+        topology = self._aggregate_topology(discovered_sg_ids, store)
+        if not discovered_sg_ids:
+            message = self.NO_DISCOVERED_MESSAGE
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            topology=topology,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _resolve_aggregate_metadata(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> tuple[SgwCacheMetadataModel, str]:
+        if store is None:
+            return (self._build_error_metadata(self.STORE_UNAVAILABLE_MESSAGE), self.STORE_UNAVAILABLE_MESSAGE)
+        missing: list[ServiceGroupId] = []
+        entries = []
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                missing.append(sg_id)
+                continue
+            entries.append(entry)
+        if missing:
+            message = self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(missing[0]))
+            return (self._build_error_metadata(message), message)
+        if not entries:
+            return (self._build_error_metadata(self.NO_DISCOVERED_MESSAGE), self.NO_DISCOVERED_MESSAGE)
+        newest = max(entries, key=lambda entry: float(entry.snapshot.metadata.snapshot_time_epoch))
+        metadata = self._resolve_metadata(newest.sg_id, store, now_epoch)
+        return (metadata, "")
+
+    def _aggregate_modems(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> list[SgwCableModemModel]:
+        if store is None:
+            return []
+        seen: dict[str, SgwCableModemModel] = {}
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            for modem in entry.snapshot.cable_modems:
+                key = str(modem.mac)
+                if key in seen:
+                    continue
+                seen[key] = modem
+        return self._sort_modems(list(seen.values()))
+
+    def _aggregate_topology(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> ServingGroupTopologyModel:
+        if store is None:
+            return ServingGroupTopologyModel(sg_id=ServiceGroupId(0))
+        ds_channels: set[int] = set()
+        us_channels: set[int] = set()
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            ds_channels.update(entry.snapshot.ds_channels.channel_ids)
+            us_channels.update(entry.snapshot.us_channels.channel_ids)
+        return ServingGroupTopologyModel(
+            sg_id=ServiceGroupId(0),
+            ds_channels=SgwChannelSummaryModel(count=len(ds_channels), channel_ids=sorted(ds_channels)),
+            us_channels=SgwChannelSummaryModel(count=len(us_channels), channel_ids=sorted(us_channels)),
+        )
+
+    def _request_refresh(
+        self,
+        sg_ids: list[ServiceGroupId],
+        refresh: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        manager = get_sgw_manager()
+        if manager is None or refresh == CacheRefreshMode.NONE:
+            return (False, "")
+        applied = False
+        message = ""
+        failure_reasons: list[str] = []
+        seen: set[str] = set()
+        for sg_id in sg_ids:
+            accepted, reason = manager.request_refresh(sg_id, refresh, now_epoch)
+            if accepted:
+                applied = True
+            if reason != "":
+                if reason not in seen and len(failure_reasons) < 3:
+                    seen.add(reason)
+                    failure_reasons.append(reason)
+        if failure_reasons:
+            message = "; ".join(failure_reasons)
+        elif applied:
+            message = "refresh requested"
+        return (applied, message)
+
+    def _wait_for_refresh(
+        self,
+        request: GetServingGroupCableModemsRequest | GetServingGroupTopologyRequest,
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+        refresh_applied: bool,
+    ) -> float:
+        if not refresh_applied:
+            return 0.0
+        if not bool(request.require_fresh):
+            return 0.0
+        if float(request.max_wait_seconds) <= 0:
+            return 0.0
+        if store is None:
+            return 0.0
+        is_aggregate = int(request.sg_id) == 0
+        frozen_ids: list[ServiceGroupId]
+        if is_aggregate:
+            manager = get_sgw_manager()
+            if manager is None:
+                frozen_ids = list(sg_ids)
+            else:
+                frozen_ids = manager.get_service_groups()
+        else:
+            frozen_ids = list(sg_ids)
+        if not frozen_ids:
+            return 0.0
+        baseline = self._snapshot_baseline(frozen_ids, store)
+        start = self._monotonic()
+        max_wait_seconds = float(request.max_wait_seconds)
+        while True:
+            if is_aggregate:
+                advanced = self._all_snapshots_advanced(frozen_ids, store, baseline)
+            else:
+                advanced = self._snapshot_advanced(frozen_ids, store, baseline)
+            if advanced:
+                return max(0.0, self._monotonic() - start)
+            elapsed = self._monotonic() - start
+            if elapsed >= max_wait_seconds:
+                return max(0.0, elapsed)
+            self._sleep(self.WAIT_POLL_SECONDS)
+
+    @staticmethod
+    def _snapshot_baseline(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+    ) -> dict[ServiceGroupId, float]:
+        baseline: dict[ServiceGroupId, float] = {}
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            snapshot_epoch = 0.0
+            if entry is not None:
+                snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline[sg_id] = snapshot_epoch
+        return baseline
+
+    @staticmethod
+    def _snapshot_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            if snapshot_epoch > float(baseline.get(sg_id, 0.0)) and snapshot_epoch > 0:
+                return True
+        return False
+
+    @staticmethod
+    def _all_snapshots_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                return False
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline_epoch = float(baseline.get(sg_id, 0.0))
+            if snapshot_epoch <= baseline_epoch or snapshot_epoch <= 0:
+                return False
+        return True
+
+    def _resolve_metadata(
+        self,
+        sg_id: ServiceGroupId,
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> SgwCacheMetadataModel:
+        if store is None:
+            return self._build_error_metadata(self.STORE_UNAVAILABLE_MESSAGE)
+        entry = store.get_entry(sg_id)
+        if entry is None:
+            message = self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(sg_id))
+            return self._build_error_metadata(message)
+        metadata = entry.snapshot.metadata
+        snapshot_epoch = float(metadata.snapshot_time_epoch)
+        if snapshot_epoch <= 0:
+            return metadata
+        age_seconds = max(0.0, float(now_epoch) - snapshot_epoch)
+        return metadata.model_copy(update={"age_seconds": age_seconds})
+
+    @staticmethod
+    def _sort_modems(modems: list[SgwCableModemModel]) -> list[SgwCableModemModel]:
+        return sorted(modems, key=lambda modem: (str(modem.mac), str(modem.ipv4), str(modem.ipv6)))
+
+    def _paginate_modems(
+        self,
+        modems: list[SgwCableModemModel],
+        page: int,
+        page_size: int,
+    ) -> list[SgwCableModemModel]:
+        ordered = self._sort_modems(modems)
+        start = (int(page) - 1) * int(page_size)
+        end = start + int(page_size)
+        if start >= len(ordered):
+            return []
+        return ordered[start:end]
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _now_epoch() -> float:
+        return datetime.now(timezone.utc).timestamp()
+
+    @staticmethod
+    def _sleep(seconds: float) -> None:
+        time.sleep(float(seconds))
+
+    @staticmethod
+    def _monotonic() -> float:
+        return float(time.monotonic())
+
+    @staticmethod
+    def _build_error_metadata(message: str) -> SgwCacheMetadataModel:
+        bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
+        return SgwCacheMetadataModel(
+            snapshot_time_epoch=0.0,
+            refresh_state=SgwRefreshState.ERROR,
+            last_error=bounded,
+        )
+
+    @staticmethod
+    def _apply_metadata_error(
+        metadata: SgwCacheMetadataModel,
+        message: str,
+    ) -> SgwCacheMetadataModel:
+        bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
+        return metadata.model_copy(
+            update={
+                "refresh_state": SgwRefreshState.ERROR,
+                "last_error": bounded,
+            }
+        )
+
+
+__all__ = [
+    "ServingGroupCacheService",
+]
+
+# FILE: src/pypnm_cmts/sgw/manager.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import random
+import threading
+import time
+from collections.abc import Callable
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
+from pypnm_cmts.sgw.models import (
+    DEFAULT_AGE_SECONDS,
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwRefreshErrorModel,
+    SgwRefreshResultModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+JITTER_MIN_SECONDS = 0
+
+HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
+LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
+Clock = Callable[[], float]
+Sleeper = Callable[[float], None]
+
+
+class SgwManager:
+    """Serving group worker cache manager."""
+
+    def __init__(
+        self,
+        settings: CmtsOrchestratorSettings,
+        store: SgwCacheStore | None = None,
+        service_groups: list[ServiceGroupId] | None = None,
+        jitter_provider: Callable[[ServiceGroupId, int], int] | None = None,
+        heavy_poller: HeavyPoller | None = None,
+        light_poller: LightPoller | None = None,
+    ) -> None:
+        """
+        Initialize the SGW manager.
+
+        Args:
+            settings (CmtsOrchestratorSettings): Orchestrator settings instance.
+            store (SgwCacheStore | None): Optional cache store.
+            service_groups (list[ServiceGroupId] | None): Initial service group identifiers.
+            jitter_provider (Callable[[ServiceGroupId, int], int] | None): Optional jitter provider.
+            heavy_poller (HeavyPoller | None): Optional heavy refresh poller.
+            light_poller (LightPoller | None): Optional light refresh poller.
+        """
+        self._settings = settings
+        self._store = store if store is not None else SgwCacheStore()
+        self._service_groups = list(service_groups) if service_groups is not None else []
+        self._jitter_provider = jitter_provider if jitter_provider is not None else self._default_jitter
+        self._heavy_poller = heavy_poller if heavy_poller is not None else self._default_heavy_poller
+        self._light_poller = light_poller if light_poller is not None else self._default_light_poller
+        self._jitter_by_sg: dict[ServiceGroupId, int] = {}
+        self._refresh_requests: dict[ServiceGroupId, CacheRefreshMode] = {}
+        self._stop_requested = False
+        self._stop_event = threading.Event()
+        if self._service_groups:
+            self._initialize_jitter(self._service_groups)
+
+    def set_service_groups(self, service_groups: list[ServiceGroupId]) -> None:
+        """Update the service groups managed by this instance."""
+        self._service_groups = list(service_groups)
+        self._initialize_jitter(self._service_groups)
+
+    def get_service_groups(self) -> list[ServiceGroupId]:
+        """Return the current list of service groups managed by this manager."""
+        return list(self._service_groups)
+
+    def get_store(self) -> SgwCacheStore:
+        """
+        Return the cache store associated with this manager.
+        """
+        return self._store
+
+    def stop(self) -> None:
+        """Request that the refresh loop stop."""
+        self._stop_requested = True
+        self._stop_event.set()
+
+    def request_refresh(
+        self,
+        sg_id: ServiceGroupId,
+        mode: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        """
+        Request an on-demand refresh for a service group.
+
+        Returns:
+            tuple[bool, str]: (accepted, message)
+        """
+        if mode == CacheRefreshMode.NONE:
+            return (False, "")
+        if sg_id not in self._service_groups:
+            return (False, "sg_id not managed by sgw")
+        if mode == CacheRefreshMode.HEAVY and self._heavy_refresh_rate_limited(sg_id, now_epoch):
+            return (False, "heavy refresh rate limited")
+        current = self._refresh_requests.get(sg_id)
+        if current == CacheRefreshMode.HEAVY:
+            return (True, "")
+        if mode == CacheRefreshMode.HEAVY or current is None:
+            self._refresh_requests[sg_id] = mode
+            return (True, "")
+        return (True, "")
+
+    def refresh_forever(
+        self,
+        sleeper: Sleeper | None = None,
+        clock: Clock | None = None,
+        max_cycles: int | None = None,
+    ) -> list[SgwRefreshResultModel]:
+        """
+        Execute refresh cycles until stopped or max_cycles is reached.
+
+        Args:
+            sleeper (Sleeper | None): Optional sleep function for tests.
+            clock (Clock | None): Optional clock function for tests.
+            max_cycles (int | None): Optional maximum number of cycles to execute.
+
+        Returns:
+            list[SgwRefreshResultModel]: Collected refresh results when max_cycles is provided.
+        """
+        if max_cycles is not None and int(max_cycles) < 0:
+            raise ValueError("max_cycles must be non-negative.")
+        sleep_fn = sleeper if sleeper is not None else time.sleep
+        clock_fn = clock if clock is not None else self._default_clock
+        interval_seconds = float(self._settings.sgw.poll_light_seconds)
+        results: list[SgwRefreshResultModel] = []
+        cycles = 0
+        self._stop_requested = False
+        self._stop_event.clear()
+        while not self._stop_requested:
+            now_epoch = float(clock_fn())
+            result = self.refresh_once(now_epoch)
+            if max_cycles is not None:
+                results.append(result)
+            cycles += 1
+            if max_cycles is not None and cycles >= int(max_cycles):
+                break
+            if self._stop_requested:
+                break
+            if self._stop_event.wait(timeout=interval_seconds):
+                break
+        return results
+
+    def refresh_once(self, now_epoch: float) -> SgwRefreshResultModel:
+        """
+        Execute a single refresh cycle.
+
+        Args:
+            now_epoch (float): Current time in epoch seconds.
+
+        Returns:
+            SgwRefreshResultModel: Summary of refresh operations performed.
+        """
+        if float(now_epoch) < 0:
+            raise ValueError("now_epoch must be non-negative.")
+        if not bool(self._settings.sgw.enabled):
+            return SgwRefreshResultModel(snapshot_time_epoch=float(now_epoch))
+
+        heavy_refreshed: list[ServiceGroupId] = []
+        light_refreshed: list[ServiceGroupId] = []
+        errors: list[SgwRefreshErrorModel] = []
+
+        for sg_id in list(self._service_groups):
+            entry = self._ensure_entry(sg_id, now_epoch)
+            metadata = entry.snapshot.metadata
+            jitter_seconds = self._resolve_jitter_seconds(sg_id)
+
+            try:
+                requested = self._refresh_requests.pop(sg_id, None)
+                heavy_due = False
+                light_due = False
+                if requested == CacheRefreshMode.HEAVY:
+                    heavy_due = True
+                elif requested == CacheRefreshMode.LIGHT:
+                    light_due = True
+                else:
+                    heavy_due = self._is_refresh_due(
+                        metadata.last_heavy_refresh_epoch,
+                        int(self._settings.sgw.poll_heavy_seconds),
+                        jitter_seconds,
+                        now_epoch,
+                    )
+                    if not heavy_due:
+                        light_due = self._is_refresh_due(
+                            metadata.last_light_refresh_epoch,
+                            int(self._settings.sgw.poll_light_seconds),
+                            jitter_seconds,
+                            now_epoch,
+                        )
+                if heavy_due:
+                    payload = self._heavy_poller(sg_id, self._settings)
+                    self._refresh_heavy(sg_id, now_epoch, payload)
+                    heavy_refreshed.append(sg_id)
+                    light_refreshed.append(sg_id)
+                elif light_due:
+                    updated_modems = self._light_poller(
+                        sg_id,
+                        self._settings,
+                        list(entry.snapshot.cable_modems),
+                    )
+                    self._refresh_light(sg_id, now_epoch, updated_modems)
+                    light_refreshed.append(sg_id)
+            except Exception as exc:
+                metadata = self._store.mark_error(sg_id, str(exc), now_epoch)
+                errors.append(SgwRefreshErrorModel(sg_id=sg_id, message=metadata.last_error or ""))
+
+            entry = self._store.get_entry(sg_id) or entry
+            metadata = entry.snapshot.metadata
+            age_seconds = max(DEFAULT_AGE_SECONDS, float(now_epoch) - float(metadata.snapshot_time_epoch))
+            metadata = metadata.model_copy(update={"age_seconds": age_seconds})
+
+            if metadata.refresh_state != SgwRefreshState.ERROR:
+                if self._store.compute_staleness(age_seconds, int(self._settings.sgw.cache_max_age_seconds)):
+                    metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.STALE})
+                else:
+                    metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.OK})
+
+            entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+            self._store.upsert_entry(entry)
+
+        return SgwRefreshResultModel(
+            snapshot_time_epoch=float(now_epoch),
+            heavy_refreshed_sg_ids=heavy_refreshed,
+            light_refreshed_sg_ids=light_refreshed,
+            errors=errors,
+        )
+
+    def _ensure_entry(self, sg_id: ServiceGroupId, now_epoch: float) -> SgwCacheEntryModel:
+        entry = self._store.get_entry(sg_id)
+        if entry is not None:
+            return entry
+        metadata = SgwCacheMetadataModel(
+            snapshot_time_epoch=float(now_epoch),
+            age_seconds=DEFAULT_AGE_SECONDS,
+        )
+        snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+        entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
+        self._store.upsert_entry(entry)
+        return entry
+
+    def _refresh_heavy(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        payload: SgwSnapshotPayloadModel,
+    ) -> None:
+        entry = self._ensure_entry(sg_id, now_epoch)
+        metadata = entry.snapshot.metadata.model_copy(
+            update={
+                "snapshot_time_epoch": float(now_epoch),
+                "age_seconds": DEFAULT_AGE_SECONDS,
+                "last_heavy_refresh_epoch": float(now_epoch),
+                "last_light_refresh_epoch": float(now_epoch),
+                "refresh_state": SgwRefreshState.OK,
+                "last_error": None,
+            }
+        )
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "ds_channels": payload.ds_channels,
+                "us_channels": payload.us_channels,
+                "cable_modems": list(payload.cable_modems),
+                "metadata": metadata,
+            }
+        )
+        self._store.upsert_entry(entry)
+
+    def _refresh_light(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        cable_modems: list[SgwCableModemModel],
+    ) -> None:
+        entry = self._ensure_entry(sg_id, now_epoch)
+        metadata = entry.snapshot.metadata.model_copy(
+            update={
+                "snapshot_time_epoch": float(now_epoch),
+                "age_seconds": DEFAULT_AGE_SECONDS,
+                "last_light_refresh_epoch": float(now_epoch),
+                "refresh_state": SgwRefreshState.OK,
+                "last_error": None,
+            }
+        )
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "cable_modems": list(cable_modems),
+                "metadata": metadata,
+            }
+        )
+        self._store.upsert_entry(entry)
+
+    def _is_refresh_due(
+        self,
+        last_refresh_epoch: float | None,
+        interval_seconds: int,
+        jitter_seconds: int,
+        now_epoch: float,
+    ) -> bool:
+        if last_refresh_epoch is None:
+            return True
+        elapsed = float(now_epoch) - float(last_refresh_epoch)
+        return elapsed >= float(interval_seconds + jitter_seconds)
+
+    def _heavy_refresh_rate_limited(self, sg_id: ServiceGroupId, now_epoch: float) -> bool:
+        entry = self._store.get_entry(sg_id)
+        if entry is None:
+            return False
+        last_heavy = entry.snapshot.metadata.last_heavy_refresh_epoch
+        if last_heavy is None:
+            return False
+        elapsed = float(now_epoch) - float(last_heavy)
+        return elapsed < float(self._settings.sgw.poll_heavy_seconds)
+
+    def _resolve_jitter_seconds(self, sg_id: ServiceGroupId) -> int:
+        cached = self._jitter_by_sg.get(sg_id)
+        if cached is not None:
+            return cached
+        max_jitter = int(self._settings.sgw.refresh_jitter_seconds)
+        if max_jitter <= 0:
+            self._jitter_by_sg[sg_id] = JITTER_MIN_SECONDS
+            return JITTER_MIN_SECONDS
+        jitter_value = int(self._jitter_provider(sg_id, max_jitter))
+        jitter_value = self._clamp_jitter(jitter_value, max_jitter)
+        self._jitter_by_sg[sg_id] = jitter_value
+        return jitter_value
+
+    @staticmethod
+    def _default_jitter(_sg_id: ServiceGroupId, max_jitter_seconds: int) -> int:
+        if max_jitter_seconds <= 0:
+            return JITTER_MIN_SECONDS
+        return random.randint(JITTER_MIN_SECONDS, max_jitter_seconds)
+
+    @staticmethod
+    def _default_heavy_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+    ) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    @staticmethod
+    def _default_light_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    @staticmethod
+    def _default_clock() -> float:
+        return float(time.time())
+
+    def _initialize_jitter(self, service_groups: list[ServiceGroupId]) -> None:
+        self._jitter_by_sg = {}
+        for sg_id in service_groups:
+            self._jitter_by_sg[sg_id] = self._resolve_jitter_seconds(sg_id)
+
+    @staticmethod
+    def _clamp_jitter(jitter_value: int, max_jitter: int) -> int:
+        if jitter_value < JITTER_MIN_SECONDS:
+            return JITTER_MIN_SECONDS
+        if jitter_value > max_jitter:
+            return max_jitter
+        return jitter_value
+
+
+__all__ = [
+    "SgwManager",
+]
+
+# FILE: src/pypnm_cmts/sgw/pollers/heavy.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+
+from pypnm.lib.types import SnmpReadCommunity, SnmpWriteCommunity
+
+from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+from pypnm_cmts.cmts.service_group_topology_collector import CmtsTopologyCollector
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
+    CmtsServiceGroupTopologyModel,
+)
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotPayloadModel,
+)
+
+
+def _run_asyncio(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+    raise RuntimeError("heavy poller cannot be run from inside an existing asyncio loop")
+
+
+def sgw_heavy_poller(
+    sg_id: ServiceGroupId,
+    settings: CmtsOrchestratorSettings,
+) -> SgwSnapshotPayloadModel:
+    """
+    Perform a heavy refresh for a single service group.
+    """
+    topology = _fetch_topology(settings)
+    ds_channels, us_channels = _summarize_channels(topology, sg_id)
+    modems = _fetch_cable_modems(sg_id, settings)
+    return SgwSnapshotPayloadModel(
+        ds_channels=ds_channels,
+        us_channels=us_channels,
+        cable_modems=modems,
+    )
+
+
+def _fetch_topology(settings: CmtsOrchestratorSettings) -> list[CmtsServiceGroupTopologyModel]:
+    try:
+        return _run_asyncio(
+            CmtsTopologyCollector.fetch_service_group_topology(
+                cmts_hostname=settings.adapter.hostname,
+                read_community=settings.adapter.community,
+                write_community=SnmpWriteCommunity(str(settings.adapter.write_community)),
+                port=int(settings.adapter.port),
+            )
+        )[0]
+    except Exception as exc:
+        raise RuntimeError(f"Failed to collect service group topology: {exc}") from exc
+
+
+def _fetch_cable_modems(
+    sg_id: ServiceGroupId,
+    settings: CmtsOrchestratorSettings,
+) -> list[SgwCableModemModel]:
+    service = CmtsInventoryDiscoveryService(
+        cmts_hostname=settings.adapter.hostname,
+        read_community=SnmpReadCommunity(str(settings.adapter.community)),
+        write_community=SnmpWriteCommunity(str(settings.adapter.write_community)),
+        port=int(settings.adapter.port),
+    )
+    try:
+        per_sg = _run_asyncio(service.discover_registered_cms_by_sg([sg_id]))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to collect cable modem membership: {exc}") from exc
+    if not per_sg:
+        return []
+    modems = [
+        SgwCableModemModel(mac=cm.mac, ipv4=cm.ipv4, ipv6=cm.ipv6)
+        for cm in per_sg[0].cms
+    ]
+    return sorted(modems, key=lambda modem: (str(modem.mac), str(modem.ipv4), str(modem.ipv6)))
+
+
+def _summarize_channels(
+    topology: list[CmtsServiceGroupTopologyModel],
+    sg_id: ServiceGroupId,
+) -> tuple[SgwChannelSummaryModel, SgwChannelSummaryModel]:
+    ds_channels: set[int] = set()
+    us_channels: set[int] = set()
+    for entry in topology:
+        if int(entry.md_cm_sg_id) != int(sg_id):
+            continue
+        ds_channels.update(int(channel) for channel in entry.ds_channels)
+        us_channels.update(int(channel) for channel in entry.us_channels)
+    ds_list = sorted(ds_channels)
+    us_list = sorted(us_channels)
+    return (
+        SgwChannelSummaryModel(count=len(ds_list), channel_ids=ds_list),
+        SgwChannelSummaryModel(count=len(us_list), channel_ids=us_list),
+    )
+
+
+__all__ = [
+    "sgw_heavy_poller",
+]
+
+# FILE: tests/test_serving_group_cache_service.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.api.routes.serving_group.schemas import GetServingGroupCableModemsRequest
+from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import SgwCacheEntryModel, SgwSnapshotModel
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+def _seed_snapshot(store: SgwCacheStore, sg_id: ServiceGroupId, snapshot_time: float) -> None:
+    metadata = SgwCacheMetadataModel(snapshot_time_epoch=snapshot_time, age_seconds=0.0)
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+
+@pytest.mark.unit
+def test_aggregate_require_fresh_waits_for_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    service = ServingGroupCacheService()
+    store = SgwCacheStore()
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+    for sg_id in sg_ids:
+        _seed_snapshot(store, sg_id, 1_000.0)
+
+    settings = CmtsOrchestratorSettings()
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, 1_000.0)
+
+    call_state = {"count": 0}
+
+    def _fake_sleep(_: float) -> None:
+        call_state["count"] += 1
+        if call_state["count"] == 1:
+            entry = store.get_entry(sg_ids[0])
+            if entry is not None:
+                metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
+                entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+                store.upsert_entry(entry)
+        elif call_state["count"] == 2:
+            entry = store.get_entry(sg_ids[1])
+            if entry is not None:
+                metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
+                entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+                store.upsert_entry(entry)
+
+    monotonic_state = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        monotonic_state["value"] += 0.1
+        return monotonic_state["value"]
+
+    monkeypatch.setattr(ServingGroupCacheService, "_sleep", staticmethod(_fake_sleep))
+    monkeypatch.setattr(ServingGroupCacheService, "_monotonic", staticmethod(_fake_monotonic))
+
+    request = GetServingGroupCableModemsRequest(
+        sg_id=ServiceGroupId(0),
+        page=1,
+        page_size=1,
+        require_fresh=True,
+        max_wait_seconds=5.0,
+    )
+
+    waited_seconds = service._wait_for_refresh(
+        request=request,
+        sg_ids=sg_ids,
+        store=store,
+        now_epoch=1_000.0,
+        refresh_applied=True,
+    )
+
+    assert waited_seconds > 0.0
+    assert call_state["count"] >= 2
+
+
+# FILE: tests/test_sgw_manager_stop.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import threading
+import time
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+def test_sgw_manager_stop_unblocks_wait() -> None:
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings()
+    settings.sgw.poll_light_seconds = 5.0
+    manager = SgwManager(settings=settings, store=store, service_groups=[ServiceGroupId(1)])
+
+    thread = threading.Thread(target=manager.refresh_forever, daemon=True)
+    thread.start()
+    time.sleep(0.01)
+
+    start = time.monotonic()
+    manager.stop()
+    thread.join(timeout=1.0)
+    duration = time.monotonic() - start
+
+    assert not thread.is_alive()
+    assert duration < 1.0
+

@@ -15,6 +15,7 @@ from pypnm_cmts.api.routes.serving_group.schemas import (
     GetServingGroupIdsResponse,
     GetServingGroupTopologyRequest,
     GetServingGroupTopologyResponse,
+    ServingGroupStatusResponse,
 )
 from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
 
@@ -50,6 +51,20 @@ class ServingGroupRouter:
             Returns discovered SG ids and cache readiness metadata.
             """
             return self._service.get_ids()
+
+        @self.router.get(
+            "/status",
+            response_model=ServingGroupStatusResponse,
+            summary="Serving group worker status",
+            description="Returns SGW startup status and cache readiness.",
+        )
+        def get_status() -> ServingGroupStatusResponse:
+            """
+            **Serving Group Status**
+
+            Returns SGW startup status and cache readiness metadata.
+            """
+            return self._service.get_status()
 
         @self.router.post(
             "/get/cableModems",

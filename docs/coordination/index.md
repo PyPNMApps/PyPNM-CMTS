@@ -142,9 +142,9 @@ CoordinationManager.tick() phases:
 flowchart TD
     A[Tick start] --> B[Leader try_acquire]
     B --> C[Leader renew if held]
-    C --> D[Renew held SG leases\n(ascending sg_id)]
-    D --> E[Release extras\n(descending sg_id)]
-    E --> F[Acquire until target\n(mode order + fallback)]
+    C --> D["Renew held SG leases<br/>(ascending sg_id)"]
+    D --> E["Release extras<br/>(descending sg_id)"]
+    E --> F["Acquire until target<br/>(mode order + fallback)"]
     F --> G[Return CoordinationTickResultModel]
 ```
 
@@ -167,12 +167,9 @@ Tick flow:
 flowchart TD
     A[Tick start] --> B[Leader try_acquire]
     B --> C[Leader renew if held]
-    C --> D[Renew held SG leases
-(ascending sg_id)]
-    D --> E[Release extras
-(descending sg_id)]
-    E --> F[Acquire if held < target
-(mode-specific order + fallback)]
+    C --> D["Renew held SG leases<br/>(ascending sg_id)"]
+    D --> E["Release extras<br/>(descending sg_id)"]
+    E --> F["Acquire if held < target<br/>(mode-specific order + fallback)"]
     F --> G[Return CoordinationTickResultModel]
 ```
 
@@ -197,8 +194,7 @@ Fallback:
 flowchart TD
     A[Candidate SGs] --> B{shard_mode}
     B -->|sequential| C[Sort by sg_id asc]
-    B -->|score| D[Score order desc
-(tie: sg_id asc)]
+    B -->|score| D["Score order desc<br/>(tie: sg_id asc)"]
     C --> E[Attempt acquire]
     D --> E
     E --> F{held < target}

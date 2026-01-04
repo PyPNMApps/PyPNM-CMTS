@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from pypnm.lib.types import HostNameStr
 
@@ -15,6 +16,7 @@ from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwSnapshotPayloadModel
 from pypnm_cmts.sgw.runtime_state import (
     get_sgw_manager,
     get_sgw_startup_status,
@@ -45,6 +47,21 @@ def _build_discovery_result(sg_ids: list[ServiceGroupId]) -> InventoryDiscoveryR
     )
 
 
+def _patch_pollers(monkeypatch: object) -> None:
+    def _fake_heavy(_sg_id: ServiceGroupId, _settings: CmtsOrchestratorSettings) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    def _fake_light(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_heavy_poller", _fake_heavy)
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_light_poller", _fake_light)
+
+
 def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: Path) -> None:
     reset_sgw_runtime_state()
     settings = _build_settings(tmp_path / "coordination")
@@ -55,6 +72,7 @@ def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: P
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    _patch_pollers(monkeypatch)
     async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
         _ = state_dir
         return _build_discovery_result(sg_ids)
@@ -90,6 +108,7 @@ def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: P
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    _patch_pollers(monkeypatch)
     async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
         _ = state_dir
         return _build_discovery_result(sg_ids)
@@ -122,6 +141,7 @@ def test_readiness_false_when_discovery_fails(monkeypatch: object, tmp_path: Pat
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    _patch_pollers(monkeypatch)
 
     async def _raise_discovery(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
         _ = state_dir
@@ -156,6 +176,7 @@ def test_startup_disabled_mode_uses_coherent_store_and_manager(monkeypatch: obje
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    _patch_pollers(monkeypatch)
     monkeypatch.setattr(
         "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
         staticmethod(lambda: now_epoch),
@@ -181,6 +202,7 @@ def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Pa
         "from_system_config",
         classmethod(lambda cls: settings),
     )
+    _patch_pollers(monkeypatch)
     async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
         _ = state_dir
         return _build_discovery_result(sg_ids)
@@ -209,3 +231,45 @@ def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Pa
     assert status.prime_failed is True
     assert status.discovered_sg_ids == sg_ids
     assert error_message in status.error_message
+
+
+@pytest.mark.unit
+def test_startup_starts_background_refresh(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    start_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    async def _fake_discover(self: object, state_dir: Path | None = None) -> InventoryDiscoveryResultModel:
+        _ = state_dir
+        return _build_discovery_result(sg_ids)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_inventory",
+        _fake_discover,
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._pytest_running",
+        staticmethod(lambda: False),
+    )
+
+    def _start_refresh() -> bool:
+        start_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.start_sgw_background_refresh", _start_refresh)
+
+    asyncio.run(SgwStartupService().initialize())
+
+    assert start_calls["count"] == 1

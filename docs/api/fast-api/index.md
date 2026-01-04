@@ -17,6 +17,9 @@ curl http://127.0.0.1:8000/ops/health
 curl http://127.0.0.1:8000/ops/ready
 ```
 
+SGW refresh runs in a background loop after startup prime. Cache-first endpoints
+may request a refresh, but they do not execute SNMP in the request thread.
+
 ## Current Endpoints
 
 - `POST /system/sysDescr` - CMTS sysDescr lookup.

@@ -45,4 +45,4 @@ Observed on a CMTS with SG IDs 3147266 and 3213825:
 
 ## Known Follow-Ups
 
-- The `PnmFileRetrieval.retrival_method.methods.tftp.remote_dir` warning originates in pypnm and is out of Phase 5 scope. Track in a later cleanup.
+- The `PnmFileRetrieval.retrieval_method.methods.tftp.remote_dir` warning originates in pypnm and is out of Phase 5 scope. Track in a later cleanup.

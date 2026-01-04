@@ -101,7 +101,7 @@ def test_cli_help_quiet_and_lists_snmp_port() -> None:
     result = _run_cli(["run", "--help"], cwd=_repo_root())
     assert result.returncode == SUCCESS_EXIT_CODE
     assert "--snmp-port" in result.stdout
-    assert "PnmFileRetrieval.retrival_method.methods.tftp.remote_dir" not in result.stderr
+    assert "PnmFileRetrieval.retrieval_method.methods.tftp.remote_dir" not in result.stderr
 
 
 def test_cli_help_package_module() -> None:

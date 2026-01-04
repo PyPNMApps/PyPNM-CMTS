@@ -18,15 +18,18 @@ Table Of Contents in alphabetical order.
 - [Coordination State Directory](#coordination-state-directory)
 - [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
 - [Epoch Seconds](#epoch-seconds)
+- [Heavy Refresh](#heavy-refresh)
 - [Inventory Discovery](#inventory-discovery)
 - [Leader ID](#leader-id)
 - [Leader TTL](#leader-ttl)
 - [Lease](#lease)
 - [Lease Held](#lease-held)
+- [Light Refresh](#light-refresh)
 - [Orchestrator](#orchestrator)
 - [Orchestrator Mode](#orchestrator-mode)
 - [Orchestrator Run ID](#orchestrator-run-id)
 - [Owner ID](#owner-id)
+- [Poller](#poller)
 - [Registered Cable Modem](#registered-cable-modem)
 - [Result Persistence](#result-persistence)
 - [Results Root](#results-root)
@@ -96,6 +99,10 @@ The process of querying a CMTS via SNMP to determine the current service group i
 Numeric timestamps represented as seconds since the Unix epoch (UTC). Stored timestamps use epoch seconds; ISO-8601 conversion happens only when
 displaying or returning external responses.
 
+### Heavy Refresh
+A serving-group worker refresh that rebuilds inventory/topology for one service group, including DS/US channels and full cable-modem membership. It
+is the expensive lane and typically runs on a longer interval.
+
 ### Inventory Discovery
 The typed result of a CMTS discovery operation, including the discovered service group identifiers and the per-SG list of registered cable
 modems.
@@ -113,6 +120,10 @@ holds that service group’s lease.
 ### Lease Held
 A boolean indicating whether the current worker instance holds the lease for its service group at the time of a tick.
 
+### Light Refresh
+A serving-group worker refresh that updates only cheap state for known cable modems (for example, registration/online status) without rebuilding
+inventory. It runs more frequently than heavy refresh.
+
 ### Orchestrator
 The top-level control loop coordinating periodic ticks. Depending on mode, it may run coordination only (standalone/controller) or coordination
 plus work (worker).
@@ -126,6 +137,10 @@ lease. Example format: `sg<id>_tick<6-digit-index>`.
 
 ### Owner ID
 A stable identifier for the running process or container instance. Used for coordination ownership, logging, and leader-election identification.
+
+### Poller
+A callable used by the serving-group worker manager to perform refreshes. The heavy poller returns an `SgwSnapshotPayloadModel` for a full refresh;
+the light poller takes the current modem list and returns an updated list with refreshed state.
 
 ### Registered Cable Modem
 A cable modem that is currently registered to the CMTS. Discovery outputs group registered modems by service group and include the modem MAC
@@ -238,6 +253,9 @@ without manual per-worker SG configuration.
 | MAC | Media Access Control |
 | MD | MAC Domain |
 | MIB | Management Information Base |
+| SG | Service Group |
+| SGW | Serving Group Worker |
+| SNMP | Simple Network Management Protocol |
 | OID | Object Identifier |
 | PNM | Proactive Network Maintenance |
 | QoS | Quality of Service |

@@ -17,6 +17,32 @@ Unless otherwise noted, examples use:
 - MAC address: `aa:bb:cc:dd:ee:ff`
 - IPv4 address: `192.168.0.100`
 
+## GET /cmts/servingGroup/status
+
+Return SGW Startup And Cache Readiness Status. This endpoint reports the discovered SG count, cache readiness, missing cache entries, and whether the background refresh loop is running.
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "sgw cache not ready",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "startup_status": {
+    "startup_completed": true,
+    "discovery_ok": true,
+    "discovered_sg_ids": [1, 2],
+    "last_refresh_epoch": 1767416694.071116,
+    "error_message": "",
+    "prime_failed": false
+  },
+  "refresh_running": false,
+  "discovered_count": 2,
+  "cache_ready": false,
+  "missing_sg_ids": [2]
+}
+```
+
 ## POST /cmts/servingGroup/get/ids
 
 Return Discovered Service Group Identifiers And Per-SG Cache Summaries. This endpoint returns HTTP 200 with `status` set to success even when `sgw_ready` is false; in that case, `message` is non-empty and summaries for missing snapshots report `refresh_state=ERROR` with a bounded `last_error`.

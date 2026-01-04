@@ -169,7 +169,7 @@ def _sanitize_system_config(config_path: Path) -> None:
         print(f"WARNING: Failed to load {config_path} for sanitization: {exc}", file=sys.stderr)
         return
 
-    pnm = data.setdefault("PnmFileRetrieval", {}).setdefault("retrival_method", {})
+    pnm = data.setdefault("PnmFileRetrieval", {}).setdefault("retrieval_method", {})
     methods = pnm.setdefault("methods", {})
     for method in methods.values():
         if isinstance(method, dict):

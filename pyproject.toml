@@ -40,6 +40,7 @@ dev = [
 ]
 test = [
   "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.5",
   "httpx>=0.27.0,<0.28.0",
 ]
 docs = [
@@ -73,6 +74,7 @@ minversion   = "8.0"
 pythonpath   = ["src"]
 testpaths    = ["tests"]
 addopts      = "-ra -q --strict-markers --tb=short"
+asyncio_mode = "auto"
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(levelname)s %(name)s:%(lineno)d | %(message)s"
@@ -84,6 +86,7 @@ markers = [
   "slow: slow tests",
   "net: network-required tests",
   "pnm: PNM file parsing tests",
+  "unit: unit tests (fast, hermetic)",
 ]
 filterwarnings = [
   "ignore:getReadersFromUrls is deprecated:DeprecationWarning:pysnmp",

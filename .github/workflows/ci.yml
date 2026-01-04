@@ -29,19 +29,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Install package and test deps
-        run: |
-          python -m pip --version
-          python -m pip install -U pip setuptools wheel
-          python -m pip install ".[test]"
-
       - name: Smoke - CLI help
         run: |
           python -m pypnm_cmts.cli --help || pypnm-cmts --help
 
-      - name: Run pytest
+      - name: Run tests
         run: |
-          python -m pytest -q -ra --tb=short
+          ./scripts/run-tests.sh -q -ra --tb=short
 
   docs:
     runs-on: ubuntu-latest

@@ -32,6 +32,7 @@ DEFAULT_MAX_WAIT_SECONDS = 10.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 CABLE_MODEM_PAGE = 1
 CABLE_MODEM_PAGE_SIZE = 50
+REFRESH_WAIT_SECONDS = 5.0
 
 
 def _get_live_hostname() -> str:
@@ -118,6 +119,15 @@ def _wait_for_ids(client: TestClient, max_wait_seconds: float, poll_interval_sec
     return payload
 
 
+def _skip_if_empty_topology(payload: dict[str, object], message: str) -> None:
+    ds_channels = payload.get("topology", {}).get("ds_channels", {})
+    us_channels = payload.get("topology", {}).get("us_channels", {})
+    ds_count = ds_channels.get("count", 0)
+    us_count = us_channels.get("count", 0)
+    if int(ds_count) == 0 and int(us_count) == 0:
+        pytest.skip(message)
+
+
 def _resolve_wait_seconds(env_name: str, default_value: float) -> float:
     raw_value = os.environ.get(env_name, "").strip()
     if raw_value == "":
@@ -180,6 +190,33 @@ def test_live_serving_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.integration
 @pytest.mark.slow
+def test_live_serving_group_topology_heavy_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    max_wait_seconds = _resolve_wait_seconds(ENV_MAX_WAIT_SECONDS, DEFAULT_MAX_WAIT_SECONDS)
+    poll_interval_seconds = _resolve_wait_seconds(ENV_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
+    with _build_client(monkeypatch) as client:
+        payload = _wait_for_ids(client, max_wait_seconds, poll_interval_seconds)
+        discovered = payload.get("discovered_sg_ids", [])
+        if not discovered:
+            pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
+        sg_id = discovered[0]
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={
+                "sg_id": sg_id,
+                "refresh": "heavy",
+                "require_fresh": True,
+                "max_wait_seconds": REFRESH_WAIT_SECONDS,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["topology"]["sg_id"] == sg_id
+        _skip_if_empty_topology(body, "topology not populated yet; SGW pollers may be stubbed")
+
+
+@pytest.mark.integration
+@pytest.mark.slow
 def test_live_serving_group_cable_modems(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     max_wait_seconds = _resolve_wait_seconds(ENV_MAX_WAIT_SECONDS, DEFAULT_MAX_WAIT_SECONDS)
@@ -196,6 +233,40 @@ def test_live_serving_group_cable_modems(monkeypatch: pytest.MonkeyPatch) -> Non
         )
         assert response.status_code == 200
         body = response.json()
+        items = body.get("items", [])
+        if items:
+            macs = [item["mac"] for item in items]
+            assert macs == sorted(macs)
+        assert body["total_count"] >= len(items)
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_cable_modems_heavy_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    max_wait_seconds = _resolve_wait_seconds(ENV_MAX_WAIT_SECONDS, DEFAULT_MAX_WAIT_SECONDS)
+    poll_interval_seconds = _resolve_wait_seconds(ENV_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
+    with _build_client(monkeypatch) as client:
+        payload = _wait_for_ids(client, max_wait_seconds, poll_interval_seconds)
+        discovered = payload.get("discovered_sg_ids", [])
+        if not discovered:
+            pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
+        sg_id = discovered[0]
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": sg_id,
+                "page": CABLE_MODEM_PAGE,
+                "page_size": CABLE_MODEM_PAGE_SIZE,
+                "refresh": "heavy",
+                "require_fresh": True,
+                "max_wait_seconds": REFRESH_WAIT_SECONDS,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        if body.get("total_count", 0) == 0:
+            pytest.skip("membership not populated yet; SGW pollers may be stubbed")
         items = body.get("items", [])
         if items:
             macs = [item["mac"] for item in items]
