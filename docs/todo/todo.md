@@ -121,6 +121,7 @@ This is the running, repo-wide TODO list for **PyPNM-CMTS**. Items are written s
   - [ ] Heavy vs light refresh lanes
   - [ ] One container per CMTS deployment topology
 - [ ] Keep `AGENTS.md` aligned with user-specified response preferences (record updates here).
+- [ ] Use the agent review bundle as the primary communication artifact for changes (reference it in responses).
 
 ## Security And QA
 

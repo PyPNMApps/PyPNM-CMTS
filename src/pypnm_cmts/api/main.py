@@ -51,7 +51,7 @@ validate configuration state, and drive PNM workflows across fleets.
 [**PyPNM Homepage**](https://github.com/PyPNMApps/PyPNM-CMTS)
 """
 
-_combined_runner: CombinedModeRunner | None = CombinedModeRunner() if combined_mode_enabled() else None
+_combined_runner: CombinedModeRunner | None = None
 _sgw_startup_service = SgwStartupService()
 
 
@@ -61,6 +61,9 @@ def _pytest_running() -> bool:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> object:
+    global _combined_runner
+    if _combined_runner is None and combined_mode_enabled():
+        _combined_runner = CombinedModeRunner()
     if _combined_runner is not None:
         _combined_runner.start()
     init_result = _sgw_startup_service.initialize()
