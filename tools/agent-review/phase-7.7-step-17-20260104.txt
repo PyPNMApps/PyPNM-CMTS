@@ -1,0 +1,370 @@
+Summary:
+- Force FastAPI lifespan on when --with-runner is enabled so the combined runner always starts and pidfiles appear for /ops/status.
+Modified files:
+- /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/cli.py
+Commands:
+/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_ops_service_smoke.py::test_ops_status_combined_mode_runner_available
+
+Tests/test_ops_service_smoke.py::test_ops_status_combined_mode_runner_available 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: GET http://127.0.0.1:59437/ops/version "HTTP/1.1 200 OK"
+INFO httpx:1038 | HTTP Request: GET http://127.0.0.1:59437/ops/status "HTTP/1.1 200 OK"
+PASSED                                                                   [100%]
+
+============================== 1 passed in 3.43s ===============================
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/cli.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import typer
+import uvicorn
+from pydantic import ValidationError
+
+from pypnm_cmts.config.orchestrator_config import (
+    DEFAULT_WORKER_CAP,
+    DEFAULT_WORKERS,
+    ENV_ADAPTER_HOSTNAME,
+    ENV_ADAPTER_READ_COMMUNITY,
+    ENV_ADAPTER_WRITE_COMMUNITY,
+    CmtsOrchestratorSettings,
+)
+from pypnm_cmts.docsis.system_network_operation import SystemNetworkOperation
+from pypnm_cmts.lib.constants import OutputFormat
+from pypnm_cmts.lib.types import (
+    CoordinationPath,
+    HostNameStr,
+    ServiceGroupId,
+)
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.version import __version__
+
+app = typer.Typer(add_completion=False)
+
+SUCCESS_EXIT_CODE = 0
+EXIT_CODE_USAGE = 2
+EXIT_CODE_FAILURE = 1
+
+TIMEOUT_KEEP_ALIVE_SECONDS = 30
+DEFAULT_CONFIG_PATH = ""
+DEFAULT_STATE_DIR = ""
+DEFAULT_LEASE_TTL_SECONDS = 30
+DEFAULT_LEADER_TTL_SECONDS = 30
+DEFAULT_TICK_INTERVAL_SECONDS = 5
+DEFAULT_MAX_TICKS = -1
+DEFAULT_SHARD_MODE = ""
+DEFAULT_WORKER_COUNT = 1
+DEFAULT_LOG_LEVEL = "info"
+
+RUN_MODES = [mode.value for mode in OrchestratorMode]
+
+
+def _resolve_config_path(path: str) -> CoordinationPath | None:
+    if str(path).strip() == "":
+        return None
+    return CoordinationPath(path)
+
+
+def _print_validation_errors(exc: ValidationError) -> None:
+    """
+    Print concise validation errors to stderr.
+    """
+    errors = exc.errors()
+    if not errors:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return
+    for item in errors:
+        loc = item.get("loc", ())
+        msg = item.get("msg", "validation error")
+        field_path = ".".join(str(part) for part in loc) if loc else "value"
+        print(f"ERROR: {field_path}: {msg}", file=sys.stderr)
+
+
+@app.command()
+def version() -> None:
+    """
+    Print the current PyPNM-CMTS version.
+    """
+    print(__version__)
+
+
+@app.command()
+def sysdescr(
+    cmts_hostname: HostNameStr = typer.Option(..., "--cmts-hostname", "--host", "-h", help="CMTS hostname or IP address."),
+    read_community: str = typer.Option(..., "--read-community", "-r", help="SNMP read community string."),
+    write_community: str = typer.Option("", "--write-community", "-w", help="SNMP write community string."),
+    port: int = typer.Option(161, "--snmp-port", "-p", help="SNMP port for CMTS."),
+    output: OutputFormat = typer.Option(OutputFormat.JSON, "--output", "-o", help="Output format."),
+) -> None:
+    """
+    Fetch sysDescr from the CMTS and print the result.
+    """
+    try:
+        response = SystemNetworkOperation.get_sysdescr(
+            cmts_hostname=cmts_hostname,
+            read_community=read_community,
+            write_community=write_community,
+            port=int(port),
+        )
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_FAILURE) from exc
+
+    if output == OutputFormat.TEXT:
+        print(f"sysDescr: {response.sysdescr}")
+    else:
+        print(response.model_dump_json(indent=2))
+
+
+@app.command()
+def discover(
+    cmts_hostname: HostNameStr = typer.Option(..., "--cmts-hostname", "--host", "-h", help="CMTS hostname or IP address."),
+    read_community: str = typer.Option(..., "--read-community", "-r", help="SNMP read community string."),
+    write_community: str = typer.Option("", "--write-community", "-w", help="SNMP write community string."),
+    port: int = typer.Option(161, "--snmp-port", "-p", help="SNMP port for CMTS."),
+    state_dir: CoordinationPath | None = typer.Option(None, "--state-dir", "-s", help="Optional state directory override."),
+    output: OutputFormat = typer.Option(OutputFormat.JSON, "--output", "-o", help="Output format."),
+) -> None:
+    """
+    Discover CMTS inventory and print summary or JSON.
+    """
+    from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+
+    try:
+        result = CmtsInventoryDiscoveryService.run_discovery(
+            cmts_hostname=cmts_hostname,
+            read_community=read_community,
+            write_community=write_community,
+            port=int(port),
+            state_dir=Path(state_dir) if state_dir is not None else None,
+        )
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_FAILURE) from exc
+
+    if output == OutputFormat.TEXT:
+        print("Discovery summary:")
+        print(f"  CMTS host: {result.cmts_host}")
+        print(f"  Service groups discovered: {len(result.discovered_sg_ids)}")
+        print(f"  Total cable modems: {sum(len(entry.cms) for entry in result.per_sg)}")
+    else:
+        print(result.model_dump_json(indent=2))
+
+
+@app.command("run")
+def run_once(
+    mode: OrchestratorMode = typer.Option(..., "--mode", help="Execution mode: standalone, controller, worker, combined."),
+    sg_id: ServiceGroupId | None = typer.Option(None, "--sg-id", help="Service group id for worker mode."),
+    owner_id: str = typer.Option("", "--owner-id", help="Optional explicit owner id override."),
+    target_service_groups: int = typer.Option(DEFAULT_WORKER_CAP, "--target-service-groups", help="Target number of service groups per replica."),
+    shard_mode: str = typer.Option(DEFAULT_SHARD_MODE, "--shard-mode", help="Service group shard mode."),
+    tick_interval_seconds: float = typer.Option(DEFAULT_TICK_INTERVAL_SECONDS, "--tick-interval", help="Tick interval in seconds."),
+    leader_ttl_seconds: int = typer.Option(DEFAULT_LEADER_TTL_SECONDS, "--leader-ttl", help="Leader election TTL in seconds."),
+    lease_ttl_seconds: int = typer.Option(DEFAULT_LEASE_TTL_SECONDS, "--lease-ttl", help="Service group lease TTL in seconds."),
+    state_dir: CoordinationPath = typer.Option(DEFAULT_STATE_DIR, "--state-dir", help="Coordination state directory override."),
+    election_name: str = typer.Option("", "--election-name", help="Election name override."),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", help="Optional path to system.json configuration file."),
+    cmts_hostname: HostNameStr | None = typer.Option(None, "--cmts-hostname", "--host", help="CMTS hostname override."),
+    read_community: str | None = typer.Option(None, "--read-community", help="SNMP read community override."),
+    write_community: str | None = typer.Option(None, "--write-community", help="SNMP write community override."),
+    snmp_port: int | None = typer.Option(None, "--snmp-port", help="SNMP port override."),
+    cmts_port: int | None = typer.Option(None, "--cmts-port", help="DEPRECATED: use --snmp-port instead."),
+) -> None:
+    """
+    Execute a single orchestration tick and print a JSON summary.
+    """
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+
+    if cmts_port is not None and snmp_port is not None:
+        print("ERROR: --snmp-port cannot be combined with deprecated --cmts-port.", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_USAGE)
+    if cmts_port is not None:
+        print("DEPRECATED: --cmts-port is deprecated; use --snmp-port.", file=sys.stderr)
+        snmp_port = cmts_port
+
+    try:
+        launcher = CmtsOrchestratorLauncher(
+            config_path=_resolve_config_path(config),
+            mode=mode,
+            sg_id=sg_id,
+            owner_id=owner_id if owner_id != "" else None,
+            target_service_groups=target_service_groups if target_service_groups != DEFAULT_WORKER_CAP else None,
+            shard_mode=shard_mode if shard_mode != "" else None,
+            tick_interval_seconds=tick_interval_seconds if tick_interval_seconds != DEFAULT_TICK_INTERVAL_SECONDS else None,
+            leader_ttl_seconds=leader_ttl_seconds if leader_ttl_seconds != DEFAULT_LEADER_TTL_SECONDS else None,
+            lease_ttl_seconds=lease_ttl_seconds if lease_ttl_seconds != DEFAULT_LEASE_TTL_SECONDS else None,
+            state_dir=_resolve_config_path(state_dir),
+            election_name=election_name if election_name != "" else None,
+            adapter_hostname=cmts_hostname,
+            adapter_read_community=read_community,
+            adapter_write_community=write_community,
+            adapter_port=snmp_port,
+        )
+        result = launcher.run_once()
+    except ValidationError as exc:
+        _print_validation_errors(exc)
+        raise typer.Exit(code=EXIT_CODE_USAGE) from exc
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_USAGE) from exc
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_FAILURE) from exc
+
+    print(result.model_dump_json(indent=2))
+
+
+@app.command("run-forever")
+def run_forever(
+    mode: OrchestratorMode = typer.Option(..., "--mode", help="Execution mode: standalone, controller, worker, combined."),
+    sg_id: ServiceGroupId | None = typer.Option(None, "--sg-id", help="Service group id for worker mode."),
+    owner_id: str = typer.Option("", "--owner-id", help="Optional explicit owner id override."),
+    target_service_groups: int = typer.Option(DEFAULT_WORKER_CAP, "--target-service-groups", help="Target number of service groups per replica."),
+    shard_mode: str = typer.Option(DEFAULT_SHARD_MODE, "--shard-mode", help="Service group shard mode."),
+    tick_interval_seconds: float = typer.Option(DEFAULT_TICK_INTERVAL_SECONDS, "--tick-interval", help="Tick interval in seconds."),
+    leader_ttl_seconds: int = typer.Option(DEFAULT_LEADER_TTL_SECONDS, "--leader-ttl", help="Leader election TTL in seconds."),
+    lease_ttl_seconds: int = typer.Option(DEFAULT_LEASE_TTL_SECONDS, "--lease-ttl", help="Service group lease TTL in seconds."),
+    state_dir: CoordinationPath = typer.Option(DEFAULT_STATE_DIR, "--state-dir", help="Coordination state directory override."),
+    election_name: str = typer.Option("", "--election-name", help="Election name override."),
+    max_ticks: int = typer.Option(DEFAULT_MAX_TICKS, "--max-ticks", help="Maximum ticks to execute before stopping."),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", help="Optional path to system.json configuration file."),
+    cmts_hostname: HostNameStr | None = typer.Option(None, "--cmts-hostname", "--host", help="CMTS hostname override."),
+    read_community: str | None = typer.Option(None, "--read-community", help="SNMP read community override."),
+    write_community: str | None = typer.Option(None, "--write-community", help="SNMP write community override."),
+    snmp_port: int | None = typer.Option(None, "--snmp-port", help="SNMP port override."),
+    cmts_port: int | None = typer.Option(None, "--cmts-port", help="DEPRECATED: use --snmp-port instead."),
+) -> None:
+    """
+    Execute the orchestration tick loop continuously, optionally with a max tick count.
+    """
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+
+    if cmts_port is not None and snmp_port is not None:
+        print("ERROR: --snmp-port cannot be combined with deprecated --cmts-port.", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_USAGE)
+    if cmts_port is not None:
+        print("DEPRECATED: --cmts-port is deprecated; use --snmp-port.", file=sys.stderr)
+        snmp_port = cmts_port
+
+    try:
+        launcher = CmtsOrchestratorLauncher(
+            config_path=_resolve_config_path(config),
+            mode=mode,
+            sg_id=sg_id,
+            owner_id=owner_id if owner_id != "" else None,
+            target_service_groups=target_service_groups if target_service_groups != DEFAULT_WORKER_CAP else None,
+            shard_mode=shard_mode if shard_mode != "" else None,
+            tick_interval_seconds=tick_interval_seconds if tick_interval_seconds != DEFAULT_TICK_INTERVAL_SECONDS else None,
+            leader_ttl_seconds=leader_ttl_seconds if leader_ttl_seconds != DEFAULT_LEADER_TTL_SECONDS else None,
+            lease_ttl_seconds=lease_ttl_seconds if lease_ttl_seconds != DEFAULT_LEASE_TTL_SECONDS else None,
+            state_dir=_resolve_config_path(state_dir),
+            election_name=election_name if election_name != "" else None,
+            adapter_hostname=cmts_hostname,
+            adapter_read_community=read_community,
+            adapter_write_community=write_community,
+            adapter_port=snmp_port,
+        )
+        launcher.run_forever(max_ticks=None if max_ticks == DEFAULT_MAX_TICKS else max_ticks)
+    except ValidationError as exc:
+        _print_validation_errors(exc)
+        raise typer.Exit(code=EXIT_CODE_USAGE) from exc
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_USAGE) from exc
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_FAILURE) from exc
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", help="Server host address."),
+    port: int = typer.Option(8000, "--port", help="Server port."),
+    log_level: str = typer.Option(DEFAULT_LOG_LEVEL, "--log-level", help="Log level."),
+    workers: int = typer.Option(DEFAULT_WORKERS, "--workers", help="Number of Uvicorn workers."),
+    with_runner: bool = typer.Option(False, "--with-runner", help="Start the orchestrator runner in-process (combined mode)."),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development."),
+    reload_dirs: list[str] | None = typer.Option(None, "--reload-dir", help="Directories to watch for reload."),
+    reload_includes: list[str] | None = typer.Option(None, "--reload-include", help="File patterns to include for reload."),
+    reload_excludes: list[str] | None = typer.Option(None, "--reload-exclude", help="File patterns to exclude for reload."),
+    no_access_log: bool = typer.Option(False, "--no-access-log", help="Disable access log output."),
+    ssl: bool = typer.Option(False, "--ssl", help="Enable HTTPS using SSL certificates."),
+    cert: str | None = typer.Option(None, "--cert", help="Path to SSL certificate file."),
+    key: str | None = typer.Option(None, "--key", help="Path to SSL private key file."),
+    cmts_hostname: HostNameStr | None = typer.Option(None, "--cmts-hostname", "--host-cmts", help="Override CMTS hostname."),
+    read_community: str | None = typer.Option(None, "--read-community", help="Override SNMP read community."),
+    write_community: str | None = typer.Option(None, "--write-community", help="Override SNMP write community."),
+) -> None:
+    """
+    Start the FastAPI service.
+    """
+    from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
+    from pypnm_cmts.config.orchestrator_config import (
+        ENV_ADAPTER_HOSTNAME,
+        ENV_ADAPTER_READ_COMMUNITY,
+        ENV_ADAPTER_WRITE_COMMUNITY,
+    )
+
+    if with_runner and reload:
+        print("ERROR: --with-runner cannot be used with --reload.", file=sys.stderr)
+        raise typer.Exit(code=EXIT_CODE_USAGE)
+
+    os.environ["PYTHONPATH"] = os.getcwd() + "/src:" + os.environ.get("PYTHONPATH", "")
+    if cmts_hostname is not None and str(cmts_hostname).strip() != "":
+        os.environ[ENV_ADAPTER_HOSTNAME] = str(cmts_hostname).strip()
+    if read_community is not None and str(read_community).strip() != "":
+        os.environ[ENV_ADAPTER_READ_COMMUNITY] = str(read_community).strip()
+    if write_community is not None and str(write_community).strip() != "":
+        os.environ[ENV_ADAPTER_WRITE_COMMUNITY] = str(write_community).strip()
+
+    uvicorn_args = {
+        "app": "pypnm_cmts.api.main:app",
+        "host": host,
+        "port": port,
+        "timeout_keep_alive": TIMEOUT_KEEP_ALIVE_SECONDS,
+        "log_level": log_level,
+        "workers": workers,
+        "access_log": not no_access_log,
+    }
+
+    if reload:
+        if workers != DEFAULT_WORKERS:
+            print("[WARN] --workers is ignored when --reload is enabled; using workers=1 for dev reload.")
+            uvicorn_args["workers"] = DEFAULT_WORKERS
+
+        watch_dirs = reload_dirs or ["src"]
+        uvicorn_args.update(
+            {
+                "reload": True,
+                "reload_dirs": watch_dirs,
+                "reload_includes": reload_includes,
+                "reload_excludes": reload_excludes,
+            }
+        )
+
+    if with_runner:
+        os.environ[COMBINED_MODE_ENV] = "1"
+        uvicorn_args["lifespan"] = "on"
+        if workers != DEFAULT_WORKERS:
+            print("[WARN] --workers is ignored when --with-runner is enabled; using workers=1 for combined mode.")
+            uvicorn_args["workers"] = DEFAULT_WORKERS
+
+    if ssl:
+        uvicorn_args.update(
+            {
+                "ssl_certfile": cert,
+                "ssl_keyfile": key,
+            }
+        )
+
+    uvicorn.run(**uvicorn_args)
+
+
+if __name__ == "__main__":
+    app()

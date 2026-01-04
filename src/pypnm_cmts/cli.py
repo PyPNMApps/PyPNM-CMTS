@@ -583,6 +583,7 @@ def _run_cli() -> int:
         if args.with_runner:
             os.environ[COMBINED_MODE_ENV] = "1"
             print("🔁 Combined mode runner enabled (controller + worker).")
+            uvicorn_args["lifespan"] = "on"
             if args.workers != DEFAULT_WORKERS:
                 print(
                     "[WARN] --workers is ignored when --with-runner is enabled; using workers=1 for combined mode."
