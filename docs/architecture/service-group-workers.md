@@ -15,6 +15,7 @@ Service Group Worker Assignment And Scale-Out Behavior.
 - [Scaling Model](#scaling-model)
 - [Failure Handling](#failure-handling)
 - [Configuration Expectations](#configuration-expectations)
+- [SGW Discovery Modes](#sgw-discovery-modes)
 - [Implementation Notes](#implementation-notes)
 
 ## Scope
@@ -182,6 +183,37 @@ Zero-Touch Still Requires A Minimal Configuration Baseline:
 - Defined Service Groups (enabled/disabled) and orchestration policy (target service groups, shard mode).
 - A Coordination State Directory (or future shared backend) accessible to participating workers.
 - SNMP connectivity and CMTS inventory discovery prerequisites for production-grade SG enumeration.
+
+## SGW Discovery Modes
+
+This Section Defines How PyPNM-CMTS Determines The Initial Service Group Set At Startup.
+
+### Static
+
+Static Discovery Uses `CmtsOrchestrator.service_groups` entries (from config).
+
+- Intended For Lab, CI, Or Fixed Environments.
+- If The List Is Empty Or Missing, Discovery Returns No SGs.
+- No SNMP Calls Are Performed.
+
+### SNMP
+
+SNMP Discovery Queries The CMTS For Service Group Inventory.
+
+- Uses `CmtsOrchestrator.adapter` settings (`hostname`, `community`, `port`).
+- Startup Runs A Precheck (ICMP Ping + SNMP sysDescr) Before Discovery.
+- If Precheck Fails, SGW Startup Records A Failure And Skips Discovery.
+
+### Default Behavior
+
+If `sgw.discovery.mode` Is Missing Or Empty, The Default Is `snmp`.
+
+### Logging
+
+Startup Logs The Discovery Mode And The Derived SG Worker IDs:
+
+- `SGW discovery mode: <mode>`
+- `SGWorkerID: [sgw-<sg_id>, ...]`
 
 ## Implementation Notes
 

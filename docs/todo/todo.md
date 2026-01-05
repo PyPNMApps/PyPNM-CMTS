@@ -1,6 +1,6 @@
 # PyPNM-CMTS TODO (Phase 7.8)
 
-Last Updated: 2026-01-04 (America/Denver)
+Last Updated: 2026-01-05 (America/Denver)
 
 This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
 
@@ -25,6 +25,7 @@ Phase 7.7 is closed. Archive references live at:
 - [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
 - [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
 - [ ] Keep AGENTS response preferences aligned with user updates (update file when requested)
+- [ ] Before proposing or making PyPNM (pypnm-docsis) changes, state the plan and rationale explicitly
 
 ## Deferred Items
 

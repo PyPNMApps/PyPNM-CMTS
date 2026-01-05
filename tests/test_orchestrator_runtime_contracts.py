@@ -28,6 +28,10 @@ from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 def _write_system_config(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+            },
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": True},
             ],
@@ -46,6 +50,7 @@ def test_runtime_controller_tick_with_empty_inventory(tmp_path: Path) -> None:
             "mode": "controller",
             "state_dir": str(state_dir),
             "service_groups": [],
+            "adapter": {"hostname": "cmts.example", "community": "public"},
         }
     )
     manager = CoordinationManager(

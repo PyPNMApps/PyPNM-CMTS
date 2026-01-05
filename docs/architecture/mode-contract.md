@@ -20,7 +20,7 @@ Modes (`OrchestratorMode`):
 
 ## Default Orchestrator Settings
 
-Operationally relevant defaults (from the default dump):
+Operationally relevant defaults (from the default dump). Defaults are sourced from `CmtsOrchestratorSettings` and the bundled system.json template, then overridden by CLI and environment settings as needed:
 
 - `mode`: `standalone`
 - `adapter.kind`: `snmp`
@@ -28,6 +28,7 @@ Operationally relevant defaults (from the default dump):
 - `adapter.community`: `public`
 - `adapter.port`: `161`
 - `service_groups`: `[]`
+- `sgw.discovery.mode`: `snmp`
 - `auto_discover`: `false`
 - `default_tests`: `["ds_ofdm_rxmer"]`
 - `tick_interval_seconds`: `1.0`
@@ -120,6 +121,11 @@ Likely issues:
 ## Startup Flow And SGW Interaction
 
 Startup is deterministic across commands: parse CLI, load config and env overrides, resolve mode, then follow the chosen command path. SGW startup is gated on discovery output so cache-first endpoints never issue implicit SNMP walks.
+
+SGW discovery mode is configured under `CmtsOrchestrator.sgw.discovery.mode`:
+
+- `snmp` (default): precheck ping + SNMP sysDescr, then SNMP discovery.
+- `static`: use configured SG IDs, no SNMP discovery.
 
 ```mermaid
 flowchart TD

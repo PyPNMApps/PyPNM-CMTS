@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.serving_group.schemas import (
     GetServingGroupCableModemsRequest,
     GetServingGroupCableModemsResponse,
-    GetServingGroupIdsRequest,
     GetServingGroupIdsResponse,
     GetServingGroupTopologyRequest,
     GetServingGroupTopologyResponse,
@@ -38,13 +37,13 @@ class ServingGroupRouter:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        @self.router.post(
+        @self.router.get(
             "/get/ids",
             response_model=GetServingGroupIdsResponse,
             summary="Retrieve discovered serving group ids",
             description="Returns discovered serving group ids and cache summaries.",
         )
-        def get_ids(_request: GetServingGroupIdsRequest) -> GetServingGroupIdsResponse:
+        def get_ids() -> GetServingGroupIdsResponse:
             """
             **Serving Group Ids**
 

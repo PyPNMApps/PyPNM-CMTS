@@ -26,6 +26,7 @@ CACHE_MAX_AGE_SECONDS = 1200
 
 def _settings() -> CmtsOrchestratorSettings:
     payload = {
+        "adapter": {"hostname": "cmts.example", "community": "public"},
         "sgw": {
             "enabled": True,
             "poll_light_seconds": POLL_LIGHT_SECONDS,

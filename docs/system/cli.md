@@ -8,6 +8,7 @@ Use the `pypnm-cmts serve` command to start the FastAPI service with development
 - [When to Use](#when-to-use)
 - [Usage](#usage)
 - [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
+- [SGW Startup Discovery Modes](#sgw-startup-discovery-modes)
 - [Orchestrator Run Modes](#orchestrator-run-modes)
 - [Worker Result Persistence](#worker-result-persistence)
 - [Coordination Flags](#coordination-flags)
@@ -61,6 +62,7 @@ pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
 
 Discover service groups and registered cable modems from a CMTS using SNMP.
 If `--write-community` is omitted or empty, the discovery path uses the effective read community.
+Use `--port` to override the SNMP port for the `discover` command; `run` and `serve` use `--snmp-port`.
 The `run` and `run-forever` commands load CMTS adapter settings from system.json unless you pass adapter overrides.
 
 ```bash
@@ -69,6 +71,72 @@ pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --stat
 
 ```bash
 pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --write-community private --state-dir ./.data/coordination
+```
+
+## SGW Startup Discovery Modes
+
+SGW discovery runs during `pypnm-cmts serve` startup. The mode is configured in `CmtsOrchestrator.sgw.discovery.mode`.
+If the mode is missing or empty, the default is `snmp`.
+
+### SNMP Mode (Default)
+
+SNMP discovery queries the CMTS to enumerate SG IDs.
+
+- Uses adapter settings from system.json or CLI/env overrides:
+  - `adapter.hostname`
+  - `adapter.community`
+  - `adapter.port`
+- Runs a precheck before discovery:
+  - ICMP ping
+  - SNMP sysDescr
+
+Example: set discovery mode in system.json and override the target at runtime:
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "snmp"
+      }
+    }
+  }
+}
+```
+
+```bash
+pypnm-cmts serve --cmts-hostname 192.168.0.100 --read-community public --write-community public
+```
+
+### Static Mode
+
+Static discovery uses the configured service group list and performs no SNMP calls.
+
+- Requires `service_groups` entries to be present.
+- If the list is empty, discovery returns no SGs.
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "static"
+      }
+    },
+    "service_groups": [
+      {
+        "sg_id": 1,
+        "enabled": true
+      },
+      {
+        "sg_id": 2,
+        "enabled": true
+      }
+    ]
+  }
+}
 ```
 
 ## Orchestrator Run Modes

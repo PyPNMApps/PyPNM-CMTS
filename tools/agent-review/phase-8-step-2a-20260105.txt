@@ -1,0 +1,2340 @@
+# FILE: docs/architecture/schema/cmts-request.md
+# CMTS Request Schema Contract
+
+## Assumptions
+
+- Most operations assume all cable modems (CMs) within a CMTS can share the same TFTP and SNMP settings.
+- TFTP and SNMP defaults are configured at install time (or container deployment time).
+- Defaults come from the inherited PyPNM `system.json` configuration (PyPNM-CMTS inherits PyPNM settings).
+
+## Canonical Request Envelope
+
+All CMTS-backed endpoints accept a single top-level `cmts` object. The fields under `cmts` are shared across endpoints and must be interpreted consistently unless a specific endpoint explicitly states a constraint.
+
+### Service Group Scope
+
+- `cmts.serving_group.id` is a list of service-group identifiers (integers).
+- An empty list or missing field means **all serving groups**, unless an endpoint explicitly requires a service-group filter.
+- Endpoints may further constrain scope (for example, only allowing a single SG per request); those constraints must be documented per endpoint.
+
+### Cable Modem Scope
+
+- `cmts.cable_modem.mac_address` is a list of CM MAC addresses (strings).
+- An empty list or missing field means **all cable modems** in the effective scope, unless an endpoint explicitly requires explicit MACs.
+
+## PNM vs Non-PNM Operations
+
+### PNM Operations
+
+- PNM endpoints may accept optional overrides for TFTP and SNMP write community per request.
+- TFTP and SNMP values apply to all cable modems in-scope for the request.
+
+### Non-PNM Operations
+
+- Non-PNM endpoints typically use SNMP only and ignore TFTP fields.
+- SNMP write community overrides are optional and apply to all cable modems in-scope.
+
+## CLI Overrides
+
+The CLI supports optional CM-side override parameters that map directly to the request schema fields. Precedence is:
+
+1) CLI overrides
+2) Request body overrides (if the endpoint explicitly allows them)
+3) `system.json` defaults
+
+Planned flags:
+- `--cm-snmpv2c-write-community`
+- `--cm-tftp-ipv4`
+- `--cm-tftp-ipv6`
+
+## Endpoint Overrides
+
+Endpoint pages may require explicit serving-group filters or explicit MAC lists. When that is the case, the endpoint documentation must state the exception and the endpoint must validate accordingly.
+
+## Examples
+
+### Serving Group Filter Only (All Cable Modems)
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": [1001, 1002]
+    }
+  }
+}
+```
+
+### Cable Modem Filter Only (All Serving Groups)
+
+```json
+{
+  "cmts": {
+    "cable_modem": {
+      "mac_address": ["aa:bb:cc:dd:ee:ff"]
+    }
+  }
+}
+```
+
+### Serving Group + Cable Modem Filters With Overrides
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": [1001]
+    },
+    "cable_modem": {
+      "mac_address": ["aa:bb:cc:dd:ee:ff"],
+      "pnm_parameters": {
+        "tftp": {
+          "ipv4": "192.168.0.100",
+          "ipv6": "2001:db8::10"
+        }
+      },
+      "snmp": {
+        "snmpV2C": {
+          "community": "private"
+        }
+      }
+    }
+  }
+}
+```
+
+# FILE: docs/planning/phase8.md
+# Phase 8 Burndown Plan
+
+## Scope
+
+Phase 8 standardizes **CMTS endpoint request/response schemas** and aligns the **CLI + container runtime configuration surface** so endpoint behavior is deterministic across:
+
+- `pypnm-cmts …` CLI usage
+- `python -m pypnm_cmts.cli …` usage
+- `serve` (FastAPI) usage in Docker and Kubernetes
+
+Phase 8 also strengthens **live CMTS testing** so integration coverage is explicit, gated, repeatable, and safe to run in CI or operator environments.
+
+## Primary Goals
+
+- Establish a **canonical CMTS request schema** used across all CMTS endpoints.
+- Establish a **canonical CMTS response envelope** used across all CMTS endpoints.
+- Implement endpoint-level rules for:
+  - **Serving-group filtering**
+  - **Cable-modem filtering**, including the rule that an **empty `mac_address` list means “all modems”** unless the endpoint explicitly requires an explicit list.
+  - **Refresh semantics** (cache-first, optional refresh requests) where applicable.
+- Add missing **CLI arguments** for CM override parameters and wire them into settings precedence.
+- Publish an ops-grade **Docker/K8 runtime contract** (env/flags, probes, state_dir mounts).
+- Improve **live CMTS pytest** structure and gating (unit vs integration vs live).
+
+## Carryovers From Phase 7
+
+The Phase 7 SGW layer and cache-first endpoints are complete. The remaining carryovers are operational and contract hardening items that Phase 8 will close:
+
+- Container runtime contract (entrypoint/env surface) for new CM override parameters.
+- Explicit K8 probe guidance (liveness vs readiness) tied to stable ops endpoints.
+- `state_dir` mount and persistence guidance for Docker/K8.
+- Live CMTS integration testing harness quality and documentation.
+
+## Non-Goals
+
+- No new CMTS vendor support beyond existing adapter contracts.
+- No Kubernetes API implementations (operators/controllers).
+- No database persistence.
+- No new SGW topology features beyond the existing cache models.
+- No breaking API response shape changes outside the explicit Phase 8 schema standardization.
+
+## Iteration Policy
+
+If a step requires multiple hardening passes, label them **Step X.a, Step X.b, Step X.c**, etc., while the “current step” remains Step X. Only advance to Step X+1 after Step X acceptance criteria are met.
+
+## Operating Model Constraints
+
+- **Cache-first reads remain the default.** Endpoints must not trigger implicit SNMP walks unless explicitly documented.
+- **Configuration precedence must be explicit and consistent.** Recommended order for Phase 8:
+  1) CLI flags
+  2) Environment overrides
+  3) `system.json`
+  4) Request body overrides (only where explicitly allowed)
+
+## Progress / Status
+
+- Completed steps: none
+- Current step: Step 1
+- Remaining steps: Steps 1–10
+- Canonical pytest command prefix: `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest`
+
+## Step Plan
+
+### Phase 8 · Step 1 — Canonical CMTS Request Schema (Docs + Contract)
+
+Goal: Define the canonical request schema contract used by CMTS endpoints.
+
+Checklist:
+- [ ] Update `docs/architecture/schema/cmts-request.md` to define the canonical request shapes:
+  - CMTS serving-group filter (`serving_group.id` list)
+  - CM filter (`cable_modem.mac_address` list)
+  - CM override parameters (SNMPv2c write community, TFTP IPv4/IPv6) as optional request fields only when explicitly supported.
+- [ ] Document the rule: **empty `mac_address` list applies to all cable modems**, unless the endpoint explicitly requires a non-empty list.
+- [ ] Document validation rules (types, empty list semantics, duplicates, normalization).
+
+Contract reference: `docs/architecture/schema/cmts-request.md`
+
+Acceptance criteria:
+- Doc page defines a single canonical contract and notes endpoint-specific deviations explicitly.
+- The “empty mac list means all” rule is unambiguous and testable.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 2 — Canonical CMTS Request Models (Pydantic) + Normalization
+
+Goal: Implement typed request models used across endpoints.
+
+Checklist:
+- [ ] Create Pydantic models for:
+  - `ServingGroupFilterModel` (list of `ServiceGroupId` or empty => all)
+  - `CableModemFilterModel` (list of MACs; empty => all, unless endpoint forbids)
+  - `CmOverrideParametersModel` (SNMPv2c write community, TFTP IPv4/IPv6)
+  - `CmtsRequestModel` (top-level wrapper under `cmts`)
+- [ ] Centralize normalization:
+  - MAC format normalization and de-duplication
+  - empty list semantics normalized to “all” representation
+- [ ] Add unit tests for validation and normalization.
+
+Acceptance criteria:
+- Request model parsing is deterministic and shared across endpoints.
+- Unit tests cover empty lists, duplicates, invalid MACs, and invalid SG IDs.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_request_models.py`
+
+### Phase 8 · Step 3 — Endpoint Refactor to Canonical Request Schema
+
+Goal: Update CMTS endpoints to accept the canonical schema and apply filters correctly.
+
+Checklist:
+- [ ] For each target endpoint:
+  - Parse canonical request model
+  - Apply serving-group filter (explicit list or all)
+  - Apply cable-modem filter (explicit list or all per contract)
+- [ ] Ensure endpoint-specific deviations are explicit in docs and validated in code.
+
+Acceptance criteria:
+- Endpoints accept canonical schema with correct filter semantics.
+- Endpoints that require explicit MAC lists enforce it with clear errors.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_endpoints_request_contract.py`
+
+### Phase 8 · Step 4 — Canonical CMTS Response Envelope
+
+Goal: Standardize response shape across CMTS endpoints.
+
+Checklist:
+- [ ] Define `CmtsResponseModel` envelope:
+  - `status`
+  - `message`
+  - `data`
+  - `request_id` (if available)
+  - cache metadata (where SGW-backed)
+- [ ] Apply to all targeted endpoints.
+- [ ] Add contract tests verifying stable response shape.
+
+Acceptance criteria:
+- All targeted endpoints return the same response envelope.
+- Cache-backed endpoints include freshness metadata consistently.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_response_envelope.py`
+
+### Phase 8 · Step 5 — CLI Flags and Settings Precedence (CM Override Parameters)
+
+Goal: Add missing CLI flags and wire them into settings precedence.
+
+Checklist:
+- [ ] Add CLI args to `pypnm-cmts`:
+  - `--cm-snmpv2c-write-community`
+  - `--cm-tftp-ipv4`
+  - `--cm-tftp-ipv6`
+- [ ] Map CLI args into settings (and optionally env var equivalents).
+- [ ] Document precedence and ensure `--help` remains quiet (no config warnings).
+
+Acceptance criteria:
+- CLI accepts new flags and they override system defaults deterministically.
+- Help output is quiet and side-effect free.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cli_cm_override_args.py`
+
+### Phase 8 · Step 6 — Endpoint Documentation Updates
+
+Goal: Update endpoint docs to reflect canonical request/response schemas.
+
+Checklist:
+- [ ] Update each endpoint doc page to:
+  - reference canonical request schema
+  - list endpoint-specific deviations (if any)
+  - show examples with generic MAC/IP values
+- [ ] Ensure MkDocs + GitHub rendering is clean.
+
+Acceptance criteria:
+- Docs are consistent and do not conflict with implementation.
+- Examples use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 7 — Live CMTS Pytest Harness (Integration + Safety)
+
+Goal: Improve live CMTS testing so it is explicit, gated, and repeatable.
+
+Checklist:
+- [ ] Define pytest markers and gating:
+  - `unit` (default)
+  - `integration` (hermetic integration with fakes)
+  - `live_cmts` (requires explicit env var enablement)
+- [ ] Add environment-driven config injection for live tests:
+  - target CMTS host, community, state_dir overrides, timeout caps
+- [ ] Ensure live tests never run by default.
+
+Acceptance criteria:
+- `pytest -q` runs only unit tests by default.
+- Live tests are enabled only with explicit opt-in (env var + marker selection).
+- Live tests fail fast with clear diagnostics when not configured.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q`
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q -m live_cmts` (only when configured)
+
+### Phase 8 · Step 8 — Docker Runtime Contract
+
+Goal: Document and validate Docker runtime behavior for schema-driven endpoints.
+
+Checklist:
+- [ ] Document container entrypoint expectations:
+  - how config is loaded
+  - how CLI flags/env overrides are passed
+  - how `state_dir` is set and mounted
+- [ ] Document recommended environment variables (if provided).
+- [ ] Validate startup logs and readiness transitions in container context (manual run acceptable).
+
+Acceptance criteria:
+- Docker usage is documented end-to-end with clear examples.
+- Override parameters are usable without request-body changes (unless endpoint explicitly supports request overrides).
+
+Tests to run:
+- None (manual validation acceptable; keep it documented).
+
+### Phase 8 · Step 9 — Kubernetes Runtime Contract (Probes + Mounts + Optional Manifests)
+
+Goal: Provide K8 guidance for probes and storage and optionally a minimal manifest set.
+
+Checklist:
+- [ ] Document probe endpoints:
+  - Liveness: process health only
+  - Readiness: discovery + SGW cache readiness criteria
+- [ ] Document `state_dir` mount strategy:
+  - ephemeral (`emptyDir`) vs persistent (PVC)
+- [ ] Optional: add `deploy/` manifests (deployment/service/configmap), aligned with “one container per CMTS”.
+
+Acceptance criteria:
+- K8 probe guidance is precise and maps to stable endpoints.
+- `state_dir` persistence trade-offs are documented.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 10 — Final QA + Release Readiness
+
+Goal: Close Phase 8 with clean regression runs and documented readiness.
+
+Checklist:
+- [ ] Run full regression suite and confirm warning hygiene.
+- [ ] Run legacy-key hygiene scan.
+- [ ] Confirm docs updated and consistent with implementation.
+- [ ] Record release readiness notes (date/time, commands, pass/fail).
+
+Acceptance criteria:
+- `pytest -q` passes cleanly.
+- `tools/hygiene/legacy_key_scan.py` reports clean.
+- Phase 8 burndown updated to “Phase complete” with readiness notes.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q`
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python tools/hygiene/legacy_key_scan.py`
+
+## Exit Criteria
+
+- Canonical CMTS request/response schemas implemented and adopted by targeted endpoints.
+- CLI and runtime configuration surface supports CM override parameters deterministically.
+- Live CMTS testing is explicit, gated, and documented.
+- Docker/K8 runtime contract is documented, including probes and state_dir strategy.
+
+# FILE: docs/planning/phase8-burndown.md
+# Phase 8 Burndown Plan
+
+## Scope
+
+Phase 8 standardizes **CMTS endpoint request/response schemas** and aligns the **CLI + container runtime configuration surface** so endpoint behavior is deterministic across:
+
+- `pypnm-cmts …` CLI usage
+- `python -m pypnm_cmts.cli …` usage
+- `serve` (FastAPI) usage in Docker and Kubernetes
+
+Phase 8 also strengthens **live CMTS testing** so integration coverage is explicit, gated, repeatable, and safe to run in CI or operator environments.
+
+## Primary Goals
+
+- Establish a **canonical CMTS request schema** used across all CMTS endpoints.
+- Establish a **canonical CMTS response envelope** used across all CMTS endpoints.
+- Implement endpoint-level rules for:
+  - **Serving-group filtering**
+  - **Cable-modem filtering**, including the rule that an **empty `mac_address` list means “all modems”** unless the endpoint explicitly requires an explicit list.
+  - **Refresh semantics** (cache-first, optional refresh requests) where applicable.
+- Add missing **CLI arguments** for CM override parameters and wire them into settings precedence.
+- Publish an ops-grade **Docker/K8 runtime contract** (env/flags, probes, state_dir mounts).
+- Improve **live CMTS pytest** structure and gating (unit vs integration vs live).
+
+## Carryovers From Phase 7
+
+The Phase 7 SGW layer and cache-first endpoints are complete. The remaining carryovers are operational and contract hardening items that Phase 8 will close:
+
+- Container runtime contract (entrypoint/env surface) for new CM override parameters.
+- Explicit K8 probe guidance (liveness vs readiness) tied to stable ops endpoints.
+- `state_dir` mount and persistence guidance for Docker/K8.
+- Live CMTS integration testing harness quality and documentation.
+
+## Non-Goals
+
+- No new CMTS vendor support beyond existing adapter contracts.
+- No Kubernetes API implementations (operators/controllers).
+- No database persistence.
+- No new SGW topology features beyond the existing cache models.
+- No breaking API response shape changes outside the explicit Phase 8 schema standardization.
+
+## Iteration Policy
+
+If a step requires multiple hardening passes, label them **Step X.a, Step X.b, Step X.c**, etc., while the “current step” remains Step X. Only advance to Step X+1 after Step X acceptance criteria are met.
+
+## Operating Model Constraints
+
+- **Cache-first reads remain the default.** Endpoints must not trigger implicit SNMP walks unless explicitly documented.
+- **Configuration precedence must be explicit and consistent.** Recommended order for Phase 8:
+  1) CLI flags
+  2) Environment overrides
+  3) `system.json`
+  4) Request body overrides (only where explicitly allowed)
+
+## Progress / Status
+
+- Completed steps: none
+- Current step: Step 1
+- Remaining steps: Steps 1–10
+- Canonical pytest command prefix: `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest`
+
+## Step Plan
+
+### Phase 8 · Step 1 — Canonical CMTS Request Schema (Docs + Contract)
+
+Goal: Define the canonical request schema contract used by CMTS endpoints.
+
+Checklist:
+- [ ] Update `docs/architecture/schema/cmts-request.md` to define the canonical request shapes:
+  - CMTS serving-group filter (`serving_group.id` list)
+  - CM filter (`cable_modem.mac_address` list)
+  - CM override parameters (SNMPv2c write community, TFTP IPv4/IPv6) as optional request fields only when explicitly supported.
+- [ ] Document the rule: **empty `mac_address` list applies to all cable modems**, unless the endpoint explicitly requires a non-empty list.
+- [ ] Document validation rules (types, empty list semantics, duplicates, normalization).
+
+Contract reference: `docs/architecture/schema/cmts-request.md`
+
+Acceptance criteria:
+- Doc page defines a single canonical contract and notes endpoint-specific deviations explicitly.
+- The “empty mac list means all” rule is unambiguous and testable.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 2 — Canonical CMTS Request Models (Pydantic) + Normalization
+
+Goal: Implement typed request models used across endpoints.
+
+Checklist:
+- [ ] Create Pydantic models for:
+  - `ServingGroupFilterModel` (list of `ServiceGroupId` or empty => all)
+  - `CableModemFilterModel` (list of MACs; empty => all, unless endpoint forbids)
+  - `CmOverrideParametersModel` (SNMPv2c write community, TFTP IPv4/IPv6)
+  - `CmtsRequestModel` (top-level wrapper under `cmts`)
+- [ ] Centralize normalization:
+  - MAC format normalization and de-duplication
+  - empty list semantics normalized to “all” representation
+- [ ] Add unit tests for validation and normalization.
+
+Acceptance criteria:
+- Request model parsing is deterministic and shared across endpoints.
+- Unit tests cover empty lists, duplicates, invalid MACs, and invalid SG IDs.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_request_models.py`
+
+### Phase 8 · Step 3 — Endpoint Refactor to Canonical Request Schema
+
+Goal: Update CMTS endpoints to accept the canonical schema and apply filters correctly.
+
+Checklist:
+- [ ] For each target endpoint:
+  - Parse canonical request model
+  - Apply serving-group filter (explicit list or all)
+  - Apply cable-modem filter (explicit list or all per contract)
+- [ ] Ensure endpoint-specific deviations are explicit in docs and validated in code.
+
+Acceptance criteria:
+- Endpoints accept canonical schema with correct filter semantics.
+- Endpoints that require explicit MAC lists enforce it with clear errors.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_endpoints_request_contract.py`
+
+### Phase 8 · Step 4 — Canonical CMTS Response Envelope
+
+Goal: Standardize response shape across CMTS endpoints.
+
+Checklist:
+- [ ] Define `CmtsResponseModel` envelope:
+  - `status`
+  - `message`
+  - `data`
+  - `request_id` (if available)
+  - cache metadata (where SGW-backed)
+- [ ] Apply to all targeted endpoints.
+- [ ] Add contract tests verifying stable response shape.
+
+Acceptance criteria:
+- All targeted endpoints return the same response envelope.
+- Cache-backed endpoints include freshness metadata consistently.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_response_envelope.py`
+
+### Phase 8 · Step 5 — CLI Flags and Settings Precedence (CM Override Parameters)
+
+Goal: Add missing CLI flags and wire them into settings precedence.
+
+Checklist:
+- [ ] Add CLI args to `pypnm-cmts`:
+  - `--cm-snmpv2c-write-community`
+  - `--cm-tftp-ipv4`
+  - `--cm-tftp-ipv6`
+- [ ] Map CLI args into settings (and optionally env var equivalents).
+- [ ] Document precedence and ensure `--help` remains quiet (no config warnings).
+
+Acceptance criteria:
+- CLI accepts new flags and they override system defaults deterministically.
+- Help output is quiet and side-effect free.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cli_cm_override_args.py`
+
+### Phase 8 · Step 6 — Endpoint Documentation Updates
+
+Goal: Update endpoint docs to reflect canonical request/response schemas.
+
+Checklist:
+- [ ] Update each endpoint doc page to:
+  - reference canonical request schema
+  - list endpoint-specific deviations (if any)
+  - show examples with generic MAC/IP values
+- [ ] Ensure MkDocs + GitHub rendering is clean.
+
+Acceptance criteria:
+- Docs are consistent and do not conflict with implementation.
+- Examples use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 7 — Live CMTS Pytest Harness (Integration + Safety)
+
+Goal: Improve live CMTS testing so it is explicit, gated, and repeatable.
+
+Checklist:
+- [ ] Define pytest markers and gating:
+  - `unit` (default)
+  - `integration` (hermetic integration with fakes)
+  - `live_cmts` (requires explicit env var enablement)
+- [ ] Add environment-driven config injection for live tests:
+  - target CMTS host, community, state_dir overrides, timeout caps
+- [ ] Ensure live tests never run by default.
+
+Acceptance criteria:
+- `pytest -q` runs only unit tests by default.
+- Live tests are enabled only with explicit opt-in (env var + marker selection).
+- Live tests fail fast with clear diagnostics when not configured.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q`
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q -m live_cmts` (only when configured)
+
+### Phase 8 · Step 8 — Docker Runtime Contract
+
+Goal: Document and validate Docker runtime behavior for schema-driven endpoints.
+
+Checklist:
+- [ ] Document container entrypoint expectations:
+  - how config is loaded
+  - how CLI flags/env overrides are passed
+  - how `state_dir` is set and mounted
+- [ ] Document recommended environment variables (if provided).
+- [ ] Validate startup logs and readiness transitions in container context (manual run acceptable).
+
+Acceptance criteria:
+- Docker usage is documented end-to-end with clear examples.
+- Override parameters are usable without request-body changes (unless endpoint explicitly supports request overrides).
+
+Tests to run:
+- None (manual validation acceptable; keep it documented).
+
+### Phase 8 · Step 9 — Kubernetes Runtime Contract (Probes + Mounts + Optional Manifests)
+
+Goal: Provide K8 guidance for probes and storage and optionally a minimal manifest set.
+
+Checklist:
+- [ ] Document probe endpoints:
+  - Liveness: process health only
+  - Readiness: discovery + SGW cache readiness criteria
+- [ ] Document `state_dir` mount strategy:
+  - ephemeral (`emptyDir`) vs persistent (PVC)
+- [ ] Optional: add `deploy/` manifests (deployment/service/configmap), aligned with “one container per CMTS”.
+
+Acceptance criteria:
+- K8 probe guidance is precise and maps to stable endpoints.
+- `state_dir` persistence trade-offs are documented.
+
+Tests to run:
+- None.
+
+### Phase 8 · Step 10 — Final QA + Release Readiness
+
+Goal: Close Phase 8 with clean regression runs and documented readiness.
+
+Checklist:
+- [ ] Run full regression suite and confirm warning hygiene.
+- [ ] Run legacy-key hygiene scan.
+- [ ] Confirm docs updated and consistent with implementation.
+- [ ] Record release readiness notes (date/time, commands, pass/fail).
+
+Acceptance criteria:
+- `pytest -q` passes cleanly.
+- `tools/hygiene/legacy_key_scan.py` reports clean.
+- Phase 8 burndown updated to “Phase complete” with readiness notes.
+
+Tests to run:
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q`
+- `/home/dev01/Projects/PyPNM-CMTS/.env/bin/python tools/hygiene/legacy_key_scan.py`
+
+## Exit Criteria
+
+- Canonical CMTS request/response schemas implemented and adopted by targeted endpoints.
+- CLI and runtime configuration surface supports CM override parameters deterministically.
+- Live CMTS testing is explicit, gated, and documented.
+- Docker/K8 runtime contract is documented, including probes and state_dir strategy.
+
+# FILE: src/pypnm_cmts/api/common/cmts_request.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, model_validator
+from pypnm.lib.mac_address import MacAddress, MacAddressFormat
+from pypnm.lib.types import IPv4Str, IPv6Str, MacAddressStr, SnmpWriteCommunity
+
+from pypnm_cmts.lib.types import ServiceGroupId
+
+
+class CmtsServingGroupFilterModel(BaseModel):
+    """Serving group filter for CMTS requests."""
+
+    id: list[ServiceGroupId] = Field(default_factory=list, description="Serving group identifiers; empty means all.")
+
+    @model_validator(mode="after")
+    def _normalize_ids(self) -> CmtsServingGroupFilterModel:
+        for sg_id in self.id:
+            if int(sg_id) < 0:
+                raise ValueError("serving_group.id values must be zero or greater.")
+        unique = {int(sg_id): sg_id for sg_id in self.id}
+        ordered = [unique[key] for key in sorted(unique.keys())]
+        self.id = ordered
+        return self
+
+
+class CmtsTftpParametersModel(BaseModel):
+    """TFTP override parameters for CMTS requests."""
+
+    ipv4: IPv4Str | None = Field(default=None, description="Optional TFTP IPv4 override.")
+    ipv6: IPv6Str | None = Field(default=None, description="Optional TFTP IPv6 override.")
+
+
+class CmtsPnmParametersModel(BaseModel):
+    """PNM override parameters for CMTS requests."""
+
+    tftp: CmtsTftpParametersModel | None = Field(default=None, description="Optional TFTP override parameters.")
+
+
+class CmtsSnmpV2CModel(BaseModel):
+    """SNMPv2c override parameters for CMTS requests."""
+
+    community: SnmpWriteCommunity | None = Field(default=None, description="Optional SNMP write community override.")
+
+
+class CmtsSnmpModel(BaseModel):
+    """SNMP override parameters for CMTS requests."""
+
+    snmpV2C: CmtsSnmpV2CModel | None = Field(default=None, description="Optional SNMPv2c override parameters.")
+
+
+class CmtsCableModemFilterModel(BaseModel):
+    """Cable modem filter and overrides for CMTS requests."""
+
+    mac_address: list[MacAddressStr] = Field(default_factory=list, description="Cable modem MAC addresses; empty means all.")
+    pnm_parameters: CmtsPnmParametersModel | None = Field(default=None, description="Optional PNM override parameters.")
+    snmp: CmtsSnmpModel | None = Field(default=None, description="Optional SNMP override parameters.")
+
+    @model_validator(mode="after")
+    def _normalize_macs(self) -> CmtsCableModemFilterModel:
+        normalized: list[MacAddressStr] = []
+        seen: set[str] = set()
+        for mac in self.mac_address:
+            try:
+                normalized_mac = MacAddress(mac).to_mac_format(MacAddressFormat.COLON)
+            except Exception as exc:
+                raise ValueError("cable_modem.mac_address entries must be valid MAC addresses.") from exc
+            mac_str = str(normalized_mac)
+            if mac_str in seen:
+                continue
+            seen.add(mac_str)
+            normalized.append(MacAddressStr(mac_str))
+        self.mac_address = normalized
+        return self
+
+
+class CmtsRequestEnvelopeModel(BaseModel):
+    """Canonical CMTS request envelope."""
+
+    serving_group: CmtsServingGroupFilterModel = Field(default_factory=CmtsServingGroupFilterModel, description="Serving group selection.")
+    cable_modem: CmtsCableModemFilterModel = Field(default_factory=CmtsCableModemFilterModel, description="Cable modem selection and overrides.")
+
+    def resolve_sg_ids(self, discovered_sg_ids: list[ServiceGroupId]) -> list[ServiceGroupId]:
+        """Return selected serving group ids using empty-list means all semantics."""
+        if self.serving_group.id:
+            return list(self.serving_group.id)
+        return list(discovered_sg_ids)
+
+    def resolve_mac_addresses(self, discovered_macs: list[MacAddressStr]) -> list[MacAddressStr]:
+        """Return selected MAC addresses using empty-list means all semantics."""
+        if self.cable_modem.mac_address:
+            return list(self.cable_modem.mac_address)
+        return list(discovered_macs)
+
+
+class CmtsRequestModel(BaseModel):
+    """Top-level CMTS request wrapper."""
+
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+
+
+__all__ = [
+    "CmtsCableModemFilterModel",
+    "CmtsPnmParametersModel",
+    "CmtsRequestEnvelopeModel",
+    "CmtsRequestModel",
+    "CmtsServingGroupFilterModel",
+    "CmtsSnmpModel",
+    "CmtsSnmpV2CModel",
+    "CmtsTftpParametersModel",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/router.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+from enum import Enum
+
+from fastapi import APIRouter
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+    GetServingGroupCableModemsResponse,
+    GetServingGroupIdsRequest,
+    GetServingGroupIdsResponse,
+    GetServingGroupTopologyRequest,
+    GetServingGroupTopologyResponse,
+    ServingGroupStatusResponse,
+)
+from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+
+
+class ServingGroupRouter:
+    """
+    FastAPI router for cache-backed serving group endpoints.
+    """
+
+    def __init__(
+        self,
+        prefix: str = "/cmts/servingGroup",
+        tags: list[str | Enum] | None = None,
+    ) -> None:
+        if tags is None:
+            tags = ["CMTS Serving Group"]
+        self.router = APIRouter(prefix=prefix, tags=tags)
+        self.logger = logging.getLogger(__name__)
+        self._service = ServingGroupCacheService()
+        self._register_routes()
+
+    def _register_routes(self) -> None:
+        @self.router.post(
+            "/get/ids",
+            response_model=GetServingGroupIdsResponse,
+            summary="Retrieve discovered serving group ids",
+            description="Returns discovered serving group ids and cache summaries.",
+        )
+        def get_ids(_request: GetServingGroupIdsRequest) -> GetServingGroupIdsResponse:
+            """
+            **Serving Group Ids**
+
+            Returns discovered SG ids and cache readiness metadata.
+            """
+            return self._service.get_ids(_request)
+
+        @self.router.get(
+            "/status",
+            response_model=ServingGroupStatusResponse,
+            summary="Serving group worker status",
+            description="Returns SGW startup status and cache readiness.",
+        )
+        def get_status() -> ServingGroupStatusResponse:
+            """
+            **Serving Group Status**
+
+            Returns SGW startup status and cache readiness metadata.
+            """
+            return self._service.get_status()
+
+        @self.router.post(
+            "/get/cableModems",
+            response_model=GetServingGroupCableModemsResponse,
+            summary="Retrieve cable modems for a serving group",
+            description="Returns cached cable modem membership for a serving group.",
+        )
+        def get_cable_modems(
+            request: GetServingGroupCableModemsRequest,
+        ) -> GetServingGroupCableModemsResponse:
+            """
+            **Serving Group Cable Modems**
+
+            Returns a paged list of cable modems for the specified service group.
+            """
+            return self._service.get_cable_modems(request)
+
+        @self.router.post(
+            "/get/topology",
+            response_model=GetServingGroupTopologyResponse,
+            summary="Retrieve serving group topology",
+            description="Returns cached topology summary for a serving group.",
+        )
+        def get_topology(
+            request: GetServingGroupTopologyRequest,
+        ) -> GetServingGroupTopologyResponse:
+            """
+            **Serving Group Topology**
+
+            Returns cached topology summary for the specified service group.
+            """
+            return self._service.get_topology(request)
+
+
+router = ServingGroupRouter().router
+
+__all__ = [
+    "router",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/schemas.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, model_validator
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
+from pypnm_cmts.sgw.runtime_state import SgwStartupStatusModel
+
+DEFAULT_PAGE_NUMBER = 1
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 1000
+DEFAULT_REFRESH_MODE = CacheRefreshMode.NONE
+DEFAULT_MAX_WAIT_SECONDS = 0.0
+MAX_WAIT_SECONDS = 10.0
+DEFAULT_TOPOLOGY_SG_ID = ServiceGroupId(0)
+
+
+class CacheResponseBase(BaseModel):
+    """Base response model for cache-backed endpoints."""
+
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
+    message: str = Field(default="", description="Informational or error message.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+
+
+class GetServingGroupIdsRequest(BaseModel):
+    """Request model for serving group id retrieval."""
+
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+
+
+class ServingGroupCacheSummaryModel(BaseModel):
+    """Cache summary for a serving group snapshot."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    metadata: SgwCacheMetadataModel | None = Field(default=None, description="Cache metadata for the snapshot.")
+
+
+class GetServingGroupIdsResponse(CacheResponseBase):
+    """Response model for serving group id retrieval."""
+
+    discovered_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Discovered service group identifiers.")
+    sgw_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    summaries: list[ServingGroupCacheSummaryModel] = Field(default_factory=list, description="Per-SG cache summary entries.")
+
+
+class ServingGroupStatusResponse(CacheResponseBase):
+    """Response model for serving group cache and runtime status."""
+
+    startup_status: SgwStartupStatusModel = Field(default_factory=SgwStartupStatusModel, description="SGW startup status snapshot.")
+    refresh_running: bool = Field(default=False, description="Whether the SGW background refresh loop is running.")
+    discovered_count: int = Field(default=0, description="Count of discovered service groups.")
+    cache_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers missing cache snapshots.")
+
+
+class GetServingGroupCableModemsRequest(BaseModel):
+    """Request model for serving group cable modem retrieval."""
+
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    sg_id: ServiceGroupId | None = Field(default=None, description="Legacy service group identifier.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
+    refresh: CacheRefreshMode = Field(default=DEFAULT_REFRESH_MODE, description="Optional refresh mode for the request.")
+    max_wait_seconds: float = Field(default=DEFAULT_MAX_WAIT_SECONDS, ge=0.0, le=MAX_WAIT_SECONDS, description="Maximum time to wait for a refresh.")
+    require_fresh: bool = Field(default=False, description="Wait for a refreshed snapshot when refresh is requested.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupCableModemsRequest:
+        if self.sg_id is None:
+            return self
+        if int(self.sg_id) < 0:
+            raise ValueError("sg_id must be zero or greater.")
+        if self.cmts.serving_group.id:
+            return self
+        if int(self.sg_id) == 0:
+            return self
+        updated_sg = self.cmts.serving_group.model_copy(update={"id": [self.sg_id]})
+        self.cmts = self.cmts.model_copy(update={"serving_group": updated_sg})
+        return self
+
+
+class GetServingGroupCableModemsResponse(CacheResponseBase):
+    """Response model for serving group cable modem retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers included in aggregation.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, description="Current page number.")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, description="Requested page size.")
+    total_count: int = Field(default=0, description="Total number of cable modems for the service group.")
+    items: list[SgwCableModemModel] = Field(default_factory=list, description="Paged cable modem entries.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+    refresh_applied: bool = Field(default=False, description="Whether a refresh request was accepted for processing.")
+    waited_seconds: float = Field(default=0.0, description="Seconds waited for a refresh to advance.")
+
+
+class GetServingGroupTopologyRequest(BaseModel):
+    """Request model for serving group topology retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    refresh: CacheRefreshMode = Field(default=DEFAULT_REFRESH_MODE, description="Optional refresh mode for the request.")
+    max_wait_seconds: float = Field(default=DEFAULT_MAX_WAIT_SECONDS, ge=0.0, le=MAX_WAIT_SECONDS, description="Maximum time to wait for a refresh.")
+    require_fresh: bool = Field(default=False, description="Wait for a refreshed snapshot when refresh is requested.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupTopologyRequest:
+        if int(self.sg_id) < 0:
+            raise ValueError("sg_id must be zero or greater.")
+        return self
+
+
+class ServingGroupTopologyModel(BaseModel):
+    """Topology summary payload for a serving group."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+
+
+class GetServingGroupTopologyResponse(CacheResponseBase):
+    """Response model for serving group topology retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers included in aggregation.")
+    topology: ServingGroupTopologyModel = Field(default_factory=lambda: ServingGroupTopologyModel(sg_id=DEFAULT_TOPOLOGY_SG_ID), description="Cached topology summary.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+    refresh_applied: bool = Field(default=False, description="Whether a refresh request was accepted for processing.")
+    waited_seconds: float = Field(default=0.0, description="Seconds waited for a refresh to advance.")
+
+
+__all__ = [
+    "CacheResponseBase",
+    "DEFAULT_PAGE_NUMBER",
+    "DEFAULT_PAGE_SIZE",
+    "DEFAULT_REFRESH_MODE",
+    "DEFAULT_MAX_WAIT_SECONDS",
+    "DEFAULT_TOPOLOGY_SG_ID",
+    "MAX_PAGE_SIZE",
+    "MAX_WAIT_SECONDS",
+    "GetServingGroupIdsRequest",
+    "GetServingGroupIdsResponse",
+    "ServingGroupStatusResponse",
+    "GetServingGroupCableModemsRequest",
+    "GetServingGroupCableModemsResponse",
+    "GetServingGroupTopologyRequest",
+    "GetServingGroupTopologyResponse",
+    "ServingGroupCacheSummaryModel",
+    "ServingGroupTopologyModel",
+]
+
+# FILE: src/pypnm_cmts/api/routes/serving_group/service.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.lib.types import MacAddressStr
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+    GetServingGroupCableModemsResponse,
+    GetServingGroupIdsRequest,
+    GetServingGroupIdsResponse,
+    GetServingGroupTopologyRequest,
+    GetServingGroupTopologyResponse,
+    ServingGroupCacheSummaryModel,
+    ServingGroupStatusResponse,
+    ServingGroupTopologyModel,
+)
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import (
+    SGW_LAST_ERROR_MAX_LENGTH,
+    SgwCacheMetadataModel,
+    SgwRefreshState,
+)
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    get_sgw_manager,
+    get_sgw_startup_status,
+    get_sgw_store,
+    is_sgw_refresh_running,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+class ServingGroupCacheService:
+    """Service layer for cache-backed serving group endpoints."""
+
+    STORE_UNAVAILABLE_MESSAGE = "sgw store not available"
+    SNAPSHOT_MISSING_TEMPLATE = "sgw snapshot missing for sg_id={sg_id}"
+    SG_NOT_FOUND_TEMPLATE = "sg_id not found: {sg_id}"
+    NO_DISCOVERED_MESSAGE = "no discovered service groups"
+    WAIT_POLL_SECONDS = 0.2
+
+    def get_ids(self, request: GetServingGroupIdsRequest) -> GetServingGroupIdsResponse:
+        """Return discovered service group identifiers and cache summaries."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        selected_sg_ids = request.cmts.resolve_sg_ids(discovered_sg_ids)
+        store = get_sgw_store()
+        sgw_ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+        summaries: list[ServingGroupCacheSummaryModel] = []
+        now_epoch = self._now_epoch()
+        for sg_id in selected_sg_ids:
+            metadata = self._resolve_metadata(sg_id, store, now_epoch)
+            summaries.append(ServingGroupCacheSummaryModel(sg_id=sg_id, metadata=metadata))
+        message = "" if sgw_ready else "sgw cache not ready"
+        return GetServingGroupIdsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            discovered_sg_ids=selected_sg_ids,
+            sgw_ready=sgw_ready,
+            summaries=summaries,
+        )
+
+    def get_status(self) -> ServingGroupStatusResponse:
+        """Return SGW startup and cache readiness status."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        cache_ready, missing_sg_ids = compute_sgw_cache_ready(discovered_sg_ids, store)
+        message = "" if cache_ready else "sgw cache not ready"
+        return ServingGroupStatusResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            startup_status=status,
+            refresh_running=is_sgw_refresh_running(),
+            discovered_count=len(discovered_sg_ids),
+            cache_ready=cache_ready,
+            missing_sg_ids=missing_sg_ids,
+        )
+
+    def get_cable_modems(
+        self,
+        request: GetServingGroupCableModemsRequest,
+    ) -> GetServingGroupCableModemsResponse:
+        """Return paged cable modem membership for a service group."""
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        selected_sg_ids = request.cmts.resolve_sg_ids(discovered_sg_ids)
+        store = get_sgw_store()
+        now_epoch = self._now_epoch()
+        selected_macs = request.cmts.cable_modem.mac_address
+        if selected_sg_ids and discovered_sg_ids and any(sg not in discovered_sg_ids for sg in selected_sg_ids):
+            missing = [sg for sg in selected_sg_ids if sg not in discovered_sg_ids]
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(missing[0])))
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(missing[0])),
+                timestamp=self._utc_now(),
+                sg_id=missing[0],
+                sg_ids=selected_sg_ids,
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        if len(selected_sg_ids) != 1:
+            return self._get_cable_modems_aggregate(
+                request=request,
+                discovered_sg_ids=selected_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+                mac_addresses=selected_macs,
+            )
+        sg_id = selected_sg_ids[0]
+        refresh_applied, failure_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        if entry is None:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+
+        filtered_modems = self._filter_modems_by_macs(entry.snapshot.cable_modems, selected_macs)
+        items = self._paginate_modems(filtered_modems, request.page, request.page_size)
+        total_count = len(filtered_modems)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            sg_ids=[sg_id],
+            page=request.page,
+            page_size=request.page_size,
+            total_count=total_count,
+            items=items,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def get_topology(
+        self,
+        request: GetServingGroupTopologyRequest,
+    ) -> GetServingGroupTopologyResponse:
+        """Return cached topology summary for a service group."""
+        sg_id = request.sg_id
+        status = get_sgw_startup_status()
+        discovered_sg_ids = list(status.discovered_sg_ids)
+        store = get_sgw_store()
+        now_epoch = self._now_epoch()
+        if int(sg_id) == 0:
+            return self._get_topology_aggregate(
+                request=request,
+                discovered_sg_ids=discovered_sg_ids,
+                store=store,
+                now_epoch=now_epoch,
+            )
+        if discovered_sg_ids and sg_id not in discovered_sg_ids:
+            metadata = self._build_error_metadata(self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)))
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=self.SG_NOT_FOUND_TEMPLATE.format(sg_id=int(sg_id)),
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                topology=ServingGroupTopologyModel(sg_id=sg_id),
+                metadata=metadata,
+                refresh_applied=False,
+                waited_seconds=0.0,
+            )
+        refresh_applied, failure_message = self._request_refresh(
+            [sg_id],
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            [sg_id],
+            store,
+            refresh_applied,
+        )
+        entry = store.get_entry(sg_id) if store is not None else None
+        metadata = self._resolve_metadata(sg_id, store, now_epoch)
+        message = ""
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        if entry is None:
+            topology = ServingGroupTopologyModel(sg_id=sg_id)
+            return GetServingGroupTopologyResponse(
+                status=ServiceStatusCode.FAILURE,
+                message=message if message != "" else f"sgw snapshot not available for sg_id={int(sg_id)}",
+                timestamp=self._utc_now(),
+                sg_id=sg_id,
+                sg_ids=[sg_id],
+                topology=topology,
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+
+        topology = ServingGroupTopologyModel(
+            sg_id=sg_id,
+            ds_channels=entry.snapshot.ds_channels,
+            us_channels=entry.snapshot.us_channels,
+        )
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=sg_id,
+            sg_ids=[sg_id],
+            topology=topology,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _get_cable_modems_aggregate(
+        self,
+        request: GetServingGroupCableModemsRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+        mac_addresses: list[MacAddressStr],
+    ) -> GetServingGroupCableModemsResponse:
+        refresh_applied, failure_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        if not discovered_sg_ids:
+            return GetServingGroupCableModemsResponse(
+                status=ServiceStatusCode.SUCCESS,
+                message=self.NO_DISCOVERED_MESSAGE,
+                timestamp=self._utc_now(),
+                sg_id=ServiceGroupId(0),
+                sg_ids=[],
+                page=request.page,
+                page_size=request.page_size,
+                total_count=0,
+                items=[],
+                metadata=metadata,
+                refresh_applied=refresh_applied,
+                waited_seconds=waited_seconds,
+            )
+        modems = self._aggregate_modems(discovered_sg_ids, store)
+        filtered_modems = self._filter_modems_by_macs(modems, mac_addresses)
+        items = self._paginate_modems(filtered_modems, request.page, request.page_size)
+        return GetServingGroupCableModemsResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            page=request.page,
+            page_size=request.page_size,
+            total_count=len(filtered_modems),
+            items=items,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _get_topology_aggregate(
+        self,
+        request: GetServingGroupTopologyRequest,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> GetServingGroupTopologyResponse:
+        refresh_applied, failure_message = self._request_refresh(
+            discovered_sg_ids,
+            request.refresh,
+            now_epoch,
+        )
+        waited_seconds = self._wait_for_refresh(
+            request,
+            discovered_sg_ids,
+            store,
+            refresh_applied,
+        )
+        metadata, message = self._resolve_aggregate_metadata(discovered_sg_ids, store, now_epoch)
+        if failure_message != "":
+            metadata = self._apply_metadata_error(metadata, failure_message)
+            message = failure_message
+        elif refresh_applied:
+            message = "refresh requested"
+        topology = self._aggregate_topology(discovered_sg_ids, store)
+        if not discovered_sg_ids:
+            message = self.NO_DISCOVERED_MESSAGE
+        return GetServingGroupTopologyResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message=message,
+            timestamp=self._utc_now(),
+            sg_id=ServiceGroupId(0),
+            sg_ids=list(discovered_sg_ids),
+            topology=topology,
+            metadata=metadata,
+            refresh_applied=refresh_applied,
+            waited_seconds=waited_seconds,
+        )
+
+    def _resolve_aggregate_metadata(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> tuple[SgwCacheMetadataModel, str]:
+        if store is None:
+            return (self._build_error_metadata(self.STORE_UNAVAILABLE_MESSAGE), self.STORE_UNAVAILABLE_MESSAGE)
+        missing: list[ServiceGroupId] = []
+        entries = []
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                missing.append(sg_id)
+                continue
+            entries.append(entry)
+        if missing:
+            message = self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(missing[0]))
+            return (self._build_error_metadata(message), message)
+        if not entries:
+            return (self._build_error_metadata(self.NO_DISCOVERED_MESSAGE), self.NO_DISCOVERED_MESSAGE)
+        newest = max(entries, key=lambda entry: float(entry.snapshot.metadata.snapshot_time_epoch))
+        metadata = self._resolve_metadata(newest.sg_id, store, now_epoch)
+        return (metadata, "")
+
+    def _aggregate_modems(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> list[SgwCableModemModel]:
+        if store is None:
+            return []
+        seen: dict[str, SgwCableModemModel] = {}
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            for modem in entry.snapshot.cable_modems:
+                key = str(modem.mac)
+                if key in seen:
+                    continue
+                seen[key] = modem
+        return self._sort_modems(list(seen.values()))
+
+    @staticmethod
+    def _filter_modems_by_macs(
+        modems: list[SgwCableModemModel],
+        mac_addresses: list[MacAddressStr],
+    ) -> list[SgwCableModemModel]:
+        if not mac_addresses:
+            return list(modems)
+        selected = {str(mac) for mac in mac_addresses}
+        return [modem for modem in modems if str(modem.mac) in selected]
+
+    def _aggregate_topology(
+        self,
+        discovered_sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+    ) -> ServingGroupTopologyModel:
+        if store is None:
+            return ServingGroupTopologyModel(sg_id=ServiceGroupId(0))
+        ds_channels: set[int] = set()
+        us_channels: set[int] = set()
+        for sg_id in discovered_sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            ds_channels.update(entry.snapshot.ds_channels.channel_ids)
+            us_channels.update(entry.snapshot.us_channels.channel_ids)
+        return ServingGroupTopologyModel(
+            sg_id=ServiceGroupId(0),
+            ds_channels=SgwChannelSummaryModel(count=len(ds_channels), channel_ids=sorted(ds_channels)),
+            us_channels=SgwChannelSummaryModel(count=len(us_channels), channel_ids=sorted(us_channels)),
+        )
+
+    def _request_refresh(
+        self,
+        sg_ids: list[ServiceGroupId],
+        refresh: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        manager = get_sgw_manager()
+        if manager is None or refresh == CacheRefreshMode.NONE:
+            return (False, "")
+        applied = False
+        failure_reasons: list[str] = []
+        seen: set[str] = set()
+        for sg_id in sg_ids:
+            accepted, reason = manager.request_refresh(sg_id, refresh, now_epoch)
+            if accepted:
+                applied = True
+            if reason and reason not in seen and len(failure_reasons) < 3:
+                seen.add(reason)
+                failure_reasons.append(reason)
+        failure_message = "; ".join(failure_reasons) if failure_reasons else ""
+        return (applied, failure_message)
+
+    def _wait_for_refresh(
+        self,
+        request: GetServingGroupCableModemsRequest | GetServingGroupTopologyRequest,
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore | None,
+        refresh_applied: bool,
+    ) -> float:
+        if not refresh_applied:
+            return 0.0
+        if not bool(request.require_fresh):
+            return 0.0
+        if float(request.max_wait_seconds) <= 0:
+            return 0.0
+        if store is None:
+            return 0.0
+        if isinstance(request, GetServingGroupCableModemsRequest):
+            if request.sg_id is None:
+                is_aggregate = len(sg_ids) != 1
+            else:
+                is_aggregate = int(request.sg_id) == 0
+        else:
+            is_aggregate = int(request.sg_id) == 0
+        frozen_ids: list[ServiceGroupId]
+        if is_aggregate:
+            manager = get_sgw_manager()
+            if manager is None:
+                frozen_ids = list(sg_ids)
+            else:
+                frozen_ids = manager.get_service_groups()
+        else:
+            frozen_ids = list(sg_ids)
+        if not frozen_ids:
+            return 0.0
+        baseline = self._snapshot_baseline(frozen_ids, store)
+        start = self._monotonic()
+        max_wait_seconds = float(request.max_wait_seconds)
+        while True:
+            if is_aggregate:
+                advanced = self._all_snapshots_advanced(frozen_ids, store, baseline)
+            else:
+                advanced = self._snapshot_advanced(frozen_ids, store, baseline)
+            if advanced:
+                return max(0.0, self._monotonic() - start)
+            elapsed = self._monotonic() - start
+            if elapsed >= max_wait_seconds:
+                return max(0.0, elapsed)
+            self._sleep(self.WAIT_POLL_SECONDS)
+
+    @staticmethod
+    def _snapshot_baseline(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+    ) -> dict[ServiceGroupId, float]:
+        baseline: dict[ServiceGroupId, float] = {}
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            snapshot_epoch = 0.0
+            if entry is not None:
+                snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline[sg_id] = snapshot_epoch
+        return baseline
+
+    @staticmethod
+    def _snapshot_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            if snapshot_epoch > float(baseline.get(sg_id, 0.0)) and snapshot_epoch > 0:
+                return True
+        return False
+
+    @staticmethod
+    def _all_snapshots_advanced(
+        sg_ids: list[ServiceGroupId],
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+    ) -> bool:
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                return False
+            snapshot_epoch = float(entry.snapshot.metadata.snapshot_time_epoch)
+            baseline_epoch = float(baseline.get(sg_id, 0.0))
+            if snapshot_epoch <= baseline_epoch or snapshot_epoch <= 0:
+                return False
+        return True
+
+    def _resolve_metadata(
+        self,
+        sg_id: ServiceGroupId,
+        store: SgwCacheStore | None,
+        now_epoch: float,
+    ) -> SgwCacheMetadataModel:
+        if store is None:
+            return self._build_error_metadata(self.STORE_UNAVAILABLE_MESSAGE)
+        entry = store.get_entry(sg_id)
+        if entry is None:
+            message = self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(sg_id))
+            return self._build_error_metadata(message)
+        metadata = entry.snapshot.metadata
+        snapshot_epoch = float(metadata.snapshot_time_epoch)
+        if snapshot_epoch <= 0:
+            return metadata
+        age_seconds = max(0.0, float(now_epoch) - snapshot_epoch)
+        return metadata.model_copy(update={"age_seconds": age_seconds})
+
+    @staticmethod
+    def _sort_modems(modems: list[SgwCableModemModel]) -> list[SgwCableModemModel]:
+        return sorted(modems, key=lambda modem: (str(modem.mac), str(modem.ipv4), str(modem.ipv6)))
+
+    def _paginate_modems(
+        self,
+        modems: list[SgwCableModemModel],
+        page: int,
+        page_size: int,
+    ) -> list[SgwCableModemModel]:
+        ordered = self._sort_modems(modems)
+        start = (int(page) - 1) * int(page_size)
+        end = start + int(page_size)
+        if start >= len(ordered):
+            return []
+        return ordered[start:end]
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _now_epoch() -> float:
+        return datetime.now(timezone.utc).timestamp()
+
+    @staticmethod
+    def _sleep(seconds: float) -> None:
+        time.sleep(float(seconds))
+
+    @staticmethod
+    def _monotonic() -> float:
+        return float(time.monotonic())
+
+    @staticmethod
+    def _build_error_metadata(message: str) -> SgwCacheMetadataModel:
+        bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
+        return SgwCacheMetadataModel(
+            snapshot_time_epoch=0.0,
+            refresh_state=SgwRefreshState.ERROR,
+            last_error=bounded,
+        )
+
+    @staticmethod
+    def _apply_metadata_error(
+        metadata: SgwCacheMetadataModel,
+        message: str,
+    ) -> SgwCacheMetadataModel:
+        bounded = message[:SGW_LAST_ERROR_MAX_LENGTH]
+        return metadata.model_copy(
+            update={
+                "refresh_state": SgwRefreshState.ERROR,
+                "last_error": bounded,
+            }
+        )
+
+
+__all__ = [
+    "ServingGroupCacheService",
+]
+
+# FILE: tests/test_cmts_request_models.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from pypnm.lib.types import MacAddressStr
+
+from pypnm_cmts.api.common.cmts_request import (
+    CmtsCableModemFilterModel,
+    CmtsRequestEnvelopeModel,
+    CmtsServingGroupFilterModel,
+)
+from pypnm_cmts.lib.types import ServiceGroupId
+
+
+@pytest.mark.unit
+def test_serving_group_filter_dedupes_and_sorts() -> None:
+    model = CmtsServingGroupFilterModel(id=[ServiceGroupId(2), ServiceGroupId(1), ServiceGroupId(2)])
+    assert model.id == [ServiceGroupId(1), ServiceGroupId(2)]
+
+
+@pytest.mark.unit
+def test_serving_group_filter_rejects_negative() -> None:
+    with pytest.raises(ValueError, match="serving_group.id values must be zero or greater."):
+        CmtsServingGroupFilterModel(id=[ServiceGroupId(-1)])
+
+
+@pytest.mark.unit
+def test_cable_modem_filter_dedupes() -> None:
+    model = CmtsCableModemFilterModel(
+        mac_address=[
+            MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            MacAddressStr("aa:bb:cc:dd:ee:01"),
+        ]
+    )
+    assert model.mac_address == [
+        MacAddressStr("aa:bb:cc:dd:ee:ff"),
+        MacAddressStr("aa:bb:cc:dd:ee:01"),
+    ]
+
+
+@pytest.mark.unit
+def test_cable_modem_filter_rejects_invalid_mac() -> None:
+    with pytest.raises(ValueError, match="cable_modem.mac_address entries must be valid MAC addresses."):
+        CmtsCableModemFilterModel(mac_address=["invalid-mac"])
+
+
+@pytest.mark.unit
+def test_request_envelope_resolves_all_when_empty() -> None:
+    envelope = CmtsRequestEnvelopeModel()
+    discovered_sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+    discovered_macs = [
+        MacAddressStr("aa:bb:cc:dd:ee:01"),
+        MacAddressStr("aa:bb:cc:dd:ee:02"),
+    ]
+    assert envelope.resolve_sg_ids(discovered_sg_ids) == discovered_sg_ids
+    assert envelope.resolve_mac_addresses(discovered_macs) == discovered_macs
+
+
+@pytest.mark.unit
+def test_request_envelope_resolves_selected() -> None:
+    envelope = CmtsRequestEnvelopeModel(
+        serving_group=CmtsServingGroupFilterModel(id=[ServiceGroupId(2)]),
+        cable_modem=CmtsCableModemFilterModel(mac_address=[MacAddressStr("aa:bb:cc:dd:ee:ff")]),
+    )
+    discovered_sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+    discovered_macs = [MacAddressStr("aa:bb:cc:dd:ee:01")]
+    assert envelope.resolve_sg_ids(discovered_sg_ids) == [ServiceGroupId(2)]
+    assert envelope.resolve_mac_addresses(discovered_macs) == [MacAddressStr("aa:bb:cc:dd:ee:ff")]
+
+# FILE: tests/test_sgw_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+)
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+SG_ID_ONE = ServiceGroupId(1)
+SG_ID_TWO = ServiceGroupId(2)
+DISCOVERED_SG_IDS = [SG_ID_ONE, SG_ID_TWO]
+SNAPSHOT_TIME_EPOCH = 1000.0
+AGE_SECONDS = 10.0
+
+
+async def _noop() -> None:
+    return
+
+
+def _disable_startup(monkeypatch: object) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", _noop)
+
+
+def _seed_store(
+    store: SgwCacheStore,
+    sg_id: ServiceGroupId,
+    modems: list[SgwCableModemModel],
+    ds_channels: SgwChannelSummaryModel | None = None,
+    us_channels: SgwChannelSummaryModel | None = None,
+) -> None:
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=SNAPSHOT_TIME_EPOCH,
+        age_seconds=AGE_SECONDS,
+    )
+    snapshot = SgwSnapshotModel(
+        sg_id=sg_id,
+        ds_channels=ds_channels or SgwChannelSummaryModel(),
+        us_channels=us_channels or SgwChannelSummaryModel(),
+        cable_modems=modems,
+        metadata=metadata,
+    )
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+
+def _configure_runtime_state(store: SgwCacheStore, sg_ids: list[ServiceGroupId]) -> None:
+    settings = CmtsOrchestratorSettings()
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, SNAPSHOT_TIME_EPOCH)
+
+
+def test_serving_group_ids_returns_cache_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _seed_store(store, SG_ID_TWO, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/ids", json={})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert payload["sgw_ready"] is True
+        summaries = payload["summaries"]
+        assert len(summaries) == 2
+        assert summaries[0]["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_ids_filters_by_sg_ids(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _seed_store(store, SG_ID_TWO, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/ids",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_TWO)]}}},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_sg_ids"] == [int(SG_ID_TWO)]
+        assert len(payload["summaries"]) == 1
+
+
+@pytest.mark.unit
+def test_serving_group_status_reports_cache_readiness(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_count"] == len(DISCOVERED_SG_IDS)
+        assert payload["cache_ready"] is False
+        assert payload["missing_sg_ids"] == [int(SG_ID_TWO)]
+        assert payload["refresh_running"] is False
+
+
+def test_serving_group_ids_not_ready_returns_success(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/ids", json={})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sgw_ready"] is False
+        assert "sgw cache not ready" in payload["message"]
+        summaries = payload["summaries"]
+        assert summaries[1]["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert summaries[1]["metadata"]["last_error"] != ""
+
+
+def test_serving_group_ids_missing_store_returns_error_metadata(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.serving_group.service.get_sgw_store", lambda: None)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/ids", json={})
+        assert response.status_code == 200
+        payload = response.json()
+        summaries = payload["summaries"]
+        assert summaries[0]["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert summaries[0]["metadata"]["last_error"] != ""
+
+
+def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_one = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+    ]
+    modems_two = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_one)
+    _seed_store(store, SG_ID_TWO, modems_two)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/cableModems", json={"cmts": {}})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["total_count"] == 2
+        assert payload["sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+
+
+def test_serving_group_cable_modems_filters_by_sg_and_mac(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_one = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff"),
+    ]
+    modems_two = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_one)
+    _seed_store(store, SG_ID_TWO, modems_two)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "cmts": {
+                    "serving_group": {"id": [int(SG_ID_ONE)]},
+                    "cable_modem": {"mac_address": ["aa:bb:cc:dd:ee:ff"]},
+                },
+                "page": 1,
+                "page_size": 10,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sg_id"] == int(SG_ID_ONE)
+        assert payload["total_count"] == 1
+        assert [item["mac"] for item in payload["items"]] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_serving_group_cable_modems_pagination(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    page_one = 1
+    page_two = 2
+    page_size = 2
+    total_count = 3
+    modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:03"),
+    ]
+    _seed_store(store, sg_id, modems)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_one, "page_size": page_size},
+        )
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["total_count"] == total_count
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:01",
+            "aa:bb:cc:dd:ee:02",
+        ]
+
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_two, "page_size": page_size},
+        )
+        payload = response.json()
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:03",
+        ]
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_cable_modems_missing_store_returns_error(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(SG_ID_ONE), "page": 1, "page_size": 1},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert payload["metadata"]["last_error"] != ""
+
+
+def test_serving_group_topology_requires_sg_id(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={})
+        assert response.status_code == 422
+
+
+def test_serving_group_topology_returns_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_TWO
+    ds_channel_count = 1
+    us_channel_count = 2
+    ds_channel_id = 100
+    us_channel_id_primary = 200
+    us_channel_id_secondary = 201
+    ds_channels = SgwChannelSummaryModel(count=ds_channel_count, channel_ids=[ds_channel_id])
+    us_channels = SgwChannelSummaryModel(count=us_channel_count, channel_ids=[us_channel_id_primary, us_channel_id_secondary])
+    _seed_store(store, sg_id, [], ds_channels=ds_channels, us_channels=us_channels)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={"sg_id": int(sg_id)})
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["topology"]["ds_channels"]["count"] == ds_channel_count
+        assert payload["topology"]["us_channels"]["count"] == us_channel_count
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_cable_modems_aggregate_dedupes(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_sg1 = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+    ]
+    modems_sg2 = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:03"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_sg1)
+    _seed_store(store, SG_ID_TWO, modems_sg2)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": 0, "page": 1, "page_size": 10},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:01",
+            "aa:bb:cc:dd:ee:02",
+            "aa:bb:cc:dd:ee:03",
+        ]
+
+
+def test_serving_group_topology_aggregate_dedupes(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    ds_channels_sg1 = SgwChannelSummaryModel(count=2, channel_ids=[100, 101])
+    us_channels_sg1 = SgwChannelSummaryModel(count=1, channel_ids=[200])
+    ds_channels_sg2 = SgwChannelSummaryModel(count=2, channel_ids=[101, 102])
+    us_channels_sg2 = SgwChannelSummaryModel(count=2, channel_ids=[200, 201])
+    _seed_store(store, SG_ID_ONE, [], ds_channels=ds_channels_sg1, us_channels=us_channels_sg1)
+    _seed_store(store, SG_ID_TWO, [], ds_channels=ds_channels_sg2, us_channels=us_channels_sg2)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={"sg_id": 0})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert payload["topology"]["ds_channels"]["count"] == 3
+        assert payload["topology"]["us_channels"]["count"] == 2
+        assert payload["topology"]["ds_channels"]["channel_ids"] == [100, 101, 102]
+        assert payload["topology"]["us_channels"]["channel_ids"] == [200, 201]
+
+
+def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    now_epoch = SNAPSHOT_TIME_EPOCH + 5.0
+    _seed_store(store, sg_id, [])
+    _configure_runtime_state(store, [sg_id])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": 1, "page_size": 1},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["metadata"]["age_seconds"] == 5.0
+        entry = store.get_entry(sg_id)
+        assert entry is not None
+        assert entry.snapshot.metadata.age_seconds == AGE_SECONDS
+
+
+def test_serving_group_refresh_waits_for_snapshot(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    now_epoch = SNAPSHOT_TIME_EPOCH
+    new_epoch = SNAPSHOT_TIME_EPOCH + 5.0
+    _seed_store(store, sg_id, [])
+    _configure_runtime_state(store, [sg_id])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+    monotonic_calls = {"value": 0.0}
+
+    def _monotonic() -> float:
+        monotonic_calls["value"] += 0.2
+        return monotonic_calls["value"]
+
+    def _sleep(_seconds: float) -> None:
+        entry = store.get_entry(sg_id)
+        assert entry is not None
+        metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": new_epoch})
+        entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+        store.upsert_entry(entry)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._monotonic",
+        staticmethod(_monotonic),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._sleep",
+        staticmethod(_sleep),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(sg_id),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+                "require_fresh": True,
+                "max_wait_seconds": 1.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is True
+        assert payload["waited_seconds"] > 0.0
+        assert payload["metadata"]["snapshot_time_epoch"] == new_epoch
+
+
+def test_serving_group_refresh_rate_limited(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings()
+    poll_heavy_seconds = int(settings.sgw.poll_heavy_seconds)
+    now_epoch = SNAPSHOT_TIME_EPOCH
+    last_heavy_epoch = now_epoch - float(poll_heavy_seconds) + 1.0
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=SNAPSHOT_TIME_EPOCH,
+        age_seconds=AGE_SECONDS,
+        last_heavy_refresh_epoch=last_heavy_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=SG_ID_ONE, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=SG_ID_ONE, snapshot=snapshot))
+    manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+                "require_fresh": False,
+                "max_wait_seconds": 0.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is False
+        assert payload["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert "rate limited" in payload["metadata"]["last_error"]
+
+
+def test_serving_group_refresh_none_does_not_request(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    manager = SgwManager(settings=CmtsOrchestratorSettings(), store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+
+    def _request_refresh(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+        raise AssertionError("request_refresh should not be called for refresh=NONE")
+
+    monkeypatch.setattr(manager, "request_refresh", _request_refresh)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.NONE.value,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is False
+
+
+def test_serving_group_refresh_light_requests_manager(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    manager = SgwManager(settings=CmtsOrchestratorSettings(), store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+    refresh_calls: list[tuple[ServiceGroupId, CacheRefreshMode, float]] = []
+
+    def _request_refresh(
+        sg_id: ServiceGroupId,
+        mode: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        refresh_calls.append((sg_id, mode, now_epoch))
+        return (True, "")
+
+    monkeypatch.setattr(manager, "request_refresh", _request_refresh)
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: SNAPSHOT_TIME_EPOCH),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.LIGHT.value,
+                "require_fresh": False,
+                "max_wait_seconds": 0.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is True
+        assert refresh_calls == [(SG_ID_ONE, CacheRefreshMode.LIGHT, SNAPSHOT_TIME_EPOCH)]
+
+
+def test_serving_group_refresh_unknown_sg_id_rejected(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_TWO),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["refresh_applied"] is False
+        assert "sg_id not found" in payload["message"]
+
+# FILE: docs/bundles/phase-8/phase-8-step-2a.md
+# Phase 8 · Step 2a Bundle Report
+
+## Goal
+Implement canonical CMTS request models and wire them into the pilot endpoints for serving-group ids and cable modem membership, with deterministic filter behavior and unit coverage.
+
+## Summary of changes
+- Added canonical CMTS request models with normalization and selection helpers.
+- Wired serving-group ids and cable modem endpoints to the canonical request envelope while preserving legacy sg_id support.
+- Added unit tests for request model validation and endpoint filter semantics (SG and MAC filters).
+
+## Files changed
+- docs/architecture/schema/cmts-request.md
+- docs/planning/phase8.md
+- docs/planning/phase8-burndown.md
+- src/pypnm_cmts/api/common/cmts_request.py
+- src/pypnm_cmts/api/routes/serving_group/router.py
+- src/pypnm_cmts/api/routes/serving_group/schemas.py
+- src/pypnm_cmts/api/routes/serving_group/service.py
+- tests/test_cmts_request_models.py
+- tests/test_sgw_endpoints.py
+
+## Tests run
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m py_compile src/pypnm_cmts/api/common/cmts_request.py src/pypnm_cmts/api/routes/serving_group/schemas.py src/pypnm_cmts/api/routes/serving_group/service.py src/pypnm_cmts/api/routes/serving_group/router.py tests/test_sgw_endpoints.py tests/test_cmts_request_models.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_cmts_request_models.py tests/test_sgw_endpoints.py
+
+## Results / Notes
+- py_compile succeeded.
+- pytest: 25 passed.
+- Follow-on: extend canonical request schema to remaining endpoints in Phase 8 Step 3.
+

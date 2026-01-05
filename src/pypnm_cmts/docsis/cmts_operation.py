@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -22,6 +22,18 @@ from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
     CmtsServiceGroupTopologyModel,
 )
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+from pypnm_cmts.docsis.data_type.docs_if31_cmts_ds_ofdm_chan_entry import (
+    DocsIf31CmtsDsOfdmChanRecord,
+)
+from pypnm_cmts.docsis.data_type.docs_if31_cmts_us_ofdma_chan_entry import (
+    DocsIf31CmtsUsOfdmaChanRecord,
+)
+from pypnm_cmts.docsis.data_type.docs_if_downstream_channel_entry import (
+    DocsIfDownstreamChannelEntry,
+)
+from pypnm_cmts.docsis.data_type.docs_if_upstream_channel_entry import (
+    DocsIfUpstreamChannelEntry,
+)
 from pypnm_cmts.lib.types import (
     CableModemIndex,
     ChSetId,
@@ -1021,6 +1033,46 @@ class CmtsOperation:
             )
 
         return results
+
+    async def getDocsIfDownstreamChannelEntry(self) -> list[DocsIfDownstreamChannelEntry]:
+        """
+        Fetch DOCS-IF downstream channel table entries.
+        """
+        try:
+            return await DocsIfDownstreamChannelEntry.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve downstream channel entries: {exc}")
+            return []
+
+    async def getDocsIfUpstreamChannelEntry(self) -> list[DocsIfUpstreamChannelEntry]:
+        """
+        Fetch DOCS-IF upstream channel table entries.
+        """
+        try:
+            return await DocsIfUpstreamChannelEntry.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve upstream channel entries: {exc}")
+            return []
+
+    async def getDocsIf31CmtsDsOfdmChanEntry(self) -> list[DocsIf31CmtsDsOfdmChanRecord]:
+        """
+        Fetch DOCS-IF31 downstream OFDM channel entries.
+        """
+        try:
+            return await DocsIf31CmtsDsOfdmChanRecord.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve downstream OFDM channel entries: {exc}")
+            return []
+
+    async def getDocsIf31CmtsUsOfdmaChanEntry(self) -> list[DocsIf31CmtsUsOfdmaChanRecord]:
+        """
+        Fetch DOCS-IF31 upstream OFDMA channel entries.
+        """
+        try:
+            return await DocsIf31CmtsUsOfdmaChanRecord.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve upstream OFDMA channel entries: {exc}")
+            return []
 
     async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
         """

@@ -1,0 +1,601 @@
+# FILE: src/pypnm_cmts/api/common/cmts/schema.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import (
+    SNMPv2c,
+    SNMPv3,
+    to_camel,
+)
+from pypnm.lib.types import HostNameStr
+from pypnm.snmp.snmp_v2c import Snmp_v2c
+
+from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.config.request_defaults import CmtsRequestDefaults
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
+
+
+class CmtsSnmpConfig(BaseModel):
+    """
+    SNMP configuration model supporting both v2c and optional v3 settings.
+    """
+    model_config        = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    port: int           = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
+
+    snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
+    snmp_v3: SNMPv3 | None = Field(default=None, description="SNMP v3 settings")
+
+
+class CmtsTarget(BaseModel):
+    """
+    CMTS connection target details.
+    """
+    hostname: HostNameStr = Field(
+        default_factory=lambda: CmtsSystemConfigSettings.cmts_device_hostname(0),
+        description="CMTS hostname or label.",
+    )
+
+class CommonCmtsRequest(BaseModel):
+    """
+    Common request model for CMTS endpoints.
+    """
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    target: CmtsTarget = Field(default_factory=CmtsTarget, description="CMTS connection details.")
+    snmp: CmtsSnmpConfig = Field(default_factory=CmtsSnmpConfig, description="SNMP connection settings.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_request(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        if "target" in values:
+            return values
+        cmts_value = values.get("cmts")
+        if isinstance(cmts_value, dict) and "hostname" in cmts_value:
+            normalized = dict(values)
+            normalized["target"] = cmts_value
+            normalized["cmts"] = {}
+            return normalized
+        return values
+
+    @model_validator(mode="after")
+    def _apply_request_defaults(self) -> CommonCmtsRequest:
+        defaults = CmtsRequestDefaults.from_system_config()
+        self.cmts = self.cmts.apply_defaults(defaults)
+        if "target" not in self.model_fields_set and self.target.hostname == "":
+            self.target.hostname = CmtsSystemConfigSettings.cmts_device_hostname(0)
+        if "snmp" not in self.model_fields_set:
+            self.snmp.snmp_v2c.community = CmtsSystemConfigSettings.cmts_snmp_v2c_read_community(0)
+        return self
+# FILE: src/pypnm_cmts/api/routes/system/router.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+from enum import Enum
+from http import HTTPStatus
+
+from fastapi import APIRouter, HTTPException
+from pypnm.lib.fastapi_constants import FAST_API_RESPONSE
+
+from pypnm_cmts.api.routes.system.schemas import CmtsSysDescrRequest, CmtsSysDescrResponse
+from pypnm_cmts.api.routes.system.service import SystemCmtsSnmpService
+
+
+class SystemRouter:
+    """
+    FastAPI router for CMTS system endpoints.
+    """
+
+    def __init__(
+        self,
+        prefix: str = "/cmts/system",
+        tags: list[str | Enum] | None = None,
+    ) -> None:
+        if tags is None:
+            tags = ["CMTS System"]
+        self.router = APIRouter(prefix=prefix, tags=tags)
+        self.logger = logging.getLogger(__name__)
+        self._register_routes()
+
+    def _register_routes(self) -> None:
+        @self.router.get(
+            "/sysDescr",
+            response_model=CmtsSysDescrResponse,
+            summary="Retrieve CMTS sysDescr",
+            description="Fetches the system description from a CMTS.",
+            responses=FAST_API_RESPONSE,
+        )
+        async def get_sysdescr() -> CmtsSysDescrResponse:
+            """
+            **Retrieve CMTS System Description**
+
+            This endpoint performs an SNMP query to fetch the system description (`sysDescr`) from
+            a CMTS and parses it into a structured model.
+            """
+            try:
+                request = CmtsSysDescrRequest()
+                return await SystemCmtsSnmpService.get_sysdescr(request)
+            except Exception as exc:
+                self.logger.error(f"CMTS sysDescr error: {exc}")
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve CMTS sysDescr.",
+                ) from exc
+
+router = SystemRouter().router
+# FILE: tests/test_system_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.lib.types import HostNameStr, InetAddressStr
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.api.routes.system.schemas import CmtsSysDescrRequest, CmtsSysDescrResponse
+from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+
+
+async def _noop() -> None:
+    return
+
+
+def _disable_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", _noop)
+
+
+@pytest.mark.unit
+def test_system_sysdescr_accepts_runtime_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+    monkeypatch.setattr(
+        "pypnm_cmts.config.system_config_settings.CmtsSystemConfigSettings.cmts_device_hostname",
+        lambda _index: HostNameStr("192.168.0.100"),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.config.system_config_settings.CmtsSystemConfigSettings.cmts_snmp_v2c_read_community",
+        lambda _index: "public",
+    )
+
+    async def _fake_sysdescr(request: object) -> CmtsSysDescrResponse:
+        assert isinstance(request, CmtsSysDescrRequest)
+        request_hostname = request.target.hostname
+        request_community = request.snmp.snmp_v2c.community
+        assert request_hostname == "192.168.0.100"
+        assert request_community == "public"
+        return CmtsSysDescrResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=CmtsSysDescrModel.empty(),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_sysdescr", _fake_sysdescr)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/system/sysDescr")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_sysdescr_accepts_empty_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_sysdescr(_request: object) -> CmtsSysDescrResponse:
+        return CmtsSysDescrResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=CmtsSysDescrModel.empty(),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_sysdescr", _fake_sysdescr)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/system/sysDescr")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+# FILE: tests/live/test_live_system_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.api.routes.system.schemas import CmtsSysDescrResponse
+
+ENV_LIVE_HOSTNAME = "PYPNM_CMTS_LIVE_HOSTNAME"
+ENV_LIVE_COMMUNITY = "PYPNM_CMTS_LIVE_SNMP_COMMUNITY"
+ENV_LIVE_PORT = "PYPNM_CMTS_LIVE_SNMP_PORT"
+DEFAULT_SNMP_PORT = 161
+
+
+async def _noop() -> None:
+    return
+
+
+def _disable_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", _noop)
+
+
+def _live_hostname() -> str:
+    return str(os.environ.get(ENV_LIVE_HOSTNAME, "")).strip()
+
+
+def _live_community() -> str:
+    return str(os.environ.get(ENV_LIVE_COMMUNITY, "")).strip()
+
+
+def _live_port() -> int:
+    port_value = str(os.environ.get(ENV_LIVE_PORT, "")).strip()
+    if port_value == "":
+        return DEFAULT_SNMP_PORT
+    return int(port_value)
+
+
+@pytest.mark.live_cmts
+def test_live_system_sysdescr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+    hostname = _live_hostname()
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/system/sysDescr")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == hostname
+        response_model = CmtsSysDescrResponse.model_validate(payload)
+        assert response_model.results.is_empty is False
+# FILE: tests/integration/test_endpoints_live.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import os
+import socket
+import subprocess
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.config.orchestrator_config import (
+    ENV_ADAPTER_HOSTNAME,
+    ENV_ADAPTER_READ_COMMUNITY,
+    ENV_ADAPTER_WRITE_COMMUNITY,
+)
+from pypnm_cmts.sgw.runtime_state import reset_sgw_runtime_state
+
+ENV_LIVE_ENABLED = "PYPNM_CMTS_LIVE"
+ENV_MAX_WAIT_SECONDS = "PYPNM_CMTS_MAX_WAIT_SECONDS"
+ENV_POLL_INTERVAL_SECONDS = "PYPNM_CMTS_POLL_INTERVAL_SECONDS"
+DEFAULT_MAX_WAIT_SECONDS = 12.0
+DEFAULT_POLL_INTERVAL_SECONDS = 0.25
+CABLE_MODEM_PAGE = 1
+CABLE_MODEM_PAGE_SIZE = 25
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_state() -> None:
+    reset_sgw_runtime_state()
+
+
+def _resolve_wait_seconds(env_name: str, default_value: float) -> float:
+    value = os.environ.get(env_name, "")
+    if value.strip() == "":
+        return default_value
+    try:
+        return float(value)
+    except ValueError:
+        return default_value
+
+
+def _require_live_config() -> tuple[str, str]:
+    hostname = os.environ.get(ENV_ADAPTER_HOSTNAME, "").strip()
+    community = os.environ.get(ENV_ADAPTER_READ_COMMUNITY, "").strip()
+    if hostname == "" or community == "":
+        pytest.skip("PYPNM_CMTS_LIVE=1 not set; skipping live integration tests")
+    return (hostname, community)
+
+
+def _apply_live_env(monkeypatch: pytest.MonkeyPatch, hostname: str, community: str) -> None:
+    monkeypatch.setenv(ENV_ADAPTER_HOSTNAME, hostname)
+    monkeypatch.setenv(ENV_ADAPTER_READ_COMMUNITY, community)
+    monkeypatch.setenv(ENV_ADAPTER_WRITE_COMMUNITY, community)
+
+
+def _system_request_body(hostname: str, community: str) -> dict[str, object]:
+    return {
+        "cmts": {
+            "serving_group": {"id": []},
+            "cable_modem": {"mac_address": []},
+        },
+        "target": {"hostname": hostname},
+        "snmp": {"snmpV2c": {"community": community}},
+    }
+
+
+def _build_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    hostname, community = _require_live_config()
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    return TestClient(app)
+
+
+def _wait_for_ids(client: TestClient, max_wait_seconds: float, poll_interval_seconds: float) -> dict[str, object]:
+    waited = 0.0
+    while waited <= max_wait_seconds:
+        response = client.get("/cmts/servingGroup/get/ids")
+        if response.status_code == 200:
+            payload = response.json()
+            if payload.get("discovered_sg_ids"):
+                return payload
+        time.sleep(poll_interval_seconds)
+        waited += poll_interval_seconds
+    return {}
+
+
+def _is_host_reachable(hostname: str) -> bool:
+    if hostname.strip() == "":
+        return False
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", hostname],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode == 0:
+            return True
+    except FileNotFoundError:
+        pass
+    for port in (22, 80):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1.0)
+            if sock.connect_ex((hostname, port)) == 0:
+                return True
+    return False
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    hostname, community = _require_live_config()
+    if not _is_host_reachable(hostname):
+        pytest.skip("host unreachable; skipping live integration tests")
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/get/ids")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    hostname, community = _require_live_config()
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={"cmts": {"serving_group": {"id": []}}})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_topology_heavy_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    hostname, community = _require_live_config()
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={"cmts": {"serving_group": {"id": []}}, "refresh": "heavy"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_cable_modems(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    hostname, community = _require_live_config()
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "cmts": {"serving_group": {"id": []}},
+                "page": CABLE_MODEM_PAGE,
+                "page_size": CABLE_MODEM_PAGE_SIZE,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_serving_group_cable_modems_heavy_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    max_wait_seconds = _resolve_wait_seconds(ENV_MAX_WAIT_SECONDS, DEFAULT_MAX_WAIT_SECONDS)
+    poll_interval_seconds = _resolve_wait_seconds(ENV_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
+    with _build_client(monkeypatch) as client:
+        payload = _wait_for_ids(client, max_wait_seconds, poll_interval_seconds)
+        discovered = payload.get("discovered_sg_ids", [])
+        if not discovered:
+            pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
+        sg_id = discovered[0]
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "cmts": {"serving_group": {"id": [sg_id]}},
+                "page": CABLE_MODEM_PAGE,
+                "page_size": CABLE_MODEM_PAGE_SIZE,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        groups = body.get("groups", [])
+        if not groups or groups[0].get("total_items", 0) == 0:
+            pytest.skip("membership not populated yet; SGW pollers may be stubbed")
+        items = groups[0].get("items", [])
+        if items:
+            macs = [item["mac_address"] for item in items]
+            assert macs == sorted(macs)
+        assert groups[0]["total_items"] >= len(items)
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_live_system_sysdescr(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    hostname, community = _require_live_config()
+    _apply_live_env(monkeypatch, hostname, community)
+    from pypnm_cmts.api.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/system/sysDescr")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        results = payload.get("results", {})
+        assert results.get("raw", "") != ""
+        assert results.get("is_empty") is False
+# FILE: docs/api/fast-api/index.md
+# FastAPI Reference
+
+FastAPI Endpoint Documentation For PyPNM-CMTS Lives Here.
+
+## Running The Service
+
+Start the FastAPI service using the CLI:
+
+```bash
+pypnm-cmts serve --host 127.0.0.1 --port 8000
+```
+
+Example health checks:
+
+```bash
+curl http://127.0.0.1:8000/ops/health
+curl http://127.0.0.1:8000/ops/ready
+```
+
+SGW refresh runs in a background loop after startup prime. Cache-first endpoints
+may request a refresh, but they do not execute SNMP in the request thread.
+
+## Current Endpoints
+
+- `GET /cmts/system/sysDescr` - CMTS sysDescr lookup.
+- `GET /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
+- `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
+- `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
+- `GET /ops/health` - Liveness probe.
+- `GET /ops/ready` - Readiness probe.
+- `GET /ops/version` - Service identity and version.
+- `GET /ops/status` - Operational process status snapshot.
+
+## Endpoint Documentation
+
+- [Operational endpoints](operational.md)
+- [Serving group endpoints](serving-group.md)
+
+## GET /cmts/system/sysDescr
+
+This endpoint uses runtime CMTS adapter settings from `system.json`.
+No request body or query parameters are required.
+
+Example request:
+
+```bash
+curl -X GET "http://127.0.0.1:8000/cmts/system/sysDescr"
+```
+
+
+## Next Steps
+
+- Add endpoint summaries as routes are added.
+- Link each route section to the owning module under `src/pypnm_cmts/api`.
+# FILE: docs/tests/pytest/live-cmts.md
+# Live CMTS Integration Tests
+
+This document explains how to run the opt-in live CMTS integration tests.
+These tests validate API contracts against a real CMTS and are not required
+for typical development runs.
+
+## Required Environment Variables
+
+Set the following environment variables before running live tests.
+Ensure `system.json` CMTS adapter settings match the hostname/community values.
+
+- `PYPNM_CMTS_RUN_LIVE=1`
+- `PYPNM_CMTS_LIVE_HOSTNAME` (example: `192.168.0.100`)
+- `PYPNM_CMTS_LIVE_SNMP_COMMUNITY` (example: `public`)
+- `PYPNM_CMTS_LIVE_SNMP_PORT` (optional, default 161)
+
+## Example Commands
+
+```bash
+export PYPNM_CMTS_RUN_LIVE=1
+export PYPNM_CMTS_LIVE_HOSTNAME=192.168.0.100
+export PYPNM_CMTS_LIVE_SNMP_COMMUNITY=public
+
+pytest -q -m integration
+```
+
+## Reachability Checks
+
+The live test suite checks host reachability before running:
+
+1) `ping -c 1 -W 1 <host>` on Linux
+2) If ping is unavailable or fails, a short TCP connect check against common
+   ports (22, 80)
+
+If the host is unreachable, the tests are skipped with a clear message.
+
+## What To Expect
+
+- Cache-first SGW endpoints may return empty cable modem lists or topology
+  entries if SGW pollers are not yet wired to populate cache entries.
+- System endpoint (`/cmts/system/sysDescr`)
+  should return non-empty results when the CMTS is reachable.

@@ -1,0 +1,1264 @@
+# FILE: docs/system/cli.md
+# CLI Service Launcher
+
+Use the `pypnm-cmts serve` command to start the FastAPI service with development-friendly options.
+
+## Table Of Contents
+
+- [Assumptions](#assumptions)
+- [When to Use](#when-to-use)
+- [Usage](#usage)
+- [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
+- [SGW Startup Discovery Modes](#sgw-startup-discovery-modes)
+- [Orchestrator Run Modes](#orchestrator-run-modes)
+- [Worker Result Persistence](#worker-result-persistence)
+- [Coordination Flags](#coordination-flags)
+- [Serve Options](#serve-options)
+- [Security Tools](#security-tools)
+- [Next Steps](#next-steps)
+
+## Assumptions
+
+- Commands are run from the repository root.
+- Virtual environment activation is handled by your environment.
+
+## When to Use
+
+- Start the CMTS API locally during development.
+- Enable hot reload when iterating on API code.
+
+## Usage
+
+### Basic HTTP
+
+```bash
+pypnm-cmts serve
+```
+
+### Custom host/port
+
+```bash
+pypnm-cmts serve --host 0.0.0.0 --port 8080
+```
+
+### Reload on changes
+
+```bash
+pypnm-cmts serve --reload
+```
+
+### Reload with custom watch paths
+
+```bash
+pypnm-cmts serve --reload --reload-dir src --reload-dir tools
+```
+
+### HTTPS
+
+```bash
+pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
+```
+
+## Discovery (CMTS Inventory)
+
+Discover service groups and registered cable modems from a CMTS using SNMP.
+If `--write-community` is omitted or empty, the discovery path uses the effective read community.
+The `run` and `run-forever` commands load CMTS adapter settings from system.json unless you pass adapter overrides.
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --state-dir ./.data/coordination
+```
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --write-community private --state-dir ./.data/coordination
+```
+
+## SGW Startup Discovery Modes
+
+SGW discovery runs during `pypnm-cmts serve` startup. The mode is configured in `CmtsOrchestrator.sgw.discovery.mode`.
+If the mode is missing or empty, the default is `snmp`.
+
+### SNMP Mode (Default)
+
+SNMP discovery queries the CMTS to enumerate SG IDs.
+
+- Uses adapter settings from system.json or CLI/env overrides:
+  - `adapter.hostname`
+  - `adapter.community`
+  - `adapter.port`
+- Runs a precheck before discovery:
+  - ICMP ping
+  - SNMP sysDescr
+
+Example: set discovery mode in system.json and override the target at runtime:
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "snmp"
+      }
+    }
+  }
+}
+```
+
+```bash
+pypnm-cmts serve --cmts-hostname 192.168.0.100 --read-community public --write-community public
+```
+
+### Static Mode
+
+Static discovery uses the configured service group list and performs no SNMP calls.
+
+- Requires `sgw.discovery.static_sg_ids` (or `service_groups` entries) to be present.
+- If the list is empty, discovery returns no SGs.
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "static",
+        "static_sg_ids": [1, 2]
+      }
+    }
+  }
+}
+```
+
+## Orchestrator Run Modes
+
+Run a single coordination tick and print JSON output.
+
+Worker mode supports a numeric service group id (bound worker) or no `--sg-id` (unbound worker).
+Use adapter overrides to supply CMTS hostname and read/write communities at runtime without editing system.json.
+
+Tick index is 1-based. The one-shot run reports `tick_index` = 1.
+Continuous runs increment `tick_index` once per tick in the same process.
+Worker persistence happens only when `lease_held` is true.
+
+```bash
+pypnm-cmts run --mode standalone
+```
+
+```bash
+pypnm-cmts run --mode controller
+```
+
+```bash
+pypnm-cmts run --mode worker --sg-id 1
+```
+
+Run continuously with a tick interval (seconds):
+
+```bash
+pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
+```
+
+```bash
+pypnm-cmts run-forever --mode controller --tick-interval-seconds 1
+```
+
+```bash
+pypnm-cmts run-forever --mode worker --sg-id 1 --tick-interval-seconds 1
+```
+
+```bash
+pypnm-cmts run-forever --mode worker --tick-interval-seconds 1
+```
+
+## Worker Result Persistence
+
+Worker mode persists test results under the coordination state directory:
+
+```
+<state_dir>/results/sg_<sg_id>/
+```
+
+Each file name is deterministic per tick:
+
+```
+sg<sg_id>_tick<tick_index>_<test_name>.json
+```
+
+Tick indices are 1-based within a single run.
+
+## Coordination Flags
+
+These flags are supported by `run` and `run-forever`.
+
+Example:
+
+```bash
+pypnm-cmts run-forever --mode standalone --owner-id replica-1 --target-service-groups 2 --shard-mode score \
+  --cmts-hostname 192.168.0.100 --read-community public --snmp-port 161 \
+  --state-dir ./.data/coordination --election-name cmts-primary
+```
+
+Flags:
+- --owner-id <str>
+- --target-service-groups <int>
+- --shard-mode sequential|score
+- --tick-interval-seconds <float>
+- --leader-ttl-seconds <int>
+- --lease-ttl-seconds <int>
+- --state-dir <path>
+- --election-name <str>
+- --cmts-hostname <str>
+- --read-community <str>
+- --write-community <str>
+- --snmp-port <int> (SNMP port override; --cmts-port is deprecated)
+
+If both `--snmp-port` and `--cmts-port` are supplied, `--snmp-port` takes precedence and the deprecated alias emits a warning.
+
+## Serve Options
+
+These options apply to `pypnm-cmts serve`.
+
+```text
+-v, --version Show PyPNM-CMTS version and exit.
+--host Host to bind (default: 127.0.0.1)
+--port Port to bind (default: 8000)
+--ssl Enable HTTPS (requires cert and key)
+--cert Path to SSL certificate (default: ./certs/cert.pem)
+--key Path to SSL private key (default: ./certs/key.pem)
+--log-level Uvicorn log level (default: info)
+--workers Number of worker processes (default: 1)
+--no-access-log Disable Uvicorn access log
+--reload Enable auto-reload on file changes (dev only)
+--reload-dir Directory to watch for changes (repeatable)
+--reload-include Glob pattern(s) to include (repeatable; default: *.py)
+--reload-exclude Glob pattern(s) to exclude (repeatable)
+```
+
+## Security Tools
+
+Repository security checks live under `tools/security`.
+The MAC scan respects `.gitignore` directory entries by default; use `--skip-gitignore` to scan ignored paths.
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
+```
+
+## Next Steps
+
+- Review the system configuration defaults in `src/pypnm_cmts/settings/system.json`.
+- Check the FastAPI reference for available endpoints.
+
+# FILE: docs/system/pypnm-cmts-manpage.md
+# PyPNM-CMTS CLI Man Page
+
+## Name
+
+`pypnm-cmts` - Orchestration, discovery, and service launcher for PyPNM-CMTS.
+
+## Synopsis
+
+```
+pypnm-cmts [-h] [-v] {run,run-forever,discover,serve} ...
+```
+
+## Description
+
+`pypnm-cmts` controls orchestration ticks, CMTS discovery, and the FastAPI service.
+Configuration is sourced from `system.json` unless overridden by CLI flags.
+
+## Commands
+
+### run
+
+Run a single orchestration tick and print JSON output.
+
+```
+pypnm-cmts run --mode <standalone|controller|worker|combined> [options]
+```
+
+### run-forever
+
+Run orchestration ticks continuously and print JSON output per tick (JSONL).
+
+```
+pypnm-cmts run-forever --mode <standalone|controller|worker|combined> [options]
+```
+
+### discover
+
+Discover service groups and registered cable modems from a CMTS and print the snapshot.
+
+```
+pypnm-cmts discover --cmts-hostname 192.168.0.100 [options]
+```
+
+### serve
+
+Start the FastAPI service via Uvicorn.
+
+```
+pypnm-cmts serve [options]
+```
+
+## Common Orchestrator Options (run, run-forever)
+
+- `--mode`: Execution mode: `standalone` (coordination only), `controller` (leader only), `worker` (lease + tests), `combined` (controller + worker).
+- `--config`: Path to `system.json` (defaults to built-in config).
+- `--cmts-hostname`: Override `adapter.hostname` for discovery/runtime.
+- `--read-community`: Override `adapter.community` (SNMPv2c read community).
+- `--write-community`: Override `adapter.write_community` (SNMPv2c write community).
+- `--snmp-port`: Override `adapter.port` (SNMP port). `--cmts-port` is deprecated.
+- `--sg-id`: Service group id for worker mode (required for bound workers).
+- `--owner-id`: Override coordination owner id.
+- `--target-service-groups`: Override target SG count per replica (0 means all).
+- `--shard-mode`: Shard strategy: `sequential` (default) or `score`.
+- `--tick-interval-seconds`: Override tick interval (seconds).
+- `--leader-ttl-seconds`: Override leader TTL (seconds).
+- `--lease-ttl-seconds`: Override service group lease TTL (seconds).
+- `--state-dir`: Override coordination state directory.
+- `--election-name`: Override leader election namespace.
+
+## run-forever Options
+
+- `--max-ticks`: Stop after N ticks (optional; useful for tests).
+
+## discover Options
+
+- `--cmts-hostname`: CMTS hostname or IP address (required if not in config).
+- `--read-community`: SNMPv2c read community string (default: `public`).
+- `--write-community`: SNMPv2c write community string (defaults to read community when empty).
+- `--port`: SNMP port for discovery (default: `161`).
+- `--config`: Path to `system.json` (defaults to built-in config).
+- `--state-dir`: Override coordination state directory for snapshot persistence.
+- `--text`: Emit text output instead of JSON.
+
+## serve Options
+
+- `--host`: Host to bind (default: `127.0.0.1`).
+- `--port`: Port to bind (default: `8000`).
+- `--ssl`: Enable HTTPS (requires cert and key).
+- `--cert`: Path to SSL certificate (PEM).
+- `--key`: Path to SSL private key (PEM).
+- `--cmts-hostname`: Override `adapter.hostname` for SGW startup discovery.
+- `--read-community`: Override `adapter.community` for SGW startup discovery.
+- `--write-community`: Override `adapter.write_community` for SGW startup discovery.
+- `--with-runner`: Start the orchestrator runner in-process (combined mode).
+- `--log-level`: Uvicorn log level (default: `info`).
+- `--workers`: Number of Uvicorn worker processes (default: `1`).
+- `--no-access-log`: Disable Uvicorn access logging.
+- `--reload`: Enable auto-reload on file changes (development only).
+- `--reload-dir`: Directory to watch for changes (repeatable).
+- `--reload-include`: Glob pattern(s) to include for reload (repeatable).
+- `--reload-exclude`: Glob pattern(s) to exclude from reload (repeatable).
+
+## Examples
+
+```
+pypnm-cmts run --mode standalone
+pypnm-cmts run --mode worker --sg-id 1
+pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public
+pypnm-cmts serve --host 0.0.0.0 --port 8080
+pypnm-cmts serve --reload
+```
+
+## Configuration Notes
+
+- `serve` uses `CmtsOrchestrator` settings for SGW discovery; `--cmts-hostname`, `--read-community`, and `--write-community` override adapter values at startup.
+- `sgw.discovery.mode` controls how SG IDs are obtained (`snmp` by default, `static` for fixed lists).
+- For MAC or IP examples in docs, use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
+
+## Exit Codes
+
+- `0`: Success.
+- `1`: Runtime failure.
+- `2`: Usage error or validation failure.
+
+# FILE: docs/api/fast-api/operational.md
+# Operational Endpoints
+
+Read-Only Operational Endpoints For Health, Readiness, And Version.
+All responses include the common `meta` identity block (mode, election_name, state_dir, sg_id).
+
+## Endpoints
+
+### GET /ops/health
+
+Liveness Probe.
+Always returns HTTP 200 if the process is running.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/health
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  }
+}
+```
+
+### GET /ops/ready
+
+Readiness Probe.
+Returns HTTP 200 when local prerequisites are satisfied, otherwise HTTP 503 with a structured body.
+
+Readiness checks:
+
+- Controller: state_dir exists or can be created, required subdirectories can be created, and state_dir is writable.
+- Worker: state_dir exists and is readable, and sg_id is bound.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/ready
+```
+
+Response shape (ready):
+
+```json
+{
+  "status": "ok",
+  "failed_check": null,
+  "message": "",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  }
+}
+```
+
+Response shape (not ready):
+
+```json
+{
+  "status": "error",
+  "failed_check": "state_dir_access",
+  "message": "state_dir is not writable: .data/coordination",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  }
+}
+```
+
+### GET /ops/status
+
+Read-Only Operational Status Snapshot.
+Reports controller and worker process visibility and PID record state.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/status
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "controller": {
+    "pidfile_path": ".data/coordination/pids/controller.pid",
+    "pidfile_exists": true,
+    "pid": 12345,
+    "is_running": true,
+    "sg_id": null
+  },
+  "workers": [
+    {
+      "pidfile_path": ".data/coordination/pids/worker_1.pid",
+      "pidfile_exists": true,
+      "pid": 23456,
+      "is_running": true,
+      "sg_id": 1
+    }
+  ],
+  "pid_records_missing": false,
+  "pid_records_stale": false,
+  "fallback_used": false
+}
+```
+
+Notes:
+
+- pid_records_missing is true when the pids directory is missing or empty.
+- pid_records_stale is true when pidfiles exist but none of the recorded PIDs are running.
+- fallback_used is true only when fallback discovery finds processes with an exact --election-name match.
+- workers are sorted by sg_id ascending, with unbound workers listed last; ties break by pid then pidfile_path.
+
+## SGW Startup And Discovery Logs
+
+FastAPI startup runs SGW discovery and cache priming. The startup log sequence clarifies which discovery mode was used
+and whether the CMTS precheck succeeded (SNMP mode only).
+
+Expected log markers:
+
+- `SGW discovery mode: snmp`
+- `CMTS precheck: hostname=192.168.0.100 inet=192.168.0.100 ping=ok snmp=ok`
+- `Discovered SG IDs: [<sg_id>, ...]`
+- `SGWorkerID: [sgw-<sg_id>, ...]`
+
+If discovery returns an empty list, readiness is still reported as `ready` but endpoints that depend on SG cache will
+return empty results.
+
+### GET /ops/version
+
+Service Identity, Version, And Runtime Metadata.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/version
+```
+
+Response shape:
+
+```json
+{
+  "application": "pypnm-cmts",
+  "version": "0.1.0",
+  "python_version": "3.10.12",
+  "build_metadata": "",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  }
+}
+```
+
+## Live CMTS Tests
+
+Live CMTS tests are skipped by default and must be explicitly enabled. They validate SNMP connectivity for system endpoints.
+
+Required environment variables:
+
+- PYPNM_CMTS_LIVE_HOSTNAME
+- PYPNM_CMTS_LIVE_SNMP_COMMUNITY
+- PYPNM_CMTS_LIVE_SNMP_PORT (optional, default 161)
+
+Enable and run:
+
+```bash
+PYPNM_CMTS_RUN_LIVE=1 \
+PYPNM_CMTS_LIVE_HOSTNAME=192.168.0.100 \
+PYPNM_CMTS_LIVE_SNMP_COMMUNITY=public \
+/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q -m live_cmts tests/live/test_live_system_endpoints.py
+```
+
+# FILE: docs/api/fast-api/serving-group.md
+# Serving Group Endpoints
+
+Cache-First Serving Group Endpoints Backed By SGW Snapshots. These endpoints do not trigger discovery or refresh; they return the latest cached snapshot and metadata.
+
+## Common Fields
+
+Response payloads include:
+
+- `timestamp` ISO-8601 response timestamp
+- `metadata.snapshot_time_epoch` epoch seconds for the cached snapshot
+- `metadata.age_seconds` elapsed seconds since snapshot time, computed at request time
+- `metadata.refresh_state` one of `OK`, `STALE`, or `ERROR`
+- `metadata.last_error` bounded error message when present
+
+Unless otherwise noted, examples use:
+
+- MAC address: `aa:bb:cc:dd:ee:ff`
+- IPv4 address: `192.168.0.100`
+
+## GET /cmts/servingGroup/status
+
+Return SGW Startup And Cache Readiness Status. This endpoint reports the discovered SG count, cache readiness, missing cache entries, and whether the background refresh loop is running.
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "sgw cache not ready",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "startup_status": {
+    "startup_completed": true,
+    "discovery_ok": true,
+    "discovered_sg_ids": [1, 2],
+    "last_refresh_epoch": 1767416694.071116,
+    "error_message": "",
+    "prime_failed": false
+  },
+  "refresh_running": false,
+  "discovered_count": 2,
+  "cache_ready": false,
+  "missing_sg_ids": [2]
+}
+```
+
+## GET /cmts/servingGroup/get/ids
+
+Return Discovered Service Group Identifiers And Per-SG Cache Summaries. This endpoint returns HTTP 200 with `status` set to success even when `sgw_ready` is false; in that case, `message` is non-empty and summaries for missing snapshots report `refresh_state=ERROR` with a bounded `last_error`.
+Uses runtime CMTS adapter settings (hostname/community/port) from system.json/env/CLI; request body is not required.
+Startup discovery mode controls whether SG IDs are enumerated via SNMP (default) or from a static list.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/cmts/servingGroup/get/ids
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "discovered_sg_ids": [1, 2],
+  "sgw_ready": true,
+  "summaries": [
+    {
+      "sg_id": 1,
+      "metadata": {
+        "snapshot_time_epoch": 1767416694.071116,
+        "age_seconds": 0,
+        "last_heavy_refresh_epoch": 1767416694.071116,
+        "last_light_refresh_epoch": 1767416694.071116,
+        "refresh_state": "OK",
+        "last_error": null
+      }
+    }
+  ]
+}
+```
+
+Compatibility POST:
+
+`POST /cmts/servingGroup/get/ids` accepts an empty body `{}` and returns the same response.
+
+## POST /cmts/servingGroup/get/cableModems
+
+Return Cached Cable Modem Membership For A Service Group. Requires `sg_id`. Pagination is stable and deterministic.
+When the snapshot is missing, `status` is `FAILURE`, `message` indicates the snapshot is not available, and `metadata.refresh_state` is `ERROR` with a bounded `last_error` (for store or snapshot gaps).
+
+Request body:
+
+```json
+{
+  "sg_id": 1,
+  "page": 1,
+  "page_size": 100
+}
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T06:39:23.046738+00:00",
+  "sg_id": 1,
+  "page": 1,
+  "page_size": 100,
+  "total_count": 1,
+  "items": [
+    {
+      "mac": "aa:bb:cc:dd:ee:ff",
+      "ipv4": "192.168.0.100",
+      "ipv6": ""
+    }
+  ],
+  "metadata": {
+    "snapshot_time_epoch": 1767417069.3638031,
+    "age_seconds": 0,
+    "last_heavy_refresh_epoch": 1767417069.3638031,
+    "last_light_refresh_epoch": 1767417069.3638031,
+    "refresh_state": "OK",
+    "last_error": null
+  }
+}
+```
+
+## POST /cmts/servingGroup/get/topology
+
+Return Cached Topology Summary For A Service Group.
+Endpoint Constraints: requires exactly one serving group id; empty list or multiple ids are rejected.
+When the snapshot is missing, `status` is `FAILURE`, `message` indicates the snapshot is not available, and `metadata.refresh_state` is `ERROR` with a bounded `last_error` (for store or snapshot gaps).
+
+Request body:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": [1]
+    }
+  }
+}
+```
+
+Invalid request (empty list):
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": []
+    }
+  }
+}
+```
+
+Invalid request (multiple ids):
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": [1, 2]
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-01-03T05:05:45.760643+00:00",
+  "sg_id": 1,
+  "topology": {
+    "sg_id": 1,
+    "ds_channels": {
+      "count": 0,
+      "channel_ids": []
+    },
+    "us_channels": {
+      "count": 0,
+      "channel_ids": []
+    }
+  },
+  "metadata": {
+    "snapshot_time_epoch": 1767416694.071116,
+    "age_seconds": 0,
+    "last_heavy_refresh_epoch": 1767416694.071116,
+    "last_light_refresh_epoch": 1767416694.071116,
+    "refresh_state": "OK",
+    "last_error": null
+  }
+}
+```
+
+# FILE: docs/architecture/mode-contract.md
+# PyPNM-CMTS Mode Contract (Current Snapshot)
+
+## Surface Area Summary
+
+Supported invocation styles:
+- `pypnm-cmts …`
+- `python -m pypnm_cmts.cli …`
+
+Commands:
+- `run` (single tick; prints JSON)
+- `run-forever` (continuous ticks; prints JSON; optional max ticks)
+- `discover` (SNMP discovery; can persist snapshot)
+- `serve` (FastAPI / Uvicorn; add `--with-runner` to host the controller and worker in a single process)
+
+Modes (`OrchestratorMode`):
+- `standalone`
+- `controller`
+- `worker`
+- `combined`
+
+## Default Orchestrator Settings
+
+Operationally relevant defaults (from the default dump):
+
+- `mode`: `standalone`
+- `adapter.kind`: `snmp`
+- `adapter.hostname`: `""`
+- `adapter.community`: `public`
+- `adapter.port`: `161`
+- `service_groups`: `[]`
+- `sgw.discovery.mode`: `snmp`
+- `auto_discover`: `false`
+- `default_tests`: `["ds_ofdm_rxmer"]`
+- `tick_interval_seconds`: `1.0`
+- `leader_ttl_seconds`: `10`
+- `lease_ttl_seconds`: `10`
+- `state_dir`: `.data/coordination`
+- `election_name`: `""`
+
+Validator guarantees (high level):
+- `shard_mode ∈ {"sequential","score"}` (default `sequential`)
+- `target_service_groups >= 0`
+- `worker_cap >= 0`
+- `tick_interval_seconds > 0`
+- `state_dir` non-empty and coerced to `Path`
+
+## Runtime Responsibilities By Mode (Current Behavior)
+
+### Controller
+
+Leader-election tick only. Discovers inventory when leader; otherwise reuses snapshot or configured SG list. Computes `worker_count` for planning and never runs tests. Output includes `coordination_tick` with leadership and lease details.
+
+### Worker
+
+No leader election. Inventory priority: discovery snapshot -> enabled SG config -> error when discovery is required but no snapshot exists. Bound workers target one SG; unbound workers target the enabled SG set. Requests leases and runs tests only when a lease is held; writes results under `state_dir/results/sg_<id>/`.
+
+### Standalone
+
+Coordination-only tick without leader election. Uses config/discovery for SGs. Useful for coordination validation; does not run worker tests.
+
+### Combined
+
+Controller and worker loops in one process. Activated via `serve --with-runner` or `--mode combined` on runner commands. Runs leader election, acquires leases, writes `pids/` records, and executes tests whenever a lease is held.
+
+## State Directory Contract
+
+Base directory:
+- `state_dir` default: `.data/coordination`
+- Created if missing (`mkdir(parents=True, exist_ok=True)`)
+
+Observed subpaths:
+- `inventory/discovery.json` (discovery snapshot)
+- `results/sg_<sg_id>/<run_id>_<test_name>.json` (worker results)
+- `pids/controller.pid`
+- `pids/worker_unbound.pid`
+- `pids/worker_<sg>.pid`
+
+Leader/lease persistence:
+- Leader election and lease services store JSON + lock files under `state_dir` (exact filenames depend on implementation).
+
+## Major Gaps / Inconsistencies (High Priority)
+
+### Standalone and Combined Semantics
+
+Standalone remains coordination-only: it manages leadership records and ensures leases can be acquired, but it does not run worker tests. Combined mode is now implemented via `serve --with-runner`. That flag boots an in-process controller + worker loop that runs leader election, acquires leases, writes the same `pids/` records, and executes worker tests whenever it holds a lease. This makes combined the go-to option when a single API process must also be the runner.
+
+### Controller Computes worker_count, but Workers Don’t Consume “Shard Assignments”
+
+Current contract is effectively:
+- workers are stateless
+- leases are the only assignment mechanism
+- `worker_count` is advisory (for deployment scaling, not direct execution control)
+
+This should be explicitly documented.
+
+### Election Name / Owner Id Normalization Should Be Explicit
+
+Clarify:
+- what happens when `owner_id == ""` (hostname-derived, persisted)
+- how `election_name` is derived when blank
+- uniqueness expectations (per CMTS)
+
+### CLI Warning on TFTP remote_dir During --help
+
+Message observed:
+- `Empty configuration value for 'PnmFileRetrieval.retrieval_method.methods.tftp.remote_dir'; using default ''`
+
+Likely issues:
+- path typo in legacy configs for retrieval_method (corrected in current config)
+- warning policy: `--help` should be quiet and side-effect free
+
+## Practical Mode Contract Table (Current Behavior)
+
+| Mode        | Leader Election | Inventory Source (preferred)                      | Lease Acquisition | Runs Tests | Typical Use |
+|-------------|------------------|---------------------------------------------------|------------------|-----------|-------------|
+| controller  | Yes              | discovery snapshot (if leader) / snapshot / config | Yes              | No        | Coordination + planning |
+| worker      | No               | discovery snapshot or config SG list              | Yes              | Yes       | Distributed execution |
+| standalone  | No               | config/discovery                                  | Yes              | No        | Coordination-only (today) |
+| combined    | Yes              | config/discovery (controller-style)               | Yes              | Yes       | Controller + worker inside `serve --with-runner` |
+
+## Startup Flow And SGW Interaction
+
+Startup is deterministic across commands: parse CLI, load config and env overrides, resolve mode, then follow the chosen command path. SGW startup is gated on discovery output so cache-first endpoints never issue implicit SNMP walks.
+
+SGW discovery mode is configured under `CmtsOrchestrator.sgw.discovery.mode`:
+
+- `snmp` (default): precheck ping + SNMP sysDescr, then SNMP discovery.
+- `static`: use configured SG IDs, no SNMP discovery.
+
+```mermaid
+flowchart TD
+  start([CLI Entry]) --> cfg[Load Config + Env Overrides]
+  cfg --> cmd{Command}
+
+  cmd --> discover["discover<br/>SNMP Inventory"]
+  discover --> snap["Write discovery.json under state_dir"]
+  snap --> exit1([Return snapshot path and exit])
+
+  cmd --> run["run / run-forever"]
+  run --> mode{mode flag}
+  mode --> ctrl["controller<br/>Leader election + discovery when leader<br/>Plan worker_count"]
+  mode --> work["worker<br/>Target bound or enabled SG set<br/>Lease -> run tests when held"]
+  mode --> comb["combined<br/>Leader election + worker loop"]
+  ctrl --> emit[Emit run JSON snapshot]
+  work --> emit
+  comb --> emit
+
+  cmd --> serve[serve]
+  serve --> api["Start FastAPI + routers"]
+  api --> withRunner{--with-runner?}
+  withRunner --> apiOnly["No -> API only<br/>Reads cache/state files"]
+  withRunner --> runner["Yes -> start controller + worker loop"]
+  runner --> sgwDisc["Discover SGs (config or snapshot)"]
+  sgwDisc --> sgwStart["Start SGW manager per sg_id"]
+  sgwStart --> heavyLight["Heavy/Light refresh loops"]
+  heavyLight --> cache["Cache-first responses from SGW store"]
+  cache --> ready[/ops/ready reflects discovery + cache readiness/]
+```
+
+## Recommended Next Step (Concrete)
+
+1) Make `--help` quiet (avoid config warnings during CLI parsing).
+2) Document the `serve --with-runner` combined-mode contract, including how it drives leader election, leases, test execution, and CLI activation.
+3) Add a short doc page encoding:
+   - `state_dir` layout
+   - snapshot lifecycle (`discover` writes; workers read)
+   - lease semantics (one SG per worker per tick)
+   - how `worker_count` is intended to drive deployment scaling
+
+# FILE: docs/architecture/architecture.md
+# PyPNM-CMTS Architecture And Implementation Burndown
+
+This Document Defines The Software-Centric Architecture, Execution Modes, And A Deterministic Implementation Checklist For PyPNM-CMTS.
+
+The Goal Is To Support A Standalone-First Deployment Model That Can Later Migrate Cleanly To Kubernetes Without Redesign.
+
+## Architecture Overview
+
+PyPNM-CMTS Is Designed To Service One CMTS Instance And Dynamically Discover Service Groups (SGs) And Cable Modems (CMs) Using SNMP.
+
+The System Is Divided Into Four Logical Layers:
+
+1. Discovery & Control Plane
+2. Scheduling & Execution
+3. Persistence & Indexing
+4. API & Observability
+
+All Layers Are Implemented In Python And Rely On Filesystem-Based Persistence. No Database Is Used.
+
+## Execution Modes
+
+### Standalone Mode
+
+- One process
+- Controller + SG workers + API
+- In-process concurrency
+- File-based coordination
+- SG workers scale with Service Groups; worker pool size should be configurable (min(num_sgs, cap))
+
+### Controller Mode
+
+- Discovery + reconciliation only
+- No workers
+- Intended for Kubernetes controller pods
+
+### Worker Mode
+
+- One SG per process
+- Intended for Kubernetes worker pods
+- Polls inventory directly until message bus is introduced
+
+## Core Principle: Serving Group Workers And Cache-First Endpoints
+
+Phase 7 Introduces Serving Group Workers (SGWs) That Continuously Maintain An In-Memory Cache Of Serving-Group Topology And Cable-Modem Membership.
+
+A Core Design Constraint Is That SG Worker Count Scales With The Number Of Service Groups. Each SGW Is Responsible For Exactly One sg_id And Owns That SG’s Cached State.
+
+Endpoints Are Cache-First And Must Not Trigger Implicit Live SNMP Walks. Any Live Refresh Must Be Explicit, Rate-Limited, And Bounded.
+
+SGW Discovery Defaults
+
+The default SGW discovery mode is `snmp`. Startup performs a ping + SNMP sysDescr precheck, then enumerates SG IDs via SNMP. Static discovery is supported for fixed SG lists.
+
+## Persistence Model
+
+Each transaction is written to disk:
+
+```
+<data_root_dir>/<cmts_id>/<sg_id>/<mac>/<YYYY>/<MM>/<DD>/<transaction_id>/
+  transaction.json
+  results.json
+```
+
+An append-only JSONL index is maintained per SG/day:
+
+```
+<data_root_dir>/<cmts_id>/<sg_id>/index/<YYYY-MM-DD>.jsonl
+```
+
+## Phase 7 Operating Model
+
+- Cache-first reads: endpoints return SGW cache by default, including snapshot_time_epoch, age_seconds, and refresh_state.
+- Two refresh lanes:
+  - Heavy refresh (inventory): DS/US channels + full cable-modem membership/topology; expensive SNMP walks; runs on a configurable interval.
+  - Light refresh (state): registration/online state deltas for known modems; cheaper polling; runs more frequently than heavy refresh and can be decoupled.
+- Explicit on-demand refresh: optional endpoint actions can request refresh, but must be rate-limited and bounded (paging and caps).
+
+## Implementation Checklist / Burndown
+
+Status Markers:
+- [x] Done (Implemented And Covered By Tests)
+- [ ] Todo / Not Started
+- [~] In Progress (Implemented But Missing Tests Or Integration)
+
+### Phase 0 — Contracts & Wiring
+
+- [x] CmtsOrchestratorSettings model implemented
+- [x] CLI mode selection added
+- [x] Adapter interface defined
+- [x] Launcher interface defined
+- [x] Coordination interfaces defined
+- [x] Docs updated (system + CLI)
+
+### Phase 1 — Storage & Index
+
+- [x] Storage layout builder
+- [x] Transaction writer
+- [x] JSONL index append
+- [x] JSONL query helpers
+- [x] Pytest coverage
+- [x] Docs updated (storage)
+
+### Phase 2 — Coordination
+
+- [x] File-based leader election
+- [x] File-based SG lease with TTL
+- [ ] Redis placeholder
+- [ ] K8 lease placeholder
+- [x] CoordinationManager (tick-loop / heartbeat + SG partitioning across replicas)
+- [x] Pytest coverage (CoordinationManager)
+- [x] MkDocs Mermaid support
+- [ ] Docs updated (coordination)
+
+### Phase 3 — Orchestrator Skeleton
+
+- [ ] Discovery controller
+- [ ] Reconciler
+- [ ] In-process launcher
+- [ ] SG worker lifecycle
+- [ ] Global executor
+- [ ] Standalone boot path
+- [ ] Docs updated (topology)
+
+### Phase 4 — Scheduling & Pipelines
+
+- [ ] Modem eligibility filtering
+- [ ] Cooldown enforcement
+- [ ] Per-SG concurrency
+- [ ] Global concurrency
+- [ ] Placeholder pipeline execution
+- [ ] Results written + indexed
+- [ ] Pytest coverage
+- [ ] Docs updated
+
+### Phase 5 — API Exposure
+
+- [ ] /cmts/status
+- [ ] /sg/status
+- [ ] /results/query
+- [ ] /results/getTransaction
+- [ ] API schemas documented
+
+### Phase 6 — Kubernetes Readiness Validation
+
+- [ ] Controller-only mode runs
+- [ ] Worker-only mode runs
+- [ ] No in-process assumptions in core logic
+- [ ] K8 backends isolated
+- [ ] Docs updated (deployment modes)
+
+### Phase 7 — Serving Group Worker Endpoint Layer
+
+Phase 7 Focuses On CMTS Endpoint Calls Backed By SGWs. The SGW Layer Continuously Maintains An In-Memory View Of Serving-Group Topology And Cable-Modem Membership So Endpoint Reads Are Cache-First And Low-Latency.
+
+#### Phase 7.1 Configuration, Types, And Contracts
+
+- [x] Add sgw.* settings fields (enabled, poll_heavy_seconds, poll_light_seconds, max_workers, refresh_jitter_seconds, cache_max_age_seconds)
+- [x] Define cache metadata model (snapshot_time_epoch, age_seconds, last_heavy_refresh_epoch, last_light_refresh_epoch, refresh_state, last_error)
+- [x] Unit tests cover defaulting and validation for SGW settings and metadata model
+
+Notes:
+- Cache metadata is modeled under orchestrator models and reused by SGW cache entry models.
+- last_error is bounded and validation-tested.
+
+#### Phase 7.2 SGW Manager Skeleton
+
+- [x] Implement SGW cache store with upsert and metadata update helpers
+- [x] Implement SGW manager refresh cycle skeleton (heavy/light lanes + jitter + staleness)
+- [x] Deterministic unit tests for:
+  - heavy refresh updates heavy + light timestamps
+  - light refresh only behavior
+  - jitter delaying refresh and driving refresh_state=STALE
+  - error bounding behavior
+
+Notes:
+- Worker-per-sg_id lifecycle management (spawn/stop/join) is tracked under Phase 7.3 to align with startup discovery and readiness gating.
+
+#### Phase 7.3 SG Discovery At Startup
+
+Objective:
+Perform SG discovery at startup, prime the SGW cache, and gate /ops/ready on discovery + cache priming.
+
+Tasks:
+- [x] Implement startup flow on FastAPI serve startup:
+  - Load CmtsOrchestratorSettings.from_system_config()
+  - Discover serving groups via CmtsInventoryDiscoveryService.run_discovery(...)
+  - Start an SGW cache store + SGW manager bound to the discovered sg_id list
+  - Prime the SGW cache with a single refresh_once(now_epoch) to ensure at least one snapshot per SG
+- [x] Publish SGW startup status for operational endpoints:
+  - startup_completed / discovery_ok / discovered_sg_ids / last_refresh_epoch / bounded error_message
+  - Accessors for store + manager for endpoint and readiness checks
+- [x] Gate /ops/ready on SGW discovery + cache priming:
+  - Fail with SGW_DISCOVERY when startup completed and discovery_ok is false
+  - Fail with SGW_CACHE when discovery_ok is true but one or more SGs lack a primed cache snapshot
+  - Return explicit readiness fields: discovery_ok, discovered_sg_ids, sgw_ready, missing_sg_ids
+- [x] Add deterministic tests:
+  - Success path: discovery returns stable SG list and cache is primed
+  - Failure path: discovery raises and /ops/ready returns 503 with SGW_DISCOVERY
+  - No real sleeps (inject _now_epoch and monkeypatch discovery)
+
+Done Criteria:
+- Serve startup logs show the discovered SG list and SGW initialization summary.
+- /ops/ready reflects SGW readiness with explicit discovery/cache fields.
+- Tests pass under pytest -q.
+
+#### Phase 7.4 SGW Polling Loop And Cache Models
+
+- [ ] Define SG snapshot model fields (sg_id, ds_channels summary, us_channels summary, cable_modems membership, topology, metadata)
+- [ ] Implement per-worker loop:
+  - Heavy refresh every poll_heavy_seconds
+  - Light refresh every poll_light_seconds
+  - Jitter applied per SGW start
+- [ ] Ensure snapshot replacement is atomic:
+  - Build new snapshot -> swap under lock -> update metadata
+- [ ] Unit tests with fake pollers validate scheduling order and error paths
+
+#### Phase 7.5 Endpoint Implementation (Cache-First)
+
+- [ ] POST /cmts/servingGroup/get/ids
+- [ ] POST /cmts/servingGroup/get/cableModems (sg_id required, paginated)
+- [ ] POST /cmts/servingGroup/get/topology (sg_id required)
+- [ ] Optional: POST /cmts/get/cableModems (CMTS-wide, always paginated, aggregates caches only)
+- [ ] Contract tests validate response shape, cache metadata presence, and pagination determinism
+
+#### Phase 7.6 On-Demand Refresh Controls
+
+- [ ] Add request options: refresh (none|light|heavy), max_wait_seconds (bounded)
+- [ ] Add per-SGW rate limiting for heavy refresh
+- [ ] Ensure refresh never blocks the main loop indefinitely (in-flight returns current snapshot with explicit state token)
+- [ ] Tests verify rate limiting and bounded waits
+
+#### Phase 7.7 Container And Kubernetes Startup Integration
+
+- [ ] Define startup sequence: load config -> discover SGs -> start SGW manager -> expose readiness
+- [ ] Document probe guidance:
+  - Liveness: process health
+  - Readiness: SG discovery + SGW cache readiness
+- [ ] Local Docker run path validated (documented and testable)
+
+#### Phase 7.8 Observability
+
+- [ ] Per-SGW logs:
+  - heavy refresh start/end + duration
+  - light refresh start/end + duration
+  - errors with bounded message
+- [ ] Manager logs:
+  - worker spawn count and mapping
+  - stop/join results
+- [ ] No excessive per-modem logs in normal operation
+
+#### Phase 7.9 Test Plan
+
+- [ ] Worker count scaling: discovered SG count -> spawned SGW count (cap enforced)
+- [ ] Cache update contract: snapshot changes visible to endpoints on subsequent calls
+- [ ] Endpoint behaviors:
+  - SG-scoped /get/cableModems requires sg_id
+  - pagination stable and deterministic
+- [ ] Refresh gating: on-demand heavy refresh rate limited
+- [ ] All tests deterministic (no real sleep; injected sleepers/fake clocks)
+
+#### Phase 7.10 Documentation
+
+- [ ] Endpoint docs:
+  - request/response schema
+  - cache metadata semantics
+  - refresh options and safeguards
+- [ ] Ops docs:
+  - startup sequence
+  - recommended polling intervals
+  - probe examples
+
+#### Phase 7.11 Hardening And Follow-Ons
+
+- [ ] Snapshot persistence (warm-start cache) per SGW
+- [ ] Backpressure for CMTS-wide membership sizes
+- [ ] Incremental SNMP walk strategies
+- [ ] Cache eviction policies
+
+## Final Acceptance Checklist
+
+- [ ] Ruff passes
+- [ ] Relevant pytest tests executed
+- [ ] mkdocs build --strict passes (or documented exception)
+- [ ] No database introduced
+- [ ] PyPNM core not modified unintentionally
+- [ ] Changes aligned with AGENTS.md
+
+# FILE: docs/bundles/phase-8/phase-8-step-7i.md
+# Phase 8 · Step 7i
+
+## Goal
+Clarify SGW discovery modes, defaults, and startup logging across related documentation.
+
+## Summary of changes
+- Documented SGW discovery modes and defaults in CLI and architecture docs.
+- Added startup log markers and discovery mode context to operational and serving-group docs.
+- Updated manpage notes to describe discovery mode and adapter overrides.
+
+## Files changed
+- docs/system/cli.md
+- docs/system/pypnm-cmts-manpage.md
+- docs/api/fast-api/operational.md
+- docs/api/fast-api/serving-group.md
+- docs/architecture/mode-contract.md
+- docs/architecture/architecture.md
+
+## Tests run
+- None (docs-only)
+
+## Results / Notes
+- Documentation now highlights `snmp` as the default discovery mode and explains precheck behavior and log markers.

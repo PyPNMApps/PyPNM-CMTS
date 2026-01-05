@@ -86,6 +86,8 @@ markers = [
   "asyncio: mark test as asyncio-based (requires pytest-asyncio)",
   "cm_it: cable modem integration tests (enable with -m cm_it)",
   "integration: live CMTS integration tests (enable with -m integration)",
+  "live: live CMTS tests (enable with --run-live or PYPNM_CMTS_RUN_LIVE=1)",
+  "live_cmts: live CMTS tests (enable with --run-live or PYPNM_CMTS_RUN_LIVE=1)",
   "slow: slow tests",
   "net: network-required tests",
   "pnm: PNM file parsing tests",

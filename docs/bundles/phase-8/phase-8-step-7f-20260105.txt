@@ -1,0 +1,401 @@
+# FILE: src/pypnm_cmts/sgw/startup.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.sgw.discovery import (
+    ServiceGroupDiscovery,
+    SnmpServiceGroupDiscovery,
+    StaticServiceGroupDiscovery,
+)
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
+from pypnm_cmts.sgw.pollers.light import sgw_light_poller
+from pypnm_cmts.sgw.precheck import CmtsStartupPrecheck
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    set_sgw_startup_failure,
+    set_sgw_startup_prime_failure,
+    set_sgw_startup_success,
+    start_sgw_background_refresh,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.lib.types import ServiceGroupId
+
+
+class SgwStartupService:
+    """Service for SG discovery and SGW priming at startup."""
+
+    def __init__(self, discovery: ServiceGroupDiscovery | None = None) -> None:
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._discovery = discovery
+
+    async def initialize(self) -> None:
+        """
+        Discover SGs and prime SGW cache at startup.
+        """
+        settings = CmtsOrchestratorSettings.from_system_config()
+        try:
+            if not bool(settings.sgw.enabled):
+                store = SgwCacheStore()
+                manager = SgwManager(settings=settings, store=store, service_groups=[])
+                set_sgw_startup_success([], store, manager, self._now_epoch())
+                self.logger.info("SGW startup skipped (sgw.enabled is false).")
+                return
+
+            state_dir_value = str(settings.state_dir).strip() if settings.state_dir is not None else ""
+            if state_dir_value == "":
+                message = "state_dir must be set for SGW discovery"
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+
+            mode_value = str(settings.sgw.discovery.mode).strip().lower()
+            self.logger.info("SGW discovery mode: %s", mode_value if mode_value != "" else "static")
+
+            if self._precheck_required(settings):
+                precheck = CmtsStartupPrecheck()
+                precheck_result = await precheck.run(settings)
+                self.logger.info(
+                    "CMTS precheck: hostname=%s inet=%s ping=%s snmp=%s",
+                    str(precheck_result.hostname),
+                    str(precheck_result.inet),
+                    "ok" if precheck_result.ping_ok else "failed",
+                    "ok" if precheck_result.snmp_ok else "failed",
+                )
+                if not precheck_result.is_ok():
+                    message = precheck_result.error_message if precheck_result.error_message != "" else "cmts precheck failed"
+                    set_sgw_startup_failure(message)
+                    self.logger.error("SG discovery failed: %s", message)
+                    return
+
+            try:
+                discovery = self._resolve_discovery(settings)
+                discovered_sg_ids = await asyncio.to_thread(discovery.discover, settings)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+
+            store = SgwCacheStore()
+            manager = SgwManager(
+                settings=settings,
+                store=store,
+                service_groups=discovered_sg_ids,
+                heavy_poller=sgw_heavy_poller,
+                light_poller=sgw_light_poller,
+            )
+            now_epoch = self._now_epoch()
+            try:
+                await asyncio.to_thread(manager.refresh_once, now_epoch)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_prime_failure(discovered_sg_ids, message)
+                self.logger.exception("SGW priming failed: %s", message)
+                return
+            set_sgw_startup_success(discovered_sg_ids, store, manager, now_epoch)
+            if not self._pytest_running():
+                start_sgw_background_refresh()
+
+            ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+            self.logger.info("Discovered SG IDs: %s", [int(sg_id) for sg_id in discovered_sg_ids])
+            self.logger.info("SGWorkerID: %s", [self._format_worker_id(sg_id) for sg_id in discovered_sg_ids])
+            self.logger.info("SGW initialized for %d service groups.", len(discovered_sg_ids))
+            self.logger.info("SGW readiness after prime: %s", "ready" if ready else "not_ready")
+        except Exception as exc:
+            message = str(exc)
+            set_sgw_startup_failure(message)
+            self.logger.exception("SGW startup failed: %s", message)
+
+    @staticmethod
+    def _now_epoch() -> float:
+        return float(time.time())
+
+    @staticmethod
+    def _pytest_running() -> bool:
+        return os.getenv("PYTEST_CURRENT_TEST") is not None
+
+    def _resolve_discovery(self, settings: CmtsOrchestratorSettings) -> ServiceGroupDiscovery:
+        if self._discovery is not None:
+            return self._discovery
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        if mode_value == "snmp":
+            return SnmpServiceGroupDiscovery()
+        return StaticServiceGroupDiscovery()
+
+    @staticmethod
+    def _precheck_required(settings: CmtsOrchestratorSettings) -> bool:
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        return mode_value == "snmp"
+
+    @staticmethod
+    def _format_worker_id(sg_id: ServiceGroupId) -> str:
+        return f"sgw-{int(sg_id)}"
+
+
+__all__ = [
+    "SgwStartupService",
+]
+
+# FILE: docs/architecture/service-group-workers.md
+# PyPNM-CMTS Architecture – Service Group Workers And Zero-Touch Operation
+
+This Document Defines The Target ("End-Game") Architecture For PyPNM-CMTS Orchestration, Including Zero-Touch (0T)
+Service Group Worker Assignment And Scale-Out Behavior.
+
+## Table Of Contents
+
+- [Scope](#scope)
+- [End Goal](#end-goal)
+- [Key Concepts](#key-concepts)
+- [Execution Roles](#execution-roles)
+- [Zero-Touch Worker Lifecycle](#zero-touch-worker-lifecycle)
+- [Coordination And Leasing](#coordination-and-leasing)
+- [Result Persistence](#result-persistence)
+- [Scaling Model](#scaling-model)
+- [Failure Handling](#failure-handling)
+- [Configuration Expectations](#configuration-expectations)
+- [SGW Discovery Modes](#sgw-discovery-modes)
+- [Implementation Notes](#implementation-notes)
+
+## Scope
+
+This Architecture Covers The PyPNM-CMTS Orchestrator And Its Interaction With Service Groups (SGs), Including:
+
+- How SGs Are Discovered (From Configuration And/Or CMTS Inventory).
+- How Work Is Assigned To Workers Using Coordination Leases.
+- How Results Are Persisted In A Deterministic, Auditable Manner.
+- How Worker Count Scales With The Number Of Service Groups.
+
+## End Goal
+
+The Production Target Is Zero-Touch (0T) Installation And Operation:
+
+- A Worker Does Not Require A Static `--sg-id` At Startup To Be Useful.
+- Workers Self-Assign Work By Participating In Coordination Leasing.
+- Adding Workers Increases Throughput Without Manual Sharding Or Per-Worker Configuration.
+
+At The Same Time, The System Supports An Explicit (Bound) Worker Mode For Debugging, Incremental Rollout, And
+Operational Override When Needed.
+
+## Key Concepts
+
+**Service Group (SG)**  
+The Fundamental Unit Of Work Scheduling. A Worker Executes Tests For One SG Per Tick (Initial Target), Producing
+Structured Results And Persisting Them Under An SG-Specific Path.
+
+**Tick**  
+A Single Iteration Of The Orchestrator: read configuration and/or inventory, execute coordination, run tests (if
+assigned), persist results, and emit a JSON status snapshot.
+
+**Lease**  
+A Time-Bounded Claim Over An SG That Grants A Worker The Right To Execute Work For That SG In The Current Tick.
+
+## Execution Roles
+
+PyPNM-CMTS Defines Three Operational Roles:
+
+### Standalone
+
+- Performs Coordination And Work In A Single Process.
+- Useful For Local Development And Single-Host Operation.
+- Runs A Tick And May Execute Work For Any SG(s) It Acquires.
+
+### Controller
+
+- Primarily Runs Coordination To Assign SG Leases.
+- May Be Extended To Publish Cluster-Wide Status (Future).
+- Does Not Necessarily Execute Work (policy-based).
+
+### Worker
+
+Two Worker Variants Are Supported:
+
+**Bound Worker (Explicit SG Assignment)**  
+- Starts With `--mode worker --sg-id <id>`.
+- Requests A Lease Only For That SG.
+- Executes Work Only For That SG When The Lease Is Held.
+
+**Unbound Worker (Zero-Touch)**  
+- Starts With `--mode worker` (no `--sg-id`).
+- Requests Leases For The Enabled SG Set.
+- Executes Work For The SG(s) It Acquires In The Current Tick.
+
+## Zero-Touch Worker Lifecycle
+
+This Is The Intended End-State Worker Behavior:
+
+1. **Boot**
+   - Load System Configuration.
+   - Build The Enabled SG Inventory.
+   - Establish The Coordination State Directory (or configured state backend).
+
+2. **Tick Start**
+   - Determine The SG Candidate Set:
+     - If Bound Worker: the single `sg_id`.
+     - If Unbound Worker: all enabled SG IDs.
+   - Submit Candidate Set To Coordination Manager.
+
+3. **Coordination**
+   - Coordination Returns `acquired_sg_ids` For The Tick.
+   - If No SG Is Acquired, Worker Performs No Work And Returns A Snapshot.
+
+4. **Work**
+   - For Each Acquired SG ID (initial policy: at most one):
+     - Execute The SG Test Plan.
+     - Build `work_results` for that SG.
+
+5. **Persist**
+   - Persist Results Only If A Lease Was Held For That SG In The Tick.
+
+6. **Emit**
+   - Emit `OrchestratorRunResultModel` JSON including:
+     - `tick_index` (coordination-driven, 1-based in-process)
+     - `lease_held` (true when at least one SG lease is held)
+     - `run_id` (populated only when work executed)
+     - `work_results` (empty when no lease held)
+
+## Coordination And Leasing
+
+Coordination Is The Gate That Makes Zero-Touch Possible.
+
+**Contract**
+- Worker Submits A Candidate SG Set.
+- Coordination Returns Which SGs Are Leased By This Worker In The Tick.
+- Work Execution Must Be Strictly Conditioned On The Lease Result.
+
+**Single-SG-Per-Tick Policy (Initial Target)**
+- Coordination Should Prefer Assigning At Most One SG Per Worker Per Tick.
+- This Matches The Deterministic Persistence Model And Simplifies Run Semantics.
+
+**Multi-SG-Per-Tick (Future Extension)**
+- Allowed Only If:
+  - The Work Pipeline Can Execute SGs Independently.
+  - Persistence Is SG-Scoped And Collision-Free.
+  - The Result Model Clearly Represents Multi-SG Runs.
+
+## Result Persistence
+
+Worker Mode Persists Results Under The Coordination State Directory:
+
+```
+<state_dir>/results/sg_<sg_id>/
+```
+
+Each File Name Is Deterministic Per Tick:
+
+```
+sg<sg_id>_tick<tick_index>_<test_name>.json
+```
+
+**Invariant**
+- Persistence Occurs Only When The Worker Holds The Lease For That SG In That Tick.
+- If The Worker Holds No Lease, No Result Files Are Written.
+
+## Scaling Model
+
+PyPNM-CMTS Is Designed To Scale With The Number Of Service Groups.
+
+### Primary Scaling Lever
+
+**SG Worker Count**
+
+- Increasing worker replicas increases the probability of concurrent SG lease coverage.
+- Target model: 1 worker can serve multiple SGs over time; N workers can serve up to N SGs concurrently per tick.
+
+### Practical Deployment Guidance
+
+- If You Have `S` Enabled Service Groups, Start With `min(S, N)` Workers Where `N` Reflects Desired Parallelism.
+- Zero-Touch Workers Remove The Need For Pre-Assigning SG IDs To Each Worker.
+
+## Failure Handling
+
+The System Must Be Safe Under Partial Failure:
+
+- If Coordination Fails: return a status snapshot with no work executed.
+- If Work Execution Fails For One SG: persist only successful results; log failure; continue operation per policy.
+- If A Worker Dies Mid-Tick: leases expire via TTL; another worker can acquire the SG in a future tick.
+
+## Configuration Expectations
+
+Zero-Touch Still Requires A Minimal Configuration Baseline:
+
+- Defined Service Groups (enabled/disabled) and orchestration policy (target service groups, shard mode).
+- A Coordination State Directory (or future shared backend) accessible to participating workers.
+- SNMP connectivity and CMTS inventory discovery prerequisites for production-grade SG enumeration.
+
+## SGW Discovery Modes
+
+This Section Defines How PyPNM-CMTS Determines The Initial Service Group Set At Startup.
+
+### Static
+
+Static Discovery Uses `sgw.discovery.static_sg_ids` (from `CmtsOrchestrator` config).
+
+- Intended For Lab, CI, Or Fixed Environments.
+- If The List Is Empty Or Missing, Discovery Returns No SGs.
+- No SNMP Calls Are Performed.
+
+### SNMP
+
+SNMP Discovery Queries The CMTS For Service Group Inventory.
+
+- Uses `CmtsOrchestrator.adapter` settings (`hostname`, `community`, `port`).
+- Startup Runs A Precheck (ICMP Ping + SNMP sysDescr) Before Discovery.
+- If Precheck Fails, SGW Startup Records A Failure And Skips Discovery.
+
+### Default Behavior
+
+If `sgw.discovery.mode` Is Missing Or Empty, The Default Is `static`.
+
+### Logging
+
+Startup Logs The Discovery Mode And The Derived SG Worker IDs:
+
+- `SGW discovery mode: <mode>`
+- `SGWorkerID: [sgw-<sg_id>, ...]`
+
+## Implementation Notes
+
+Serving Group Workers Maintain Cache Snapshots With Heavy And Light Refresh Lanes And Expose Cache-First Reads.
+
+To Reach And Maintain The 0T End-State, These Design Rules Apply:
+
+- Do Not Bind SG Assignment At Process Startup Unless Explicitly Requested.
+- Treat Coordination Output As The Source Of Truth For Work Eligibility.
+- Separate "Enabled Inventory" (what could be worked) From "Acquired Assignment" (what is worked this tick).
+- Keep Persistence Strictly Lease-Gated To Avoid Duplicate Or Conflicting Outputs.
+
+## Startup Integration
+
+- On Serve Or Combined Startup, Discover The Enabled SG Set Before Spawning SGWs.
+- SGW Manager Starts One Worker Per sg_id (Capped By Max Workers) And Primes Each Cache Before Readiness Is Reported.
+- Cache-First API Responses Must Not Trigger Implicit SNMP Walks; Discovery + SGW Priming Are The Gate For /ops/ready.
+
+# FILE: docs/bundles/phase-8/phase-8-step-7f.md
+# Phase 8 · Step 7f
+
+## Goal
+Log SGW discovery mode at startup and document SGW discovery modes and logging.
+
+## Summary of changes
+- Added SGW discovery mode logging to startup.
+- Documented static vs SNMP discovery, defaults, and startup logging.
+
+## Files changed
+- src/pypnm_cmts/sgw/startup.py
+- docs/architecture/service-group-workers.md
+
+## Tests run
+- None (docs and logging change only)
+
+## Results / Notes
+- Startup now logs the active discovery mode before precheck and discovery.

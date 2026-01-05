@@ -1,12 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from pypnm.lib.types import HostNameStr, IPv4Str, IPv6Str, MacAddressStr
 
-from pypnm_cmts.lib.types import IPv6LinkLocalStr, ServiceGroupId
+from pypnm_cmts.lib.types import (
+    ChSetId,
+    CmtsCmRegState,
+    IPv6LinkLocalStr,
+    ServiceGroupId,
+)
 
 
 class RegisteredCableModemModel(BaseModel):
@@ -14,6 +19,9 @@ class RegisteredCableModemModel(BaseModel):
     ipv4: IPv4Str = Field(default=IPv4Str(""), description="Cable modem IPv4 address when available.")
     ipv6: IPv6Str = Field(default=IPv6Str(""), description="Cable modem IPv6 address when available.")
     ipv6_link_local: IPv6LinkLocalStr = Field(default=IPv6LinkLocalStr(IPv6Str("")), description="Cable modem IPv6 link-local address when available.")
+    ds_channel_set: ChSetId = Field(default=ChSetId(0), description="Downstream channel set id when available.")
+    us_channel_set: ChSetId = Field(default=ChSetId(0), description="Upstream channel set id when available.")
+    registration_status: CmtsCmRegState = Field(default=CmtsCmRegState(0), description="Registration status when available.")
 
 
 class ServiceGroupCableModemInventoryModel(BaseModel):

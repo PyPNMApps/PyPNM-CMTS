@@ -47,6 +47,10 @@ A Core Design Constraint Is That SG Worker Count Scales With The Number Of Servi
 
 Endpoints Are Cache-First And Must Not Trigger Implicit Live SNMP Walks. Any Live Refresh Must Be Explicit, Rate-Limited, And Bounded.
 
+## SGW Discovery Defaults
+
+The default SGW discovery mode is `snmp`. Startup performs a ping + SNMP sysDescr precheck, then enumerates SG IDs via SNMP. Static discovery is supported for fixed SG lists.
+
 ## Persistence Model
 
 Each transaction is written to disk:

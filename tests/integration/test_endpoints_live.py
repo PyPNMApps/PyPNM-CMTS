@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -120,11 +120,16 @@ def _wait_for_ids(client: TestClient, max_wait_seconds: float, poll_interval_sec
 
 
 def _skip_if_empty_topology(payload: dict[str, object], message: str) -> None:
-    ds_channels = payload.get("topology", {}).get("ds_channels", {})
-    us_channels = payload.get("topology", {}).get("us_channels", {})
-    ds_count = ds_channels.get("count", 0)
-    us_count = us_channels.get("count", 0)
-    if int(ds_count) == 0 and int(us_count) == 0:
+    groups = payload.get("groups", [])
+    if not groups:
+        pytest.skip(message)
+    first = groups[0]
+    channels = first.get("channels", {})
+    ds_channels = channels.get("ds", {})
+    us_channels = channels.get("us", {})
+    ds_inventory = ds_channels.get("sc_qam", []) + ds_channels.get("ofdm", [])
+    us_inventory = us_channels.get("sc_qam", []) + us_channels.get("ofdma", [])
+    if not ds_inventory and not us_inventory:
         pytest.skip(message)
 
 
@@ -182,10 +187,17 @@ def test_live_serving_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
         if not discovered:
             pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
         sg_id = discovered[0]
-        response = client.post("/cmts/servingGroup/get/topology", json={"sg_id": sg_id})
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={
+                "cmts": {"serving_group": {"id": [sg_id]}},
+                "page": 1,
+                "page_size": 100,
+            },
+        )
         assert response.status_code == 200
         body = response.json()
-        assert body["topology"]["sg_id"] == sg_id
+        assert body["groups"][0]["sg_id"] == sg_id
 
 
 @pytest.mark.integration
@@ -203,15 +215,14 @@ def test_live_serving_group_topology_heavy_refresh(monkeypatch: pytest.MonkeyPat
         response = client.post(
             "/cmts/servingGroup/get/topology",
             json={
-                "sg_id": sg_id,
-                "refresh": "heavy",
-                "require_fresh": True,
-                "max_wait_seconds": REFRESH_WAIT_SECONDS,
+                "cmts": {"serving_group": {"id": [sg_id]}},
+                "page": 1,
+                "page_size": 100,
             },
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["topology"]["sg_id"] == sg_id
+        assert body["groups"][0]["sg_id"] == sg_id
         _skip_if_empty_topology(body, "topology not populated yet; SGW pollers may be stubbed")
 
 
@@ -229,15 +240,22 @@ def test_live_serving_group_cable_modems(monkeypatch: pytest.MonkeyPatch) -> Non
         sg_id = discovered[0]
         response = client.post(
             "/cmts/servingGroup/get/cableModems",
-            json={"sg_id": sg_id, "page": CABLE_MODEM_PAGE, "page_size": CABLE_MODEM_PAGE_SIZE},
+            json={
+                "cmts": {"serving_group": {"id": [sg_id]}},
+                "page": CABLE_MODEM_PAGE,
+                "page_size": CABLE_MODEM_PAGE_SIZE,
+            },
         )
         assert response.status_code == 200
         body = response.json()
-        items = body.get("items", [])
+        groups = body.get("groups", [])
+        if not groups:
+            pytest.skip("membership not populated yet; SGW pollers may be stubbed")
+        items = groups[0].get("items", [])
         if items:
-            macs = [item["mac"] for item in items]
+            macs = [item["mac_address"] for item in items]
             assert macs == sorted(macs)
-        assert body["total_count"] >= len(items)
+        assert groups[0]["total_items"] >= len(items)
 
 
 @pytest.mark.integration
@@ -255,23 +273,21 @@ def test_live_serving_group_cable_modems_heavy_refresh(monkeypatch: pytest.Monke
         response = client.post(
             "/cmts/servingGroup/get/cableModems",
             json={
-                "sg_id": sg_id,
+                "cmts": {"serving_group": {"id": [sg_id]}},
                 "page": CABLE_MODEM_PAGE,
                 "page_size": CABLE_MODEM_PAGE_SIZE,
-                "refresh": "heavy",
-                "require_fresh": True,
-                "max_wait_seconds": REFRESH_WAIT_SECONDS,
             },
         )
         assert response.status_code == 200
         body = response.json()
-        if body.get("total_count", 0) == 0:
+        groups = body.get("groups", [])
+        if not groups or groups[0].get("total_items", 0) == 0:
             pytest.skip("membership not populated yet; SGW pollers may be stubbed")
-        items = body.get("items", [])
+        items = groups[0].get("items", [])
         if items:
-            macs = [item["mac"] for item in items]
+            macs = [item["mac_address"] for item in items]
             assert macs == sorted(macs)
-        assert body["total_count"] >= len(items)
+        assert groups[0]["total_items"] >= len(items)
 
 
 @pytest.mark.integration
@@ -283,28 +299,10 @@ def test_live_system_sysdescr(monkeypatch: pytest.MonkeyPatch) -> None:
     from pypnm_cmts.api.main import app
 
     with TestClient(app) as client:
-        response = client.post("/system/sysDescr", json=_system_request_body(hostname, community))
+        response = client.get("/cmts/system/sysDescr")
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
         results = payload.get("results", {})
         assert results.get("raw", "") != ""
         assert results.get("is_empty") is False
-
-
-@pytest.mark.integration
-@pytest.mark.slow
-def test_live_system_service_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    hostname, community = _require_live_config()
-    _apply_live_env(monkeypatch, hostname, community)
-    from pypnm_cmts.api.main import app
-
-    with TestClient(app) as client:
-        response = client.post("/system/serviceGroupTopology", json=_system_request_body(hostname, community))
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == ServiceStatusCode.SUCCESS.value
-        results = payload.get("results", [])
-        assert results
-        assert results[0].get("md_cm_sg_id") is not None

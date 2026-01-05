@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 
@@ -11,6 +12,7 @@ class StartUp:
     """Initialize shared PyPNM-CMTS startup routines."""
 
     _LOGS_LINK_NAME = "logs"
+    _logging_configured = False
 
     @staticmethod
     def initialize() -> bool:
@@ -25,6 +27,11 @@ class StartUp:
         """
         Configure logging using the installed pypnm-docsis settings.
         """
+        if StartUp._logging_configured:
+            return
+        if logging.getLogger().handlers:
+            StartUp._logging_configured = True
+            return
         try:
             from pypnm.config.log_config import LoggerConfigurator
             from pypnm.config.system_config_settings import SystemConfigSettings
@@ -38,6 +45,7 @@ class StartUp:
             to_console=False,
             rotate=False,
         )
+        StartUp._logging_configured = True
 
     @staticmethod
     def _ensure_logs_symlink() -> None:

@@ -25,6 +25,8 @@ Table Of Contents in alphabetical order.
 - [Lease](#lease)
 - [Lease Held](#lease-held)
 - [Light Refresh](#light-refresh)
+- [OFDM](#ofdm)
+- [OFDMA](#ofdma)
 - [Orchestrator](#orchestrator)
 - [Orchestrator Mode](#orchestrator-mode)
 - [Orchestrator Run ID](#orchestrator-run-id)
@@ -36,6 +38,7 @@ Table Of Contents in alphabetical order.
 - [Run](#run)
 - [Run-Forever](#run-forever)
 - [Serve](#serve)
+- [SC-QAM](#sc-qam)
 - [Service Group](#service-group)
 - [Service Group Descriptor](#service-group-descriptor)
 - [Service Group ID](#service-group-id)
@@ -124,6 +127,14 @@ A boolean indicating whether the current worker instance holds the lease for its
 A serving-group worker refresh that updates only cheap state for known cable modems (for example, registration/online status) without rebuilding
 inventory. It runs more frequently than heavy refresh.
 
+### OFDM
+Orthogonal Frequency-Division Multiplexing downstream channels in DOCSIS 3.1. OFDM channels are represented by a channel id and a frequency range
+derived from the DOCS-IF31 MIB tables.
+
+### OFDMA
+Orthogonal Frequency-Division Multiple Access upstream channels in DOCSIS 3.1. OFDMA channels are represented by a channel id and a frequency
+range derived from the DOCS-IF31 MIB tables.
+
 ### Orchestrator
 The top-level control loop coordinating periodic ticks. Depending on mode, it may run coordination only (standalone/controller) or coordination
 plus work (worker).
@@ -161,6 +172,10 @@ A CLI subcommand that executes ticks repeatedly and prints one JSON object per t
 
 ### Serve
 A CLI subcommand that starts the FastAPI service via Uvicorn.
+
+### SC-QAM
+Single-carrier QAM channels in DOCSIS. In topology output, SC-QAM channels use the DOCS-IF downstream or upstream channel tables for frequency and
+width metadata.
 
 ### Service Group
 An operational boundary grouping cable modems and plant resources on a CMTS. The orchestrator assigns work at the granularity of a service group,

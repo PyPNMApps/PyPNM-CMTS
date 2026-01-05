@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -30,7 +30,9 @@ from pypnm_cmts.sgw.store import SgwCacheStore
 
 @pytest.mark.unit
 def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> None:
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     sg_id = ServiceGroupId(21)
     store = SgwCacheStore()
     metrics = InMemorySgwMetrics()
@@ -55,12 +57,20 @@ def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> No
     assert record.result in (REFRESH_RESULT_OK, REFRESH_RESULT_ERROR, REFRESH_RESULT_STALE)
     assert record.snapshot_time_epoch >= 0.0
     assert record.age_seconds >= 0.0
+    assert record.interval_seconds >= 0.0
+    if record.refresh_mode == REFRESH_MODE_HEAVY:
+        assert record.interval_seconds == float(settings.sgw.poll_heavy_seconds)
+    elif record.refresh_mode == REFRESH_MODE_LIGHT:
+        assert record.interval_seconds == float(settings.sgw.poll_light_seconds)
+    else:
+        assert record.interval_seconds == 0.0
 
 
 @pytest.mark.unit
 def test_sgw_manager_metrics_capture_refresh_and_stale() -> None:
     settings = CmtsOrchestratorSettings.model_validate(
         {
+            "adapter": {"hostname": "cmts.example", "community": "public"},
             "sgw": {
                 "cache_max_age_seconds": 1,
                 "poll_light_seconds": 1,

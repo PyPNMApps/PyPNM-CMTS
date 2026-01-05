@@ -19,7 +19,9 @@ def test_sgw_manager_stop_before_start_unblocks_immediately() -> None:
     the manager does not clear the stop event and will not start a long-running loop.
     """
     store = SgwCacheStore()
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     # Make the sleep interval long to detect blocking if stop-not-respected
     settings.sgw.poll_light_seconds = 5.0
     manager = SgwManager(settings=settings, store=store, service_groups=[ServiceGroupId(1)])

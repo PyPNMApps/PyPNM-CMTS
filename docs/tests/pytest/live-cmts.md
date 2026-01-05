@@ -6,18 +6,20 @@ for typical development runs.
 
 ## Required Environment Variables
 
-Set the following environment variables before running live tests:
+Set the following environment variables before running live tests.
+Ensure `system.json` CMTS adapter settings match the hostname/community values.
 
-- `PYPNM_CMTS_LIVE=1`
-- `CMTS_HOSTNAME` (example: `192.168.0.100`)
-- `CMTS_SNMP_V2_COMMUNITY` (example: `public`)
+- `PYPNM_CMTS_RUN_LIVE=1`
+- `PYPNM_CMTS_LIVE_HOSTNAME` (example: `192.168.0.100`)
+- `PYPNM_CMTS_LIVE_SNMP_COMMUNITY` (example: `public`)
+- `PYPNM_CMTS_LIVE_SNMP_PORT` (optional, default 161)
 
 ## Example Commands
 
 ```bash
-export PYPNM_CMTS_LIVE=1
-export CMTS_HOSTNAME=192.168.0.100
-export CMTS_SNMP_V2_COMMUNITY=public
+export PYPNM_CMTS_RUN_LIVE=1
+export PYPNM_CMTS_LIVE_HOSTNAME=192.168.0.100
+export PYPNM_CMTS_LIVE_SNMP_COMMUNITY=public
 
 pytest -q -m integration
 ```
@@ -36,5 +38,5 @@ If the host is unreachable, the tests are skipped with a clear message.
 
 - Cache-first SGW endpoints may return empty cable modem lists or topology
   entries if SGW pollers are not yet wired to populate cache entries.
-- System endpoints (`/system/sysDescr` and `/system/serviceGroupTopology`)
+- System endpoint (`/cmts/system/sysDescr`)
   should return non-empty results when the CMTS is reachable.

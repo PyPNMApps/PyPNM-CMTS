@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.inet import Inet
+from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import (
     HostNameStr,
     IPv4Str,
@@ -25,12 +26,16 @@ from pypnm_cmts.cmts.discovery_models import (
     ServiceGroupCableModemInventoryModel,
 )
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
+from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
+    DocsIf3CmtsCmRegStatusEntry,
+)
 from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
 from pypnm_cmts.lib.types import (
+    ChSetId,
+    CmtsCmRegState,
     CoordinationPath,
     IPv6LinkLocalStr,
     MdCmSgId,
-    RegisterCmMacInetAddress,
     ServiceGroupId,
 )
 
@@ -204,26 +209,49 @@ class CmtsInventoryDiscoveryService:
         Fetch registered cable modems for a single service group.
         """
         try:
-            entries = await operation.getAllRegisterCmMacInetAddress(
-                MdCmSgId(int(sg_id))
-            )
+            entries = await operation.getAllRegisterCm(MdCmSgId(int(sg_id)))
         except Exception as exc:
             self.logger.error(f"Failed to fetch registered CMs for sg_id {int(sg_id)}: {exc}")
             return []
 
-        return [self._map_register_cm(entry) for entry in entries]
+        mapped: list[RegisteredCableModemModel] = []
+        for entry in entries:
+            mapped_entry = self._map_register_cm(entry)
+            if mapped_entry is None:
+                continue
+            mapped.append(mapped_entry)
+        return mapped
 
     @staticmethod
-    def _map_register_cm(entry: RegisterCmMacInetAddress) -> RegisteredCableModemModel:
+    def _map_register_cm(
+        entry: DocsIf3CmtsCmRegStatusEntry,
+    ) -> RegisteredCableModemModel | None:
         """
-        Map a registered CM tuple into a discovery model.
+        Map a registered CM entry into a discovery model.
         """
-        _, mac, ipv4, ipv6, ipv6_ll = entry
+        mac_value = entry.docsIf3CmtsCmRegStatusMacAddr
+        if mac_value is None or str(mac_value).strip() == "":
+            return None
+        try:
+            normalized_mac = MacAddress(mac_value)
+        except (TypeError, ValueError):
+            return None
+
+        ipv4_value = entry.docsIf3CmtsCmRegStatusIPv4Addr
+        ipv6_value = entry.docsIf3CmtsCmRegStatusIPv6Addr
+        ipv6_ll_value = entry.docsIf3CmtsCmRegStatusIPv6LinkLocal
+        ds_channel_set = entry.docsIf3CmtsCmRegStatusRcsId
+        us_channel_set = entry.docsIf3CmtsCmRegStatusTcsId
+        reg_status = entry.docsIf3CmtsCmRegStatusValue
+
         return RegisteredCableModemModel(
-            mac=MacAddressStr(str(mac)),
-            ipv4=IPv4Str(str(ipv4)),
-            ipv6=IPv6Str(str(ipv6)),
-            ipv6_link_local=IPv6LinkLocalStr(IPv6Str(str(ipv6_ll))),
+            mac=MacAddressStr(str(normalized_mac)),
+            ipv4=IPv4Str("" if ipv4_value is None else str(ipv4_value)),
+            ipv6=IPv6Str("" if ipv6_value is None else str(ipv6_value)),
+            ipv6_link_local=IPv6LinkLocalStr(IPv6Str("" if ipv6_ll_value is None else str(ipv6_ll_value))),
+            ds_channel_set=ChSetId(0) if ds_channel_set is None else ChSetId(int(ds_channel_set)),
+            us_channel_set=ChSetId(0) if us_channel_set is None else ChSetId(int(us_channel_set)),
+            registration_status=CmtsCmRegState(1) if reg_status is None else CmtsCmRegState(int(reg_status)),
         )
 
     def _persist_snapshot(

@@ -133,6 +133,21 @@ Notes:
 - fallback_used is true only when fallback discovery finds processes with an exact --election-name match.
 - workers are sorted by sg_id ascending, with unbound workers listed last; ties break by pid then pidfile_path.
 
+## SGW Startup And Discovery Logs
+
+FastAPI startup runs SGW discovery and cache priming. The startup log sequence clarifies which discovery mode was used
+and whether the CMTS precheck succeeded (SNMP mode only).
+
+Expected log markers:
+
+- `SGW discovery mode: snmp`
+- `CMTS precheck: hostname=192.168.0.100 inet=192.168.0.100 ping=ok snmp=ok`
+- `Discovered SG IDs: [<sg_id>, ...]`
+- `SGWorkerID: [sgw-<sg_id>, ...]`
+
+If discovery returns an empty list, readiness is still reported as `ready` but endpoints that depend on SG cache will
+return empty results.
+
 ### GET /ops/version
 
 Service Identity, Version, And Runtime Metadata.
@@ -159,4 +174,23 @@ Response shape:
     "sg_id": null
   }
 }
+```
+
+## Live CMTS Tests
+
+Live CMTS tests are skipped by default and must be explicitly enabled. They validate SNMP connectivity for system endpoints.
+
+Required environment variables:
+
+- PYPNM_CMTS_LIVE_HOSTNAME
+- PYPNM_CMTS_LIVE_SNMP_COMMUNITY
+- PYPNM_CMTS_LIVE_SNMP_PORT (optional, default 161)
+
+Enable and run:
+
+```bash
+PYPNM_CMTS_RUN_LIVE=1 \
+PYPNM_CMTS_LIVE_HOSTNAME=192.168.0.100 \
+PYPNM_CMTS_LIVE_SNMP_COMMUNITY=public \
+/home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q -m live_cmts tests/live/test_live_system_endpoints.py
 ```

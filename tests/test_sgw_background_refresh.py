@@ -24,7 +24,9 @@ STARTUP_REFRESH_EPOCH = 0.0
 def test_sgw_background_refresh_start_stop(monkeypatch: object) -> None:
     reset_sgw_runtime_state()
     store = SgwCacheStore()
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     manager = SgwManager(settings=settings, store=store, service_groups=[])
     started = Event()
     stopped = Event()
@@ -54,7 +56,9 @@ def test_sgw_background_refresh_start_stop(monkeypatch: object) -> None:
 def test_sgw_background_refresh_restart_clears_stop(monkeypatch: object) -> None:
     reset_sgw_runtime_state()
     store = SgwCacheStore()
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     manager = SgwManager(settings=settings, store=store, service_groups=[])
     started = Event()
     stopped = Event()

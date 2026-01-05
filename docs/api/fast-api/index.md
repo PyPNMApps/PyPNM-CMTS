@@ -22,9 +22,8 @@ may request a refresh, but they do not execute SNMP in the request thread.
 
 ## Current Endpoints
 
-- `POST /system/sysDescr` - CMTS sysDescr lookup.
-- `POST /system/serviceGroupTopology` - CMTS service-group topology lookup.
-- `POST /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
+- `GET /cmts/system/sysDescr` - CMTS sysDescr lookup.
+- `GET /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
 - `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
 - `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
 - `GET /ops/health` - Liveness probe.
@@ -36,6 +35,18 @@ may request a refresh, but they do not execute SNMP in the request thread.
 
 - [Operational endpoints](operational.md)
 - [Serving group endpoints](serving-group.md)
+
+## GET /cmts/system/sysDescr
+
+This endpoint uses runtime CMTS adapter settings from `system.json`.
+No request body or query parameters are required.
+
+Example request:
+
+```bash
+curl -X GET "http://127.0.0.1:8000/cmts/system/sysDescr"
+```
+
 
 ## Next Steps
 

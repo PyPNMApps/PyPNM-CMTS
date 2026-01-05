@@ -17,12 +17,16 @@ from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
 
 
 def test_default_tests_fallback_when_missing() -> None:
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     assert settings.default_tests == ["ds_ofdm_rxmer"]
 
 
 def test_default_tests_fallback_when_empty() -> None:
-    settings = CmtsOrchestratorSettings(default_tests=[])
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"default_tests": [], "adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     assert settings.default_tests == ["ds_ofdm_rxmer"]
 
 
@@ -70,17 +74,23 @@ def test_worker_mode_allows_unbound(monkeypatch: object, tmp_path: Path) -> None
 
 def test_orchestrator_settings_invalid_shard_mode_raises() -> None:
     with pytest.raises(ValueError):
-        CmtsOrchestratorSettings(shard_mode="invalid")
+        CmtsOrchestratorSettings.model_validate(
+            {"shard_mode": "invalid", "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
 
 
 def test_orchestrator_settings_negative_target_service_groups_raises() -> None:
     with pytest.raises(ValueError):
-        CmtsOrchestratorSettings(target_service_groups=-1)
+        CmtsOrchestratorSettings.model_validate(
+            {"target_service_groups": -1, "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
 
 
 def test_orchestrator_settings_negative_worker_cap_raises() -> None:
     with pytest.raises(ValueError):
-        CmtsOrchestratorSettings(worker_cap=-1)
+        CmtsOrchestratorSettings.model_validate(
+            {"worker_cap": -1, "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
 
 
 def test_cli_snmp_port_override_passed_to_launcher(monkeypatch: object) -> None:
@@ -294,18 +304,24 @@ def test_cli_worker_rejects_sg_id_not_enabled(monkeypatch: object, tmp_path: Pat
 
 def test_orchestrator_settings_tick_interval_validation_raises() -> None:
     with pytest.raises(ValueError, match="tick_interval_seconds must be less than"):
-        CmtsOrchestratorSettings(
-            tick_interval_seconds=10,
-            leader_ttl_seconds=10,
-            lease_ttl_seconds=10,
+        CmtsOrchestratorSettings.model_validate(
+            {
+                "tick_interval_seconds": 10,
+                "leader_ttl_seconds": 10,
+                "lease_ttl_seconds": 10,
+                "adapter": {"hostname": "cmts.example", "community": "public"},
+            }
         )
 
 
 def test_orchestrator_settings_tick_interval_valid() -> None:
-    settings = CmtsOrchestratorSettings(
-        tick_interval_seconds=1,
-        leader_ttl_seconds=10,
-        lease_ttl_seconds=10,
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "tick_interval_seconds": 1,
+            "leader_ttl_seconds": 10,
+            "lease_ttl_seconds": 10,
+            "adapter": {"hostname": "cmts.example", "community": "public"},
+        }
     )
     assert float(settings.tick_interval_seconds) == 1.0
 

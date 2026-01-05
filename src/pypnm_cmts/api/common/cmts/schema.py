@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import os
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import (
     SNMPv2c,
     SNMPv3,
@@ -12,6 +14,12 @@ from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp im
 from pypnm.lib.types import HostNameStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
+from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.config.orchestrator_config import (
+    ENV_ADAPTER_HOSTNAME,
+    ENV_ADAPTER_READ_COMMUNITY,
+)
+from pypnm_cmts.config.request_defaults import CmtsRequestDefaults
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 
 
@@ -22,22 +30,55 @@ class CmtsSnmpConfig(BaseModel):
     model_config        = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     port: int           = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
 
-    if CmtsSystemConfigSettings.cmts_snmp_v2c_enabled(0):
-        snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
-
-    if CmtsSystemConfigSettings.cmts_snmp_v3_enabled(0):
-        snmp_v3: SNMPv3     = Field(default_factory=SNMPv3, description="SNMP v3 settings")
+    snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
+    snmp_v3: SNMPv3 | None = Field(default=None, description="SNMP v3 settings")
 
 
 class CmtsTarget(BaseModel):
     """
     CMTS connection target details.
     """
-    hostname: HostNameStr = Field(default=CmtsSystemConfigSettings.cmts_device_hostname(0), description="CMTS hostname or label.")
+    hostname: HostNameStr = Field(
+        default_factory=lambda: CmtsSystemConfigSettings.cmts_device_hostname(0),
+        description="CMTS hostname or label.",
+    )
 
 class CommonCmtsRequest(BaseModel):
     """
     Common request model for CMTS endpoints.
     """
-    cmts: CmtsTarget = Field(..., description="CMTS connection details.")
-    snmp: CmtsSnmpConfig = Field(..., description="SNMP connection settings.")
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    target: CmtsTarget = Field(default_factory=CmtsTarget, description="CMTS connection details.")
+    snmp: CmtsSnmpConfig = Field(default_factory=CmtsSnmpConfig, description="SNMP connection settings.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_request(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        if "target" in values:
+            return values
+        cmts_value = values.get("cmts")
+        if isinstance(cmts_value, dict) and "hostname" in cmts_value:
+            normalized = dict(values)
+            normalized["target"] = cmts_value
+            normalized["cmts"] = {}
+            return normalized
+        return values
+
+    @model_validator(mode="after")
+    def _apply_request_defaults(self) -> CommonCmtsRequest:
+        defaults = CmtsRequestDefaults.from_system_config()
+        self.cmts = self.cmts.apply_defaults(defaults)
+        if "target" not in self.model_fields_set and self.target.hostname == "":
+            hostname_value = os.environ.get(ENV_ADAPTER_HOSTNAME, "").strip()
+            if hostname_value == "":
+                hostname_value = CmtsSystemConfigSettings.cmts_device_hostname(0)
+            self.target.hostname = HostNameStr(hostname_value)
+        if "snmp" not in self.model_fields_set:
+            community_value = os.environ.get(ENV_ADAPTER_READ_COMMUNITY, "").strip()
+            if community_value == "":
+                community_value = CmtsSystemConfigSettings.cmts_snmp_v2c_read_community(0)
+            self.snmp.snmp_v2c.community = community_value
+            self.snmp.port = int(CmtsSystemConfigSettings.cmts_snmp_v2c_port(0))
+        return self

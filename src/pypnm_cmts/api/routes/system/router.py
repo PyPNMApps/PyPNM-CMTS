@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from fastapi import APIRouter, HTTPException
 from pypnm.lib.fastapi_constants import FAST_API_RESPONSE
 
 from pypnm_cmts.api.routes.system.schemas import (
-    CmtsServiceGroupTopologyRequest,
-    CmtsServiceGroupTopologyResponse,
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
 )
@@ -26,7 +24,7 @@ class SystemRouter:
 
     def __init__(
         self,
-        prefix: str = "/system",
+        prefix: str = "/cmts/system",
         tags: list[str | Enum] | None = None,
     ) -> None:
         if tags is None:
@@ -36,14 +34,14 @@ class SystemRouter:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        @self.router.post(
+        @self.router.get(
             "/sysDescr",
             response_model=CmtsSysDescrResponse,
             summary="Retrieve CMTS sysDescr",
             description="Fetches the system description from a CMTS.",
             responses=FAST_API_RESPONSE,
         )
-        async def get_sysdescr(request: CmtsSysDescrRequest) -> CmtsSysDescrResponse:
+        async def get_sysdescr() -> CmtsSysDescrResponse:
             """
             **Retrieve CMTS System Description**
 
@@ -51,6 +49,7 @@ class SystemRouter:
             a CMTS and parses it into a structured model.
             """
             try:
+                request = CmtsSysDescrRequest()
                 return await SystemCmtsSnmpService.get_sysdescr(request)
             except Exception as exc:
                 self.logger.error(f"CMTS sysDescr error: {exc}")
@@ -58,31 +57,5 @@ class SystemRouter:
                     status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                     detail="Failed to retrieve CMTS sysDescr.",
                 ) from exc
-
-        @self.router.post(
-            "/serviceGroupTopology",
-            response_model=CmtsServiceGroupTopologyResponse,
-            summary="Retrieve CMTS service-group topology",
-            description="Fetches the service-group topology from a CMTS.",
-            responses=FAST_API_RESPONSE,
-        )
-        async def get_service_group_topology(
-            request: CmtsServiceGroupTopologyRequest,
-        ) -> CmtsServiceGroupTopologyResponse:
-            """
-            **Retrieve CMTS Service-Group Topology**
-
-            This endpoint performs SNMP queries to build the service-group topology
-            for a CMTS, including channel-set IDs and channel lists.
-            """
-            try:
-                return await SystemCmtsSnmpService.get_service_group_topology(request)
-            except Exception as exc:
-                self.logger.error(f"CMTS topology error: {exc}")
-                raise HTTPException(
-                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    detail="Failed to retrieve CMTS topology.",
-                ) from exc
-
 
 router = SystemRouter().router

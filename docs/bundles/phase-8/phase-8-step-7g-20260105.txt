@@ -1,0 +1,3532 @@
+# FILE: src/pypnm_cmts/config/orchestrator_config.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from pydantic import BaseModel, Field, model_validator
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+
+from pypnm_cmts.config.config_manager import CmtsConfigManager
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    CoordinationPath,
+    OwnerId,
+    ServiceGroupId,
+)
+from pypnm_cmts.types.orchestrator_types import AdapterKind, OrchestratorMode
+
+DEFAULT_CMTS_INDEX: int = 0
+DEFAULT_ORCHESTRATOR_MODE: OrchestratorMode = OrchestratorMode.STANDALONE
+DEFAULT_TESTS: list[str] = ["ds_ofdm_rxmer"]
+DEFAULT_OWNER_ID: OwnerId = OwnerId("")
+DEFAULT_TARGET_SERVICE_GROUPS: int = 0
+DEFAULT_WORKER_CAP: int = 0
+DEFAULT_STATE_DIR = Path(".data/coordination")
+DEFAULT_ELECTION_NAME: CoordinationElectionName = CoordinationElectionName("")
+DEFAULT_LEADER_TTL_SECONDS = 10
+DEFAULT_LEASE_TTL_SECONDS = 10
+DEFAULT_TICK_INTERVAL_SECONDS = 1.0
+DEFAULT_SNMP_COMMUNITY: SnmpReadCommunity = SnmpReadCommunity("public")
+DEFAULT_SNMP_PORT = 161
+DEFAULT_SGW_ENABLED = True
+DEFAULT_SGW_POLL_LIGHT_SECONDS = 300
+DEFAULT_SGW_POLL_HEAVY_SECONDS = 900
+DEFAULT_SGW_REFRESH_JITTER_SECONDS = 30
+DEFAULT_SGW_CACHE_MAX_AGE_SECONDS = 1200
+DEFAULT_SGW_MAX_WORKERS = 0
+SGW_DISCOVERY_MODE_STATIC = "static"
+SGW_DISCOVERY_MODE_SNMP = "snmp"
+SGW_DISCOVERY_MODE_OPTIONS = (SGW_DISCOVERY_MODE_STATIC, SGW_DISCOVERY_MODE_SNMP)
+DEFAULT_SGW_DISCOVERY_MODE = SGW_DISCOVERY_MODE_SNMP
+SHARD_MODE_SEQUENTIAL = "sequential"
+SHARD_MODE_SCORE = "score"
+SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
+DEFAULT_SHARD_MODE = SHARD_MODE_SEQUENTIAL
+ENV_ADAPTER_HOSTNAME = "PYPNM_CMTS_ADAPTER_HOSTNAME"
+ENV_ADAPTER_READ_COMMUNITY = "PYPNM_CMTS_ADAPTER_READ_COMMUNITY"
+ENV_ADAPTER_WRITE_COMMUNITY = "PYPNM_CMTS_ADAPTER_WRITE_COMMUNITY"
+
+
+class CmtsAdapterConfig(BaseModel):
+    """Configuration for CMTS adapter selection and targeting."""
+
+    kind: AdapterKind = Field(default=AdapterKind.SNMP, description="CMTS adapter kind.")
+    cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="Index of the CMTS entry in system.json.")
+    label: str = Field(default="primary", description="Human-friendly adapter label.")
+    hostname: HostNameStr = Field(default=HostNameStr(""), description="CMTS hostname or IP address.")
+    community: SnmpReadCommunity = Field(default=DEFAULT_SNMP_COMMUNITY, description="SNMPv2c read community string.")
+    write_community: SnmpWriteCommunity = Field(default=SnmpWriteCommunity(""), description="Optional SNMPv2c write community string.")
+    port: int = Field(default=DEFAULT_SNMP_PORT, description="SNMP port for CMTS discovery.")
+
+
+class ServiceGroupDescriptor(BaseModel):
+    """Descriptor for a CMTS service group boundary."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    name: str = Field(default="", description="Service group name or label.")
+    cmts_index: int = Field(default=DEFAULT_CMTS_INDEX, description="CMTS index for the service group.")
+    enabled: bool = Field(default=True, description="Whether the service group is enabled for orchestration.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> ServiceGroupDescriptor:
+        if int(self.sg_id) <= 0:
+            raise ValueError("sg_id must be greater than zero.")
+        return self
+
+
+class SgwDiscoverySettings(BaseModel):
+    """Serving group discovery settings."""
+
+    mode: str = Field(default=DEFAULT_SGW_DISCOVERY_MODE, description="Service group discovery mode: static or snmp.")
+
+    @model_validator(mode="after")
+    def _validate_mode(self) -> SgwDiscoverySettings:
+        mode_value = str(self.mode).strip().lower()
+        if mode_value == "":
+            mode_value = DEFAULT_SGW_DISCOVERY_MODE
+        if mode_value not in SGW_DISCOVERY_MODE_OPTIONS:
+            raise ValueError("sgw.discovery.mode must be 'static' or 'snmp'.")
+        self.mode = mode_value
+        return self
+
+
+class SgwSettings(BaseModel):
+    """Serving group worker settings constrained by light/heavy refresh and cache age bounds."""
+
+    enabled: bool = Field(default=DEFAULT_SGW_ENABLED, description="Enable serving group worker orchestration.")
+    discovery: SgwDiscoverySettings = Field(default_factory=SgwDiscoverySettings, description="Serving group discovery settings.")
+    poll_heavy_seconds: int = Field(default=DEFAULT_SGW_POLL_HEAVY_SECONDS, description="Heavy inventory refresh interval in seconds.")
+    poll_light_seconds: int = Field(default=DEFAULT_SGW_POLL_LIGHT_SECONDS, description="Light state refresh interval in seconds.")
+    max_workers: int = Field(default=DEFAULT_SGW_MAX_WORKERS, description="Maximum SGW workers (0 means derive from discovery).")
+    refresh_jitter_seconds: int = Field(default=DEFAULT_SGW_REFRESH_JITTER_SECONDS, description="Jitter to stagger SGW refresh cycles.")
+    cache_max_age_seconds: int = Field(default=DEFAULT_SGW_CACHE_MAX_AGE_SECONDS, description="Maximum cache age before reporting stale.")
+
+    @model_validator(mode="after")
+    def _validate_sgw_settings(self) -> SgwSettings:
+        if int(self.poll_light_seconds) <= 0:
+            raise ValueError("sgw.poll_light_seconds must be greater than zero.")
+        if int(self.poll_heavy_seconds) <= 0:
+            raise ValueError("sgw.poll_heavy_seconds must be greater than zero.")
+        if int(self.poll_heavy_seconds) < int(self.poll_light_seconds):
+            raise ValueError("sgw.poll_heavy_seconds must be greater than or equal to sgw.poll_light_seconds.")
+        if int(self.refresh_jitter_seconds) < 0:
+            raise ValueError("sgw.refresh_jitter_seconds must be non-negative.")
+        if int(self.refresh_jitter_seconds) > int(self.poll_light_seconds):
+            raise ValueError("sgw.refresh_jitter_seconds must be less than or equal to sgw.poll_light_seconds.")
+        if int(self.cache_max_age_seconds) < int(self.poll_light_seconds):
+            raise ValueError("sgw.cache_max_age_seconds must be greater than or equal to sgw.poll_light_seconds.")
+        if int(self.max_workers) < 0:
+            raise ValueError("sgw.max_workers must be non-negative.")
+        return self
+
+
+class CmtsOrchestratorSettings(BaseModel):
+    """Top-level orchestrator settings for CMTS control boundaries."""
+
+    mode: OrchestratorMode = Field(default=DEFAULT_ORCHESTRATOR_MODE, description="Orchestrator execution mode.")
+    adapter: CmtsAdapterConfig = Field(default_factory=CmtsAdapterConfig, description="CMTS adapter configuration.")
+    service_groups: list[ServiceGroupDescriptor] = Field(default_factory=list, description="Service group descriptors.")
+    auto_discover: bool = Field(default=False, description="Enable CMTS-based service group discovery.")
+    default_tests: list[str] = Field(default_factory=list, description="Default test names for orchestration.")
+    sgw: SgwSettings = Field(default_factory=SgwSettings, description="Serving group worker settings.")
+    owner_id: OwnerId = Field(default=DEFAULT_OWNER_ID, description="Optional explicit owner id for coordination.")
+    target_service_groups: int = Field(default=DEFAULT_TARGET_SERVICE_GROUPS, description="Target number of service groups per replica.")
+    shard_mode: str = Field(default=DEFAULT_SHARD_MODE, description="Service group shard mode: sequential or score.")
+    worker_cap: int = Field(default=DEFAULT_WORKER_CAP, description="Optional cap on worker count (0 means no cap).")
+    tick_interval_seconds: float = Field(default=DEFAULT_TICK_INTERVAL_SECONDS, description="Tick interval in seconds.")
+    leader_ttl_seconds: int = Field(default=DEFAULT_LEADER_TTL_SECONDS, description="Leader election TTL in seconds.")
+    lease_ttl_seconds: int = Field(default=DEFAULT_LEASE_TTL_SECONDS, description="Service group lease TTL in seconds.")
+    state_dir: CoordinationPath = Field(default=DEFAULT_STATE_DIR, description="State directory for coordination files.")
+    election_name: CoordinationElectionName = Field(default=DEFAULT_ELECTION_NAME, description="Optional election name override.")
+
+    @model_validator(mode="after")
+    def _apply_default_tests(self) -> CmtsOrchestratorSettings:
+        if not self.default_tests:
+            self.default_tests = list(DEFAULT_TESTS)
+        if self.shard_mode not in SHARD_MODE_OPTIONS:
+            raise ValueError("shard_mode must be 'sequential' or 'score'.")
+        if int(self.target_service_groups) < 0:
+            raise ValueError("target_service_groups must be non-negative.")
+        if int(self.worker_cap) < 0:
+            raise ValueError("worker_cap must be non-negative.")
+        if float(self.tick_interval_seconds) <= 0:
+            raise ValueError("tick_interval_seconds must be greater than zero.")
+        if int(self.leader_ttl_seconds) <= 0:
+            raise ValueError("leader_ttl_seconds must be greater than zero.")
+        if int(self.lease_ttl_seconds) <= 0:
+            raise ValueError("lease_ttl_seconds must be greater than zero.")
+        if bool(self.sgw.enabled) and str(self.sgw.discovery.mode).strip().lower() == SGW_DISCOVERY_MODE_SNMP:
+            hostname_value = str(self.adapter.hostname).strip()
+            if hostname_value == "":
+                raise ValueError("adapter.hostname must be set for snmp discovery.")
+            community_value = str(self.adapter.community).strip()
+            if community_value == "":
+                raise ValueError("adapter.community must be set for snmp discovery.")
+        min_ttl = min(int(self.leader_ttl_seconds), int(self.lease_ttl_seconds))
+        if float(self.tick_interval_seconds) >= float(min_ttl):
+            raise ValueError("tick_interval_seconds must be less than leader_ttl_seconds and lease_ttl_seconds.")
+        if bool(self.auto_discover):
+            hostname_value = str(self.adapter.hostname).strip()
+            if hostname_value == "":
+                raise ValueError("adapter.hostname must be set when auto_discover is enabled.")
+            community_value = str(self.adapter.community).strip()
+            if community_value == "":
+                raise ValueError("adapter.community must be set when auto_discover is enabled.")
+        if isinstance(self.state_dir, str):
+            if self.state_dir.strip() == "":
+                raise ValueError("state_dir must be non-empty.")
+            self.state_dir = Path(self.state_dir)
+        if str(self.election_name).strip() == "":
+            self.election_name = DEFAULT_ELECTION_NAME
+        return self
+
+    @classmethod
+    def from_system_config(cls, config_path: CoordinationPath | None = None) -> CmtsOrchestratorSettings:
+        """
+        Build orchestrator configuration from system.json.
+
+        TODO (Phase-1): Expand validation once orchestration fields stabilize.
+        """
+        manager = CmtsConfigManager(config_path=config_path)
+        data = manager.get("CmtsOrchestrator")
+        payload: dict[str, object] = {}
+        if isinstance(data, dict):
+            payload = dict(data)
+
+        adapter_data = dict(payload.get("adapter", {}))
+        hostname_value = os.environ.get(ENV_ADAPTER_HOSTNAME, "").strip()
+        if hostname_value != "":
+            adapter_data["hostname"] = hostname_value
+        read_community_value = os.environ.get(ENV_ADAPTER_READ_COMMUNITY, "").strip()
+        if read_community_value != "":
+            adapter_data["community"] = read_community_value
+        write_community_value = os.environ.get(ENV_ADAPTER_WRITE_COMMUNITY, "").strip()
+        if write_community_value != "":
+            adapter_data["write_community"] = write_community_value
+        if adapter_data:
+            payload["adapter"] = adapter_data
+
+        return cls.model_validate(payload)
+
+# FILE: docs/architecture/service-group-workers.md
+# PyPNM-CMTS Architecture – Service Group Workers And Zero-Touch Operation
+
+This Document Defines The Target ("End-Game") Architecture For PyPNM-CMTS Orchestration, Including Zero-Touch (0T)
+Service Group Worker Assignment And Scale-Out Behavior.
+
+## Table Of Contents
+
+- [Scope](#scope)
+- [End Goal](#end-goal)
+- [Key Concepts](#key-concepts)
+- [Execution Roles](#execution-roles)
+- [Zero-Touch Worker Lifecycle](#zero-touch-worker-lifecycle)
+- [Coordination And Leasing](#coordination-and-leasing)
+- [Result Persistence](#result-persistence)
+- [Scaling Model](#scaling-model)
+- [Failure Handling](#failure-handling)
+- [Configuration Expectations](#configuration-expectations)
+- [SGW Discovery Modes](#sgw-discovery-modes)
+- [Implementation Notes](#implementation-notes)
+
+## Scope
+
+This Architecture Covers The PyPNM-CMTS Orchestrator And Its Interaction With Service Groups (SGs), Including:
+
+- How SGs Are Discovered (From Configuration And/Or CMTS Inventory).
+- How Work Is Assigned To Workers Using Coordination Leases.
+- How Results Are Persisted In A Deterministic, Auditable Manner.
+- How Worker Count Scales With The Number Of Service Groups.
+
+## End Goal
+
+The Production Target Is Zero-Touch (0T) Installation And Operation:
+
+- A Worker Does Not Require A Static `--sg-id` At Startup To Be Useful.
+- Workers Self-Assign Work By Participating In Coordination Leasing.
+- Adding Workers Increases Throughput Without Manual Sharding Or Per-Worker Configuration.
+
+At The Same Time, The System Supports An Explicit (Bound) Worker Mode For Debugging, Incremental Rollout, And
+Operational Override When Needed.
+
+## Key Concepts
+
+**Service Group (SG)**  
+The Fundamental Unit Of Work Scheduling. A Worker Executes Tests For One SG Per Tick (Initial Target), Producing
+Structured Results And Persisting Them Under An SG-Specific Path.
+
+**Tick**  
+A Single Iteration Of The Orchestrator: read configuration and/or inventory, execute coordination, run tests (if
+assigned), persist results, and emit a JSON status snapshot.
+
+**Lease**  
+A Time-Bounded Claim Over An SG That Grants A Worker The Right To Execute Work For That SG In The Current Tick.
+
+## Execution Roles
+
+PyPNM-CMTS Defines Three Operational Roles:
+
+### Standalone
+
+- Performs Coordination And Work In A Single Process.
+- Useful For Local Development And Single-Host Operation.
+- Runs A Tick And May Execute Work For Any SG(s) It Acquires.
+
+### Controller
+
+- Primarily Runs Coordination To Assign SG Leases.
+- May Be Extended To Publish Cluster-Wide Status (Future).
+- Does Not Necessarily Execute Work (policy-based).
+
+### Worker
+
+Two Worker Variants Are Supported:
+
+**Bound Worker (Explicit SG Assignment)**  
+- Starts With `--mode worker --sg-id <id>`.
+- Requests A Lease Only For That SG.
+- Executes Work Only For That SG When The Lease Is Held.
+
+**Unbound Worker (Zero-Touch)**  
+- Starts With `--mode worker` (no `--sg-id`).
+- Requests Leases For The Enabled SG Set.
+- Executes Work For The SG(s) It Acquires In The Current Tick.
+
+## Zero-Touch Worker Lifecycle
+
+This Is The Intended End-State Worker Behavior:
+
+1. **Boot**
+   - Load System Configuration.
+   - Build The Enabled SG Inventory.
+   - Establish The Coordination State Directory (or configured state backend).
+
+2. **Tick Start**
+   - Determine The SG Candidate Set:
+     - If Bound Worker: the single `sg_id`.
+     - If Unbound Worker: all enabled SG IDs.
+   - Submit Candidate Set To Coordination Manager.
+
+3. **Coordination**
+   - Coordination Returns `acquired_sg_ids` For The Tick.
+   - If No SG Is Acquired, Worker Performs No Work And Returns A Snapshot.
+
+4. **Work**
+   - For Each Acquired SG ID (initial policy: at most one):
+     - Execute The SG Test Plan.
+     - Build `work_results` for that SG.
+
+5. **Persist**
+   - Persist Results Only If A Lease Was Held For That SG In The Tick.
+
+6. **Emit**
+   - Emit `OrchestratorRunResultModel` JSON including:
+     - `tick_index` (coordination-driven, 1-based in-process)
+     - `lease_held` (true when at least one SG lease is held)
+     - `run_id` (populated only when work executed)
+     - `work_results` (empty when no lease held)
+
+## Coordination And Leasing
+
+Coordination Is The Gate That Makes Zero-Touch Possible.
+
+**Contract**
+- Worker Submits A Candidate SG Set.
+- Coordination Returns Which SGs Are Leased By This Worker In The Tick.
+- Work Execution Must Be Strictly Conditioned On The Lease Result.
+
+**Single-SG-Per-Tick Policy (Initial Target)**
+- Coordination Should Prefer Assigning At Most One SG Per Worker Per Tick.
+- This Matches The Deterministic Persistence Model And Simplifies Run Semantics.
+
+**Multi-SG-Per-Tick (Future Extension)**
+- Allowed Only If:
+  - The Work Pipeline Can Execute SGs Independently.
+  - Persistence Is SG-Scoped And Collision-Free.
+  - The Result Model Clearly Represents Multi-SG Runs.
+
+## Result Persistence
+
+Worker Mode Persists Results Under The Coordination State Directory:
+
+```
+<state_dir>/results/sg_<sg_id>/
+```
+
+Each File Name Is Deterministic Per Tick:
+
+```
+sg<sg_id>_tick<tick_index>_<test_name>.json
+```
+
+**Invariant**
+- Persistence Occurs Only When The Worker Holds The Lease For That SG In That Tick.
+- If The Worker Holds No Lease, No Result Files Are Written.
+
+## Scaling Model
+
+PyPNM-CMTS Is Designed To Scale With The Number Of Service Groups.
+
+### Primary Scaling Lever
+
+**SG Worker Count**
+
+- Increasing worker replicas increases the probability of concurrent SG lease coverage.
+- Target model: 1 worker can serve multiple SGs over time; N workers can serve up to N SGs concurrently per tick.
+
+### Practical Deployment Guidance
+
+- If You Have `S` Enabled Service Groups, Start With `min(S, N)` Workers Where `N` Reflects Desired Parallelism.
+- Zero-Touch Workers Remove The Need For Pre-Assigning SG IDs To Each Worker.
+
+## Failure Handling
+
+The System Must Be Safe Under Partial Failure:
+
+- If Coordination Fails: return a status snapshot with no work executed.
+- If Work Execution Fails For One SG: persist only successful results; log failure; continue operation per policy.
+- If A Worker Dies Mid-Tick: leases expire via TTL; another worker can acquire the SG in a future tick.
+
+## Configuration Expectations
+
+Zero-Touch Still Requires A Minimal Configuration Baseline:
+
+- Defined Service Groups (enabled/disabled) and orchestration policy (target service groups, shard mode).
+- A Coordination State Directory (or future shared backend) accessible to participating workers.
+- SNMP connectivity and CMTS inventory discovery prerequisites for production-grade SG enumeration.
+
+## SGW Discovery Modes
+
+This Section Defines How PyPNM-CMTS Determines The Initial Service Group Set At Startup.
+
+### Static
+
+Static Discovery Uses `sgw.discovery.static_sg_ids` (from `CmtsOrchestrator` config).
+
+- Intended For Lab, CI, Or Fixed Environments.
+- If The List Is Empty Or Missing, Discovery Returns No SGs.
+- No SNMP Calls Are Performed.
+
+### SNMP
+
+SNMP Discovery Queries The CMTS For Service Group Inventory.
+
+- Uses `CmtsOrchestrator.adapter` settings (`hostname`, `community`, `port`).
+- Startup Runs A Precheck (ICMP Ping + SNMP sysDescr) Before Discovery.
+- If Precheck Fails, SGW Startup Records A Failure And Skips Discovery.
+
+### Default Behavior
+
+If `sgw.discovery.mode` Is Missing Or Empty, The Default Is `snmp`.
+
+### Logging
+
+Startup Logs The Discovery Mode And The Derived SG Worker IDs:
+
+- `SGW discovery mode: <mode>`
+- `SGWorkerID: [sgw-<sg_id>, ...]`
+
+## Implementation Notes
+
+Serving Group Workers Maintain Cache Snapshots With Heavy And Light Refresh Lanes And Expose Cache-First Reads.
+
+To Reach And Maintain The 0T End-State, These Design Rules Apply:
+
+- Do Not Bind SG Assignment At Process Startup Unless Explicitly Requested.
+- Treat Coordination Output As The Source Of Truth For Work Eligibility.
+- Separate "Enabled Inventory" (what could be worked) From "Acquired Assignment" (what is worked this tick).
+- Keep Persistence Strictly Lease-Gated To Avoid Duplicate Or Conflicting Outputs.
+
+## Startup Integration
+
+- On Serve Or Combined Startup, Discover The Enabled SG Set Before Spawning SGWs.
+- SGW Manager Starts One Worker Per sg_id (Capped By Max Workers) And Primes Each Cache Before Readiness Is Reported.
+- Cache-First API Responses Must Not Trigger Implicit SNMP Walks; Discovery + SGW Priming Are The Gate For /ops/ready.
+
+# FILE: tests/test_sgw_settings.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.orchestrator.models import (
+    SGW_LAST_ERROR_MAX_LENGTH,
+    SgwCacheMetadataModel,
+    SgwRefreshState,
+)
+
+def _adapter_payload() -> dict[str, object]:
+    return {"adapter": {"hostname": "cmts.example", "community": "public"}}
+
+
+def test_sgw_settings_defaults() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(_adapter_payload())
+    sgw = settings.sgw
+    assert sgw.enabled is True
+    assert int(sgw.poll_light_seconds) == 300
+    assert int(sgw.poll_heavy_seconds) == 900
+    assert int(sgw.refresh_jitter_seconds) == 30
+    assert int(sgw.cache_max_age_seconds) == 1200
+    assert int(sgw.max_workers) == 0
+    assert sgw.discovery.mode == "snmp"
+
+
+def test_sgw_settings_rejects_non_positive_light_poll() -> None:
+    with pytest.raises(ValueError, match="sgw.poll_light_seconds must be greater than zero."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"poll_light_seconds": 0}}
+        )
+
+
+def test_sgw_settings_rejects_heavy_less_than_light() -> None:
+    with pytest.raises(ValueError, match="sgw.poll_heavy_seconds must be greater than or equal to sgw.poll_light_seconds."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"poll_light_seconds": 300, "poll_heavy_seconds": 60}}
+        )
+
+
+def test_sgw_settings_rejects_excessive_jitter() -> None:
+    with pytest.raises(ValueError, match="sgw.refresh_jitter_seconds must be less than or equal to sgw.poll_light_seconds."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"poll_light_seconds": 300, "refresh_jitter_seconds": 301}}
+        )
+
+
+def test_sgw_settings_rejects_negative_max_workers() -> None:
+    with pytest.raises(ValueError, match="sgw.max_workers must be non-negative."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"max_workers": -1}}
+        )
+
+
+def test_sgw_settings_rejects_invalid_discovery_mode() -> None:
+    with pytest.raises(ValueError, match="sgw.discovery.mode must be 'static' or 'snmp'."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"discovery": {"mode": "invalid"}}}
+        )
+
+
+def test_sgw_settings_snmp_requires_hostname_and_community() -> None:
+    base_payload = {
+        "sgw": {"discovery": {"mode": "snmp"}},
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+        },
+    }
+    with pytest.raises(ValueError, match="adapter.hostname must be set for snmp discovery."):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                **base_payload,
+                "adapter": {"hostname": "", "community": "public"},
+            }
+        )
+    with pytest.raises(ValueError, match="adapter.community must be set for snmp discovery."):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                **base_payload,
+                "adapter": {"hostname": "cmts.example", "community": ""},
+            }
+        )
+    settings = CmtsOrchestratorSettings.model_validate(base_payload)
+    assert settings.sgw.discovery.mode == "snmp"
+
+
+def test_sgw_settings_rejects_small_cache_max_age() -> None:
+    with pytest.raises(ValueError, match="sgw.cache_max_age_seconds must be greater than or equal to sgw.poll_light_seconds."):
+        CmtsOrchestratorSettings.model_validate(
+            {**_adapter_payload(), "sgw": {"poll_light_seconds": 300, "cache_max_age_seconds": 200}}
+        )
+
+
+def test_sgw_settings_accepts_poll_heavy_equal_to_light() -> None:
+    poll_seconds = 300
+    settings = CmtsOrchestratorSettings.model_validate(
+        {**_adapter_payload(), "sgw": {"poll_light_seconds": poll_seconds, "poll_heavy_seconds": poll_seconds}}
+    )
+    assert int(settings.sgw.poll_heavy_seconds) == poll_seconds
+
+
+def test_sgw_settings_accepts_max_jitter_equal_to_light() -> None:
+    poll_seconds = 300
+    settings = CmtsOrchestratorSettings.model_validate(
+        {**_adapter_payload(), "sgw": {"poll_light_seconds": poll_seconds, "refresh_jitter_seconds": poll_seconds}}
+    )
+    assert int(settings.sgw.refresh_jitter_seconds) == poll_seconds
+
+
+def test_sgw_settings_accepts_zero_jitter() -> None:
+    poll_seconds = 300
+    jitter_seconds = 0
+    settings = CmtsOrchestratorSettings.model_validate(
+        {**_adapter_payload(), "sgw": {"poll_light_seconds": poll_seconds, "refresh_jitter_seconds": jitter_seconds}}
+    )
+    assert int(settings.sgw.refresh_jitter_seconds) == jitter_seconds
+
+
+def test_sgw_settings_accepts_cache_max_age_equal_to_light() -> None:
+    poll_seconds = 300
+    settings = CmtsOrchestratorSettings.model_validate(
+        {**_adapter_payload(), "sgw": {"poll_light_seconds": poll_seconds, "cache_max_age_seconds": poll_seconds}}
+    )
+    assert int(settings.sgw.cache_max_age_seconds) == poll_seconds
+
+
+def test_sgw_cache_metadata_refresh_state_values() -> None:
+    for value in (SgwRefreshState.OK, SgwRefreshState.STALE, SgwRefreshState.ERROR):
+        model = SgwCacheMetadataModel(refresh_state=value)
+        assert model.refresh_state == value
+
+    for value in ("OK", "STALE", "ERROR"):
+        model = SgwCacheMetadataModel(refresh_state=value)
+        assert model.refresh_state.value == value
+
+
+def test_sgw_cache_metadata_rejects_long_error() -> None:
+    too_long = "a" * (SGW_LAST_ERROR_MAX_LENGTH + 1)
+    with pytest.raises(ValidationError):
+        SgwCacheMetadataModel(last_error=too_long)
+
+# FILE: tests/test_sgw_manager_stop.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import threading
+import time
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_sgw_manager_stop_unblocks_wait() -> None:
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    settings.sgw.poll_light_seconds = 5.0
+    manager = SgwManager(settings=settings, store=store, service_groups=[ServiceGroupId(1)])
+
+    thread = threading.Thread(target=manager.refresh_forever, daemon=True)
+    thread.start()
+    time.sleep(0.01)
+
+    start = time.monotonic()
+    manager.stop()
+    thread.join(timeout=1.0)
+    duration = time.monotonic() - start
+
+    assert not thread.is_alive()
+    assert duration < 1.0
+
+# FILE: tests/test_sgw_manager_stop_prestart.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+from __future__ import annotations
+
+import threading
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_sgw_manager_stop_before_start_unblocks_immediately() -> None:
+    """
+    Ensure that if `stop()` is called before `refresh_forever()` starts,
+    the manager does not clear the stop event and will not start a long-running loop.
+    """
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    # Make the sleep interval long to detect blocking if stop-not-respected
+    settings.sgw.poll_light_seconds = 5.0
+    manager = SgwManager(settings=settings, store=store, service_groups=[ServiceGroupId(1)])
+
+    # Request stop before starting the thread
+    manager.stop()
+
+    thread = threading.Thread(target=manager.refresh_forever, daemon=True)
+    thread.start()
+
+    # Allow a sliver of time for thread to run/exit
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+
+# FILE: tests/test_sgw_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+)
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+SG_ID_ONE = ServiceGroupId(1)
+SG_ID_TWO = ServiceGroupId(2)
+DISCOVERED_SG_IDS = [SG_ID_ONE, SG_ID_TWO]
+SNAPSHOT_TIME_EPOCH = 1000.0
+AGE_SECONDS = 10.0
+
+
+async def _noop() -> None:
+    return
+
+
+def _disable_startup(monkeypatch: object) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", _noop)
+
+
+def _seed_store(
+    store: SgwCacheStore,
+    sg_id: ServiceGroupId,
+    modems: list[SgwCableModemModel],
+    ds_channels: SgwChannelSummaryModel | None = None,
+    us_channels: SgwChannelSummaryModel | None = None,
+) -> None:
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=SNAPSHOT_TIME_EPOCH,
+        age_seconds=AGE_SECONDS,
+    )
+    snapshot = SgwSnapshotModel(
+        sg_id=sg_id,
+        ds_channels=ds_channels or SgwChannelSummaryModel(),
+        us_channels=us_channels or SgwChannelSummaryModel(),
+        cable_modems=modems,
+        metadata=metadata,
+    )
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+
+def _configure_runtime_state(store: SgwCacheStore, sg_ids: list[ServiceGroupId]) -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, SNAPSHOT_TIME_EPOCH)
+
+
+def test_serving_group_ids_returns_cache_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _seed_store(store, SG_ID_TWO, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/get/ids")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert payload["sgw_ready"] is True
+        summaries = payload["summaries"]
+        assert len(summaries) == 2
+        assert summaries[0]["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_ids_post_accepts_empty_body(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _seed_store(store, SG_ID_TWO, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/ids", json={})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert len(payload["summaries"]) == 2
+
+
+@pytest.mark.unit
+def test_serving_group_status_reports_cache_readiness(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["discovered_count"] == len(DISCOVERED_SG_IDS)
+        assert payload["cache_ready"] is False
+        assert payload["missing_sg_ids"] == [int(SG_ID_TWO)]
+        assert payload["refresh_running"] is False
+
+
+def test_serving_group_ids_not_ready_returns_success(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/get/ids")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sgw_ready"] is False
+        assert "sgw cache not ready" in payload["message"]
+        summaries = payload["summaries"]
+        assert summaries[1]["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert summaries[1]["metadata"]["last_error"] != ""
+
+
+def test_serving_group_ids_missing_store_returns_error_metadata(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.serving_group.service.get_sgw_store", lambda: None)
+
+    with TestClient(app) as client:
+        response = client.get("/cmts/servingGroup/get/ids")
+        assert response.status_code == 200
+        payload = response.json()
+        summaries = payload["summaries"]
+        assert summaries[0]["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert summaries[0]["metadata"]["last_error"] != ""
+
+
+def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_one = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+    ]
+    modems_two = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_one)
+    _seed_store(store, SG_ID_TWO, modems_two)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/cableModems", json={"cmts": {}})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["total_count"] == 2
+        assert payload["sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+
+
+def test_serving_group_cable_modems_filters_by_sg_and_mac(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_one = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff"),
+    ]
+    modems_two = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_one)
+    _seed_store(store, SG_ID_TWO, modems_two)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "cmts": {
+                    "serving_group": {"id": [int(SG_ID_ONE)]},
+                    "cable_modem": {"mac_address": ["aa:bb:cc:dd:ee:ff"]},
+                },
+                "page": 1,
+                "page_size": 10,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sg_id"] == int(SG_ID_ONE)
+        assert payload["total_count"] == 1
+        assert [item["mac"] for item in payload["items"]] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_serving_group_cable_modems_pagination(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    page_one = 1
+    page_two = 2
+    page_size = 2
+    total_count = 3
+    modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:03"),
+    ]
+    _seed_store(store, sg_id, modems)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_one, "page_size": page_size},
+        )
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["total_count"] == total_count
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:01",
+            "aa:bb:cc:dd:ee:02",
+        ]
+
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": page_two, "page_size": page_size},
+        )
+        payload = response.json()
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:03",
+        ]
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_cable_modems_missing_store_returns_error(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(SG_ID_ONE), "page": 1, "page_size": 1},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert payload["metadata"]["last_error"] != ""
+
+
+def test_serving_group_topology_requires_sg_id(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/servingGroup/get/topology", json={})
+        assert response.status_code == 422
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={"cmts": {"serving_group": {"id": []}}},
+        )
+        assert response.status_code == 422
+
+
+def test_serving_group_topology_returns_summary(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_TWO
+    ds_channel_count = 1
+    us_channel_count = 2
+    ds_channel_id = 100
+    us_channel_id_primary = 200
+    us_channel_id_secondary = 201
+    ds_channels = SgwChannelSummaryModel(count=ds_channel_count, channel_ids=[ds_channel_id])
+    us_channels = SgwChannelSummaryModel(count=us_channel_count, channel_ids=[us_channel_id_primary, us_channel_id_secondary])
+    _seed_store(store, sg_id, [], ds_channels=ds_channels, us_channels=us_channels)
+    _configure_runtime_state(store, [sg_id])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={"cmts": {"serving_group": {"id": [int(sg_id)]}}},
+        )
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["topology"]["ds_channels"]["count"] == ds_channel_count
+        assert payload["topology"]["us_channels"]["count"] == us_channel_count
+        assert payload["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
+
+
+def test_serving_group_cable_modems_aggregate_dedupes(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    modems_sg1 = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+    ]
+    modems_sg2 = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:03"),
+    ]
+    _seed_store(store, SG_ID_ONE, modems_sg1)
+    _seed_store(store, SG_ID_TWO, modems_sg2)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": 0, "page": 1, "page_size": 10},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        assert [item["mac"] for item in payload["items"]] == [
+            "aa:bb:cc:dd:ee:01",
+            "aa:bb:cc:dd:ee:02",
+            "aa:bb:cc:dd:ee:03",
+        ]
+
+
+def test_serving_group_topology_rejects_multiple_sg_ids(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    ds_channels_sg1 = SgwChannelSummaryModel(count=2, channel_ids=[100, 101])
+    us_channels_sg1 = SgwChannelSummaryModel(count=1, channel_ids=[200])
+    ds_channels_sg2 = SgwChannelSummaryModel(count=2, channel_ids=[101, 102])
+    us_channels_sg2 = SgwChannelSummaryModel(count=2, channel_ids=[200, 201])
+    _seed_store(store, SG_ID_ONE, [], ds_channels=ds_channels_sg1, us_channels=us_channels_sg1)
+    _seed_store(store, SG_ID_TWO, [], ds_channels=ds_channels_sg2, us_channels=us_channels_sg2)
+    _configure_runtime_state(store, DISCOVERED_SG_IDS)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/topology",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE), int(SG_ID_TWO)]}}},
+        )
+        assert response.status_code == 422
+
+
+def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    now_epoch = SNAPSHOT_TIME_EPOCH + 5.0
+    _seed_store(store, sg_id, [])
+    _configure_runtime_state(store, [sg_id])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={"sg_id": int(sg_id), "page": 1, "page_size": 1},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["metadata"]["age_seconds"] == 5.0
+        entry = store.get_entry(sg_id)
+        assert entry is not None
+        assert entry.snapshot.metadata.age_seconds == AGE_SECONDS
+
+
+def test_serving_group_refresh_waits_for_snapshot(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    sg_id = SG_ID_ONE
+    now_epoch = SNAPSHOT_TIME_EPOCH
+    new_epoch = SNAPSHOT_TIME_EPOCH + 5.0
+    _seed_store(store, sg_id, [])
+    _configure_runtime_state(store, [sg_id])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+    monotonic_calls = {"value": 0.0}
+
+    def _monotonic() -> float:
+        monotonic_calls["value"] += 0.2
+        return monotonic_calls["value"]
+
+    def _sleep(_seconds: float) -> None:
+        entry = store.get_entry(sg_id)
+        assert entry is not None
+        metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": new_epoch})
+        entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+        store.upsert_entry(entry)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._monotonic",
+        staticmethod(_monotonic),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._sleep",
+        staticmethod(_sleep),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(sg_id),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+                "require_fresh": True,
+                "max_wait_seconds": 1.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is True
+        assert payload["waited_seconds"] > 0.0
+        assert payload["metadata"]["snapshot_time_epoch"] == new_epoch
+
+
+def test_serving_group_refresh_rate_limited(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    poll_heavy_seconds = int(settings.sgw.poll_heavy_seconds)
+    now_epoch = SNAPSHOT_TIME_EPOCH
+    last_heavy_epoch = now_epoch - float(poll_heavy_seconds) + 1.0
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=SNAPSHOT_TIME_EPOCH,
+        age_seconds=AGE_SECONDS,
+        last_heavy_refresh_epoch=last_heavy_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=SG_ID_ONE, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=SG_ID_ONE, snapshot=snapshot))
+    manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+                "require_fresh": False,
+                "max_wait_seconds": 0.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is False
+        assert payload["metadata"]["refresh_state"] == SgwRefreshState.ERROR.value
+        assert "rate limited" in payload["metadata"]["last_error"]
+
+
+def test_serving_group_refresh_none_does_not_request(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+
+    def _request_refresh(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+        raise AssertionError("request_refresh should not be called for refresh=NONE")
+
+    monkeypatch.setattr(manager, "request_refresh", _request_refresh)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.NONE.value,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is False
+
+
+def test_serving_group_refresh_light_requests_manager(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID_ONE])
+    set_sgw_startup_success([SG_ID_ONE], store, manager, SNAPSHOT_TIME_EPOCH)
+    refresh_calls: list[tuple[ServiceGroupId, CacheRefreshMode, float]] = []
+
+    def _request_refresh(
+        sg_id: ServiceGroupId,
+        mode: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        refresh_calls.append((sg_id, mode, now_epoch))
+        return (True, "")
+
+    monkeypatch.setattr(manager, "request_refresh", _request_refresh)
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        staticmethod(lambda: SNAPSHOT_TIME_EPOCH),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_ONE),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.LIGHT.value,
+                "require_fresh": False,
+                "max_wait_seconds": 0.0,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["refresh_applied"] is True
+        assert refresh_calls == [(SG_ID_ONE, CacheRefreshMode.LIGHT, SNAPSHOT_TIME_EPOCH)]
+
+
+def test_serving_group_refresh_unknown_sg_id_rejected(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [])
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "sg_id": int(SG_ID_TWO),
+                "page": 1,
+                "page_size": 1,
+                "refresh": CacheRefreshMode.HEAVY.value,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["refresh_applied"] is False
+        assert "sg_id not found" in payload["message"]
+
+# FILE: tests/test_sgw_store_aliasing.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import threading
+from queue import SimpleQueue
+
+import pytest
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+)
+from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_service_response_mutation_does_not_alias_store() -> None:
+    reset_sgw_runtime_state()
+    try:
+        service = ServingGroupCacheService()
+        store = SgwCacheStore()
+        settings = CmtsOrchestratorSettings.model_validate(
+            {"adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
+        sg_id = ServiceGroupId(1)
+        metadata = SgwCacheMetadataModel(snapshot_time_epoch=1_000.0, age_seconds=0.0)
+        snapshot = SgwSnapshotModel(
+            sg_id=sg_id,
+            metadata=metadata,
+            cable_modems=[
+                SgwCableModemModel(
+                    mac="aa:bb:cc:dd:ee:ff",
+                    ipv4="192.168.0.100",
+                    ipv6="2001:db8::1",
+                )
+            ],
+        )
+        store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+        manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
+        set_sgw_startup_success([sg_id], store, manager, 1_000.0)
+
+        request = GetServingGroupCableModemsRequest(
+            sg_id=sg_id,
+            page=1,
+            page_size=10,
+        )
+        response = service.get_cable_modems(request)
+        response.items.append(
+            SgwCableModemModel(
+                mac="aa:bb:cc:dd:ee:01",
+                ipv4="192.168.0.101",
+                ipv6="2001:db8::2",
+            )
+        )
+        response.metadata.last_error = "mutated"
+
+        stored = store.get_entry(sg_id)
+        assert stored is not None
+        assert len(stored.snapshot.cable_modems) == 1
+        assert stored.snapshot.metadata.last_error in ("", None)
+    finally:
+        reset_sgw_runtime_state()
+
+
+@pytest.mark.unit
+def test_concurrent_refresh_and_reads_do_not_alias_or_throw() -> None:
+    reset_sgw_runtime_state()
+    try:
+        store = SgwCacheStore()
+        settings = CmtsOrchestratorSettings.model_validate(
+            {
+                "adapter": {"hostname": "cmts.example", "community": "public"},
+                "sgw": {
+                    "poll_light_seconds": 1,
+                    "poll_heavy_seconds": 1,
+                    "refresh_jitter_seconds": 0,
+                }
+            }
+        )
+        sg_id = ServiceGroupId(2)
+        payload = SgwSnapshotPayloadModel(
+            cable_modems=[
+                SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.111", ipv6="2001:db8::11"),
+                SgwCableModemModel(mac="aa:bb:cc:dd:ee:03", ipv4="192.168.0.112", ipv6="2001:db8::12"),
+            ],
+        )
+
+        def _heavy(_sg_id: ServiceGroupId, _settings: CmtsOrchestratorSettings) -> SgwSnapshotPayloadModel:
+            return payload.model_copy(deep=True)
+
+        def _light(
+            _sg_id: ServiceGroupId,
+            _settings: CmtsOrchestratorSettings,
+            cable_modems: list[SgwCableModemModel],
+        ) -> list[SgwCableModemModel]:
+            return [
+                SgwCableModemModel(
+                    mac=modem.mac,
+                    ipv4=modem.ipv4,
+                    ipv6=modem.ipv6,
+                )
+                for modem in cable_modems
+            ]
+
+        manager = SgwManager(
+            settings=settings,
+            store=store,
+            service_groups=[sg_id],
+            jitter_provider=lambda *_args: 0,
+            heavy_poller=_heavy,
+            light_poller=_light,
+        )
+        set_sgw_startup_success([sg_id], store, manager, 1_000.0)
+        service = ServingGroupCacheService()
+        exceptions = SimpleQueue()
+
+        def _writer() -> None:
+            try:
+                for idx in range(30):
+                    manager.refresh_once(1_000.0 + float(idx))
+            except BaseException as exc:
+                exceptions.put(exc)
+
+        def _reader() -> None:
+            try:
+                for _ in range(100):
+                    store.get_ids()
+                    entry = store.get_entry(sg_id)
+                    if entry is not None:
+                        _ = entry.snapshot.metadata.snapshot_time_epoch
+                    request = GetServingGroupCableModemsRequest(
+                        sg_id=sg_id,
+                        page=1,
+                        page_size=10,
+                    )
+                    response = service.get_cable_modems(request)
+                    assert response.sg_id == sg_id
+            except BaseException as exc:
+                exceptions.put(exc)
+
+        writer_thread = threading.Thread(target=_writer)
+        reader_thread = threading.Thread(target=_reader)
+        writer_thread.start()
+        reader_thread.start()
+        writer_thread.join(timeout=3.0)
+        reader_thread.join(timeout=3.0)
+
+        assert not writer_thread.is_alive()
+        assert not reader_thread.is_alive()
+        assert exceptions.empty()
+
+        entry = store.get_entry(sg_id)
+        assert entry is not None
+        macs = [str(modem.mac) for modem in entry.snapshot.cable_modems]
+        assert macs == ["aa:bb:cc:dd:ee:02", "aa:bb:cc:dd:ee:03"]
+    finally:
+        reset_sgw_runtime_state()
+
+# FILE: tests/test_sgw_background_refresh.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from threading import Event
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.runtime_state import (
+    is_sgw_refresh_running,
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+    start_sgw_background_refresh,
+    stop_sgw_background_refresh,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+START_TIMEOUT_SECONDS = 0.5
+STOP_TIMEOUT_SECONDS = 0.5
+STARTUP_REFRESH_EPOCH = 0.0
+
+
+def test_sgw_background_refresh_start_stop(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=[])
+    started = Event()
+    stopped = Event()
+
+    def _refresh_forever(*_args: object, **_kwargs: object) -> list[object]:
+        started.set()
+        stopped.wait(timeout=START_TIMEOUT_SECONDS)
+        return []
+
+    def _stop() -> None:
+        stopped.set()
+
+    monkeypatch.setattr(manager, "refresh_forever", _refresh_forever)
+    monkeypatch.setattr(manager, "stop", _stop)
+
+    set_sgw_startup_success([], store, manager, STARTUP_REFRESH_EPOCH)
+
+    assert start_sgw_background_refresh() is True
+    assert started.wait(timeout=START_TIMEOUT_SECONDS)
+    assert is_sgw_refresh_running() is True
+
+    stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
+    assert stopped.is_set() is True
+    assert is_sgw_refresh_running() is False
+
+
+def test_sgw_background_refresh_restart_clears_stop(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=[])
+    started = Event()
+    stopped = Event()
+    reset_calls = {"count": 0}
+    original_reset_stop = manager.reset_stop
+
+    def _refresh_forever(*_args: object, **_kwargs: object) -> list[object]:
+        started.set()
+        stopped.wait(timeout=START_TIMEOUT_SECONDS)
+        return []
+
+    def _stop() -> None:
+        stopped.set()
+
+    def _reset_stop() -> None:
+        reset_calls["count"] += 1
+        original_reset_stop()
+
+    monkeypatch.setattr(manager, "refresh_forever", _refresh_forever)
+    monkeypatch.setattr(manager, "stop", _stop)
+    monkeypatch.setattr(manager, "reset_stop", _reset_stop)
+
+    set_sgw_startup_success([], store, manager, STARTUP_REFRESH_EPOCH)
+
+    assert start_sgw_background_refresh() is True
+    assert started.wait(timeout=START_TIMEOUT_SECONDS)
+    assert is_sgw_refresh_running() is True
+    stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
+    assert stopped.is_set() is True
+    assert is_sgw_refresh_running() is False
+
+    started.clear()
+    stopped.clear()
+    assert start_sgw_background_refresh() is True
+    assert started.wait(timeout=START_TIMEOUT_SECONDS)
+    assert is_sgw_refresh_running() is True
+    stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
+    assert stopped.is_set() is True
+    assert is_sgw_refresh_running() is False
+    assert reset_calls["count"] == 2
+
+# FILE: tests/test_sgw_observability.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import (
+    REFRESH_MODE_HEAVY,
+    REFRESH_MODE_LIGHT,
+    REFRESH_MODE_NONE,
+    REFRESH_RESULT_ERROR,
+    REFRESH_RESULT_OK,
+    REFRESH_RESULT_STALE,
+    SgwManager,
+)
+from pypnm_cmts.sgw.metrics import InMemorySgwMetrics
+from pypnm_cmts.sgw.models import (
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    sg_id = ServiceGroupId(21)
+    store = SgwCacheStore()
+    metrics = InMemorySgwMetrics()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: SgwSnapshotPayloadModel(),
+        metrics=metrics,
+    )
+
+    caplog.set_level(logging.INFO)
+    manager.refresh_once(1_000.0)
+
+    records = [record for record in caplog.records if record.name == "SgwManager"]
+    assert records
+    record = records[0]
+    assert record.sg_id == int(sg_id)
+    assert record.refresh_mode in (REFRESH_MODE_HEAVY, REFRESH_MODE_LIGHT, REFRESH_MODE_NONE)
+    assert record.duration_ms >= 0.0
+    assert record.result in (REFRESH_RESULT_OK, REFRESH_RESULT_ERROR, REFRESH_RESULT_STALE)
+    assert record.snapshot_time_epoch >= 0.0
+    assert record.age_seconds >= 0.0
+
+
+@pytest.mark.unit
+def test_sgw_manager_metrics_capture_refresh_and_stale() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "adapter": {"hostname": "cmts.example", "community": "public"},
+            "sgw": {
+                "cache_max_age_seconds": 1,
+                "poll_light_seconds": 1,
+                "poll_heavy_seconds": 1,
+                "refresh_jitter_seconds": 0,
+            }
+        }
+    )
+    sg_id = ServiceGroupId(22)
+    store = SgwCacheStore()
+    metrics = InMemorySgwMetrics()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: SgwSnapshotPayloadModel(),
+        metrics=metrics,
+    )
+
+    manager.refresh_once(1_000.0)
+
+    now_epoch = 1_005.0
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=1.0,
+        last_heavy_refresh_epoch=now_epoch,
+        last_light_refresh_epoch=now_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+    manager.refresh_once(now_epoch)
+
+    assert metrics.refresh_durations_ms.get(REFRESH_MODE_HEAVY)
+    assert metrics.staleness_count >= 1
+
+# FILE: tests/test_sgw_worker.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.worker import ServingGroupWorker
+from pypnm_cmts.sgw.worker_models import (
+    InventoryResultModel,
+    RefreshState,
+    StateResultModel,
+)
+
+
+class FakeClock:
+    def __init__(self, start: datetime) -> None:
+        self._now = start
+
+    def now(self) -> datetime:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now = self._now + timedelta(seconds=float(seconds))
+
+
+class FakeCmtsServingGroupClient:
+    def __init__(
+        self,
+        inventory: InventoryResultModel,
+        state: StateResultModel,
+        fail_inventory: bool = False,
+        fail_state: bool = False,
+    ) -> None:
+        self._inventory = inventory
+        self._state = state
+        self._fail_inventory = fail_inventory
+        self._fail_state = fail_state
+
+    async def fetch_inventory(self, _sg_id: ServiceGroupId) -> InventoryResultModel:
+        if self._fail_inventory:
+            raise RuntimeError("inventory failure")
+        return self._inventory
+
+    async def fetch_state(
+        self,
+        _sg_id: ServiceGroupId,
+        _inventory: InventoryResultModel,
+    ) -> StateResultModel:
+        if self._fail_state:
+            raise RuntimeError("state failure")
+        return self._state
+
+
+def _build_worker(
+    clock: FakeClock,
+    client: FakeCmtsServingGroupClient,
+) -> ServingGroupWorker:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    return ServingGroupWorker(
+        sg_id=ServiceGroupId(1),
+        client=client,
+        clock=clock,
+        settings=settings,
+    )
+
+
+def test_serving_group_worker_cache_first_snapshot() -> None:
+    start = datetime(2026, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
+    clock = FakeClock(start)
+    client = FakeCmtsServingGroupClient(
+        inventory=InventoryResultModel(modem_count=0),
+        state=StateResultModel(updated_count=0),
+    )
+    worker = _build_worker(clock, client)
+
+    snapshot = worker.get_snapshot()
+    assert snapshot.modem_count == 0
+    assert snapshot.refresh_state == RefreshState.IDLE
+    assert snapshot.age_seconds == 0.0
+
+    clock.advance(5.0)
+    snapshot = worker.get_snapshot()
+    assert snapshot.age_seconds == 5.0
+
+
+def test_serving_group_worker_heavy_refresh_success() -> None:
+    start = datetime(2026, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
+    clock = FakeClock(start)
+    client = FakeCmtsServingGroupClient(
+        inventory=InventoryResultModel(modem_count=7),
+        state=StateResultModel(updated_count=0),
+    )
+    worker = _build_worker(clock, client)
+
+    clock.advance(10.0)
+    snapshot = asyncio.run(worker.tick_heavy())
+
+    assert snapshot.modem_count == 7
+    assert snapshot.snapshot_time == clock.now()
+    assert snapshot.refresh_state == RefreshState.IDLE
+    assert snapshot.heavy_refresh.state == RefreshState.IDLE
+    assert snapshot.heavy_refresh.last_error == ""
+
+
+def test_serving_group_worker_light_refresh_success_independent() -> None:
+    start = datetime(2026, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
+    clock = FakeClock(start)
+    client = FakeCmtsServingGroupClient(
+        inventory=InventoryResultModel(modem_count=3),
+        state=StateResultModel(updated_count=2),
+    )
+    worker = _build_worker(clock, client)
+
+    clock.advance(5.0)
+    heavy_snapshot = asyncio.run(worker.tick_heavy())
+    heavy_time = heavy_snapshot.heavy_refresh.last_success_time
+
+    clock.advance(5.0)
+    light_snapshot = asyncio.run(worker.tick_light())
+
+    assert light_snapshot.light_refresh.state == RefreshState.IDLE
+    assert light_snapshot.light_refresh.last_error == ""
+    assert light_snapshot.light_refresh.last_success_time == clock.now()
+    assert light_snapshot.heavy_refresh.last_success_time == heavy_time
+
+
+def test_serving_group_worker_heavy_refresh_failure() -> None:
+    start = datetime(2026, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
+    clock = FakeClock(start)
+    client = FakeCmtsServingGroupClient(
+        inventory=InventoryResultModel(modem_count=0),
+        state=StateResultModel(updated_count=0),
+        fail_inventory=True,
+    )
+    worker = _build_worker(clock, client)
+
+    snapshot = asyncio.run(worker.tick_heavy())
+
+    assert snapshot.refresh_state == RefreshState.ERROR
+    assert snapshot.heavy_refresh.state == RefreshState.ERROR
+    assert snapshot.heavy_refresh.last_error != ""
+
+# FILE: tests/test_orchestrator_settings.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import json
+import sys
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+
+from pypnm_cmts.cli import EXIT_CODE_USAGE, _build_launcher, _build_parser, _run_cli
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.coordination.models import CoordinationTickResultModel
+from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
+
+
+def test_default_tests_fallback_when_missing() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    assert settings.default_tests == ["ds_ofdm_rxmer"]
+
+
+def test_default_tests_fallback_when_empty() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"default_tests": [], "adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    assert settings.default_tests == ["ds_ofdm_rxmer"]
+
+
+def test_worker_mode_allows_unbound(monkeypatch: object, tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
+    class _Args:
+        command = "run"
+        mode = "worker"
+        config = str(config_path)
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher.run_once",
+        lambda self: _build_minimal_run_result(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+
+
+def test_orchestrator_settings_invalid_shard_mode_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(
+            {"shard_mode": "invalid", "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
+
+
+def test_orchestrator_settings_negative_target_service_groups_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(
+            {"target_service_groups": -1, "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
+
+
+def test_orchestrator_settings_negative_worker_cap_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(
+            {"worker_cap": -1, "adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
+
+
+def test_cli_snmp_port_override_passed_to_launcher(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = 1161
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] == 1161
+
+
+def test_cli_snmp_port_omitted_uses_config_default(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = None
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] is None
+
+
+def test_cli_cmts_port_alias_parses_into_snmp_port() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(["run", "--mode", "standalone", "--cmts-port", "1161"])
+    assert args.snmp_port == 1161
+
+
+def test_cli_snmp_port_takes_precedence_over_cmts_port(monkeypatch: object) -> None:
+    captured: dict[str, int | None] = {}
+
+    class _FakeLauncher:
+        def __init__(self, *args: object, adapter_port: int | None = None, **kwargs: object) -> None:
+            captured["adapter_port"] = adapter_port
+
+    monkeypatch.setattr("pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher", _FakeLauncher)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pypnm-cmts", "run", "--mode", "standalone", "--snmp-port", "1161", "--cmts-port", "2000"],
+    )
+    monkeypatch.setattr("pypnm_cmts.cli._cmts_port_warned", True)
+
+    class _Args:
+        mode = "standalone"
+        config = ""
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = ""
+        election_name = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        snmp_port: int | None = 2000
+
+    _build_launcher(_Args())
+    assert captured["adapter_port"] == 1161
+
+
+def _write_system_config(path: Path, enabled: bool = True) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "service_groups": [
+                {"sg_id": 1, "name": "sg-1", "enabled": enabled},
+            ],
+            "target_service_groups": 1,
+            "shard_mode": "sequential",
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _build_minimal_run_result() -> OrchestratorRunResultModel:
+    payload = {
+        "mode": "standalone",
+        "tick_index": 1,
+        "run_id": "",
+        "lease_held": False,
+        "inventory": {
+            "sg_ids": [],
+            "count": 0,
+            "source": "config",
+        },
+        "coordination_tick": {},
+        "coordination_status": {},
+        "leader_status": {},
+        "target_service_groups": 0,
+        "work_results": [],
+    }
+    return OrchestratorRunResultModel.model_validate(payload)
+
+
+def test_cli_worker_rejects_non_numeric_sg_id(monkeypatch: object, tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
+    class _Args:
+        command = "run"
+        mode = "worker"
+        config = str(config_path)
+        sg_id = "sg-1"
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = str(tmp_path / "coordination")
+        election_name = ""
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == EXIT_CODE_USAGE
+
+
+def test_cli_worker_rejects_sg_id_not_enabled(monkeypatch: object, tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=False)
+
+    class _Args:
+        command = "run"
+        mode = "worker"
+        config = str(config_path)
+        sg_id = "1"
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds: float | None = None
+        leader_ttl_seconds: int | None = None
+        lease_ttl_seconds: int | None = None
+        state_dir = str(tmp_path / "coordination")
+        election_name = ""
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == EXIT_CODE_USAGE
+
+
+def test_orchestrator_settings_tick_interval_validation_raises() -> None:
+    with pytest.raises(ValueError, match="tick_interval_seconds must be less than"):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                "tick_interval_seconds": 10,
+                "leader_ttl_seconds": 10,
+                "lease_ttl_seconds": 10,
+                "adapter": {"hostname": "cmts.example", "community": "public"},
+            }
+        )
+
+
+def test_orchestrator_settings_tick_interval_valid() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "tick_interval_seconds": 1,
+            "leader_ttl_seconds": 10,
+            "lease_ttl_seconds": 10,
+            "adapter": {"hostname": "cmts.example", "community": "public"},
+        }
+    )
+    assert float(settings.tick_interval_seconds) == 1.0
+
+
+def test_cli_rejects_invalid_tick_interval(monkeypatch: object, tmp_path: Path) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
+    class _Args:
+        command = "run"
+        mode = "standalone"
+        config = str(config_path)
+        sg_id = ""
+        owner_id = ""
+        target_service_groups: int | None = None
+        shard_mode: str | None = None
+        tick_interval_seconds = 10.0
+        leader_ttl_seconds = 10
+        lease_ttl_seconds = 10
+        state_dir = str(tmp_path / "coordination")
+        election_name = ""
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == EXIT_CODE_USAGE
+
+
+def test_cli_run_single_tick_accepts_new_flags_calls_run_once(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
+    class _Args:
+        command = "run"
+        mode = "standalone"
+        config = str(config_path)
+        sg_id = ""
+        owner_id = "owner-1"
+        target_service_groups = 2
+        shard_mode = "score"
+        tick_interval_seconds = 1.0
+        leader_ttl_seconds = 10
+        lease_ttl_seconds = 10
+        state_dir = str(tmp_path / "coordination")
+        election_name = "cmts-test"
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    called: dict[str, int] = {"run_once": 0}
+
+    def _fake_run_once(self: object) -> OrchestratorRunResultModel:
+        called["run_once"] += 1
+        return _build_minimal_run_result()
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher.run_once",
+        _fake_run_once,
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+    assert called["run_once"] == 1
+
+
+def test_cli_run_forever_accepts_new_flags_calls_run_forever(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path, enabled=True)
+
+    class _Args:
+        command = "run-forever"
+        mode = "standalone"
+        config = str(config_path)
+        sg_id = ""
+        owner_id = "owner-1"
+        target_service_groups = 2
+        shard_mode = "score"
+        tick_interval_seconds = 1.0
+        leader_ttl_seconds = 10
+        lease_ttl_seconds = 10
+        state_dir = str(tmp_path / "coordination")
+        election_name = "cmts-test"
+        max_ticks: int | None = None
+        ssl = False
+        host = "127.0.0.1"
+        port = 8000
+        log_level = "info"
+        workers = 1
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    called: dict[str, int] = {"run_forever": 0}
+
+    def _fake_run_forever(
+        self: object,
+        on_tick: Callable[[OrchestratorRunResultModel], None] | None = None,
+        max_ticks: int | None = None,
+        sleeper: Callable[[float], None] | None = None,
+    ) -> list[CoordinationTickResultModel]:
+        called["run_forever"] += 1
+        if on_tick is not None:
+            on_tick(_build_minimal_run_result())
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher.run_forever",
+        _fake_run_forever,
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+    assert called["run_forever"] == 1
+
+# FILE: tests/test_orchestrator_runtime_contracts.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.coordination.manager import CoordinationManager
+from pypnm_cmts.coordination.models import (
+    CoordinationStatusModel,
+    CoordinationTickResultModel,
+)
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    LeaderId,
+    OrchestratorRunId,
+    OwnerId,
+    ServiceGroupId,
+)
+from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+from pypnm_cmts.orchestrator.models import WorkResultModel
+from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+
+
+def _write_system_config(path: Path) -> None:
+    payload = {
+        "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+            },
+            "service_groups": [
+                {"sg_id": 1, "name": "sg-1", "enabled": True},
+            ],
+            "target_service_groups": 1,
+            "shard_mode": "sequential",
+            "default_tests": ["test-a"],
+        }
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_runtime_controller_tick_with_empty_inventory(tmp_path: Path) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "mode": "controller",
+            "state_dir": str(state_dir),
+            "service_groups": [],
+            "adapter": {"hostname": "cmts.example", "community": "public"},
+        }
+    )
+    manager = CoordinationManager(
+        state_dir=state_dir,
+        election_name=CoordinationElectionName("cmts-primary"),
+        leader_id=LeaderId("controller-test"),
+        owner_id=OwnerId("controller-test"),
+        leader_ttl_seconds=int(settings.leader_ttl_seconds),
+        lease_ttl_seconds=int(settings.lease_ttl_seconds),
+        target_service_groups=0,
+        shard_mode=settings.shard_mode,
+        leader_enabled=True,
+        leader_id_validator=None,
+    )
+    runtime = CmtsOrchestratorRuntime(
+        settings=settings,
+        manager=manager,
+        service_groups=[],
+        mode=OrchestratorMode.CONTROLLER,
+        sg_id=None,
+    )
+
+    results = runtime.run_forever(max_ticks=1, sleeper=lambda _: None)
+    assert len(results) == 1
+    assert int(results[0].tick_index) == 1
+
+
+def test_worker_bound_sg_without_lease_returns_empty_work_results(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        lambda self: CoordinationStatusModel(held_sg_ids=[]),
+    )
+
+    called = {"run_tests": False}
+
+    def _fake_run_tests(
+        self: object,
+        sg_id: ServiceGroupId,
+        tests: list[str],
+        run_id: OrchestratorRunId,
+    ) -> list[WorkResultModel]:
+        called["run_tests"] = True
+        return []
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
+        _fake_run_tests,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.WORKER,
+        sg_id=ServiceGroupId(1),
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    result = launcher.run_once()
+    assert result.lease_held is False
+    assert str(result.run_id) == ""
+    assert result.work_results == []
+    assert called["run_tests"] is False
+
+
+def test_run_forever_updates_service_groups_after_leader(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "system.json"
+    _write_system_config(config_path)
+
+    seen: list[list[int]] = []
+
+    def _fake_tick(self: object, service_groups: list[ServiceGroupId]) -> CoordinationTickResultModel:
+        seen.append([int(sg_id) for sg_id in service_groups])
+        return CoordinationTickResultModel(acquired_sg_ids=[])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.tick",
+        _fake_tick,
+    )
+
+    statuses = iter([False, True, True, True])
+
+    def _fake_status(self: object) -> CoordinationStatusModel:
+        try:
+            is_leader = next(statuses)
+        except StopIteration:
+            is_leader = True
+        return CoordinationStatusModel(
+            is_leader=is_leader,
+            held_sg_ids=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.coordination.manager.CoordinationManager.status",
+        _fake_status,
+    )
+
+    def _fake_build_controller_service_groups(
+        self: object,
+        settings: CmtsOrchestratorSettings,
+        state_dir: Path,
+        is_leader: bool,
+    ) -> tuple[list[ServiceGroupId], str]:
+        if is_leader:
+            return ([ServiceGroupId(2)], "config")
+        return ([ServiceGroupId(1)], "config")
+
+    monkeypatch.setattr(
+        "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher._build_controller_service_groups",
+        _fake_build_controller_service_groups,
+    )
+
+    launcher = CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=OrchestratorMode.COMBINED,
+        sg_id=None,
+        state_dir_override=tmp_path / "coordination",
+    )
+
+    launcher.run_forever(max_ticks=3, sleeper=lambda _: None)
+
+    assert len(seen) == 3
+    assert seen[0] == [1]
+    assert seen[1] == [1]
+    assert seen[2] == [2]
+
+# FILE: tests/test_api_operational.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from pypnm_cmts.config.orchestrator_config import (
+    CmtsOrchestratorSettings,
+    ServiceGroupDescriptor,
+)
+from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.version import __version__
+
+
+def _load_app(settings: CmtsOrchestratorSettings, monkeypatch: object) -> FastAPI:
+    from pypnm_cmts.api.routes.operational.router import router as operational_router
+
+    app = FastAPI(title="PyPNM-CMTS Operational API", version=__version__)
+    app.include_router(operational_router)
+
+    def _fake_from_system_config(**_kwargs: object) -> CmtsOrchestratorSettings:
+        return settings
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls, **_kwargs: _fake_from_system_config()),
+    )
+    return app
+
+
+def _client(app: FastAPI) -> TestClient:
+    return TestClient(app)
+
+
+def _build_settings(
+    mode: OrchestratorMode,
+    state_dir: Path,
+    service_groups: list[ServiceGroupDescriptor],
+    election_name: str | None = None,
+) -> CmtsOrchestratorSettings:
+    payload = {
+        "mode": mode,
+        "state_dir": str(state_dir),
+        "service_groups": [entry.model_dump() for entry in service_groups],
+        "default_tests": ["test-a"],
+        "adapter": {"hostname": "cmts.example", "community": "public"},
+    }
+    if election_name is not None:
+        payload["election_name"] = election_name
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+def _mark_sgw_ready(settings: CmtsOrchestratorSettings) -> None:
+    now_epoch = 0.0
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    manager = SgwManager(settings=settings, store=store, service_groups=[])
+    set_sgw_startup_success([], store, manager, now_epoch)
+
+
+def test_ops_health_returns_ok(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "state"
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        [],
+        election_name="ops-demo",
+    )
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["timestamp"] != ""
+    assert payload["meta"]["mode"] == OrchestratorMode.STANDALONE.value
+    assert payload["meta"]["state_dir"] == str(state_dir)
+    assert payload["meta"]["election_name"] == "ops-demo"
+
+
+def test_ops_version_returns_metadata(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "state"
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        [],
+        election_name="ops-version",
+    )
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/version")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["application"] == "pypnm-cmts"
+    assert payload["version"] == __version__
+    assert payload["python_version"] != ""
+    assert payload["timestamp"] != ""
+    assert payload["meta"]["state_dir"] == str(state_dir)
+    assert payload["meta"]["election_name"] == "ops-version"
+
+
+def test_ops_ready_controller_creates_state_dir(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    _mark_sgw_ready(settings)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert state_dir.exists()
+    assert (state_dir / "pids").exists()
+    assert (state_dir / "logs").exists()
+    assert (state_dir / "inventory").exists()
+
+
+def test_ops_ready_controller_not_writable(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    _mark_sgw_ready(settings)
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    monkeypatch.setattr(OperationalService, "_ensure_state_dir_writable", lambda *_args: False)
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["failed_check"] == ReadinessCheck.STATE_DIR_ACCESS.value
+    assert body["status"] == OperationalStatus.ERROR.value
+
+
+def test_ops_ready_worker_requires_sg(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    settings = _build_settings(OrchestratorMode.WORKER, state_dir, [])
+    _mark_sgw_ready(settings)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["failed_check"] == ReadinessCheck.WORKER_SG.value
+
+
+def test_ops_ready_worker_ok(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    service_groups = [ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True)]
+    settings = _build_settings(OrchestratorMode.WORKER, state_dir, service_groups)
+    _mark_sgw_ready(settings)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["meta"]["sg_id"] == service_groups[0].sg_id
+
+
+def test_ops_ready_rejects_blank_state_dir(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
+    _mark_sgw_ready(settings)
+    blank_settings = settings.model_copy(update={"state_dir": "   "})
+    app = _load_app(blank_settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fail_if_called(_self: OperationalService, _path: Path) -> bool:
+        raise AssertionError("state_dir check should fail before directory creation")
+
+    monkeypatch.setattr(OperationalService, "_ensure_state_dir_exists", _fail_if_called)
+
+    client = _client(app)
+    response = client.get("/ops/ready")
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["failed_check"] == ReadinessCheck.STATE_DIR.value
+
+
+def test_ops_status_missing_pid_records(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.ERROR.value
+    assert payload["pid_records_missing"] is True
+    assert payload["pid_records_stale"] is False
+    assert payload["fallback_used"] is False
+
+
+def test_ops_status_pidfile_parsing(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    pid_dir = state_dir / "pids"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    (pid_dir / "controller.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_5.pid").write_text("999999", encoding="utf-8")
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pid_records_missing"] is False
+    assert payload["pid_records_stale"] is True
+    assert payload["status"] == OperationalStatus.ERROR.value
+    assert payload["controller"]["pidfile_exists"] is True
+    assert payload["controller"]["pid"] == 999999
+    assert payload["controller"]["is_running"] is False
+    assert payload["workers"][0]["pidfile_exists"] is True
+    assert payload["workers"][0]["pid"] == 999999
+    assert payload["workers"][0]["is_running"] is False
+    assert payload["workers"][0]["sg_id"] == 5
+
+
+def test_ops_status_skips_fallback_without_election(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.CONTROLLER,
+        state_dir,
+        [],
+        election_name=None,
+    )
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fallback_used"] is False
+
+
+def test_ops_status_worker_sorting(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    pid_dir = state_dir / "pids"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    (pid_dir / "controller.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_10.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_2.pid").write_text("999999", encoding="utf-8")
+    (pid_dir / "worker_unbound.pid").write_text("999999", encoding="utf-8")
+    settings = _build_settings(OrchestratorMode.CONTROLLER, state_dir, [])
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    workers = payload["workers"]
+    assert workers[0]["sg_id"] == 2
+    assert workers[1]["sg_id"] == 10
+    assert workers[2]["sg_id"] is None
+
+
+def test_ops_status_fallback_arg_equals_parsing(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.CONTROLLER,
+        state_dir,
+        [],
+        election_name="ops-demo",
+    )
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fake_fallback(_self: OperationalService, _election: str) -> list[tuple[int, str]]:
+        return [
+            (
+                999999,
+                "pypnm-cmts run-forever --election-name=ops-demo --mode=worker --sg-id=7",
+            )
+        ]
+
+    monkeypatch.setattr(OperationalService, "_fallback_find_processes", _fake_fallback)
+
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fallback_used"] is True
+    workers = payload["workers"]
+    assert len(workers) == 1
+    assert workers[0]["sg_id"] == 7
+    assert workers[0]["pidfile_exists"] is False
+
+
+def test_ops_status_fallback_combined_mode_signature(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.CONTROLLER,
+        state_dir,
+        [],
+        election_name="ops-combined",
+    )
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    def _fake_fallback(_self: OperationalService, _election: str) -> list[tuple[int, str]]:
+        return [
+            (
+                555555,
+                "pypnm-cmts serve --with-runner --election-name=ops-combined",
+            )
+        ]
+
+    monkeypatch.setattr(OperationalService, "_fallback_find_processes", _fake_fallback)
+
+    client = _client(app)
+    response = client.get("/ops/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fallback_used"] is True
+    workers = payload["workers"]
+    assert len(workers) == 1
+    assert workers[0]["pid"] == 555555
+    assert workers[0]["sg_id"] is None
+
+# FILE: tests/test_sgw_readiness.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.version import __version__
+
+
+def _load_app(settings: CmtsOrchestratorSettings, monkeypatch: object) -> FastAPI:
+    from pypnm_cmts.api.routes.operational.router import router as operational_router
+
+    app = FastAPI(title="PyPNM-CMTS Operational API", version=__version__)
+    app.include_router(operational_router)
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls, **_kwargs: settings),
+    )
+    return app
+
+
+def _build_settings(state_dir: Path) -> CmtsOrchestratorSettings:
+    payload = {
+        "mode": OrchestratorMode.STANDALONE,
+        "state_dir": str(state_dir),
+        "adapter": {"hostname": "cmts.example", "community": "public"},
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+def test_ops_ready_returns_sgw_startup_when_pending(tmp_path: Path, monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    app = _load_app(settings, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["status"] == OperationalStatus.ERROR.value
+        assert payload["failed_check"] == ReadinessCheck.SGW_STARTUP.value
+
+
+def test_ops_ready_returns_sgw_cache_when_missing_entries(tmp_path: Path, monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    last_refresh_epoch = 1000.0
+    store = SgwCacheStore()
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, last_refresh_epoch)
+
+    app = _load_app(settings, monkeypatch)
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["failed_check"] == ReadinessCheck.SGW_CACHE.value
+
+# FILE: tests/test_sgw_discovery_static.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.discovery import StaticServiceGroupDiscovery
+
+
+@pytest.mark.unit
+def test_static_discovery_dedupes_and_sorts_enabled() -> None:
+    payload = {
+        "sgw": {"discovery": {"mode": "static"}},
+        "service_groups": [
+            {"sg_id": 2, "enabled": True, "name": "sg-2"},
+            {"sg_id": 1, "enabled": True, "name": "sg-1"},
+            {"sg_id": 2, "enabled": True, "name": "sg-2-dup"},
+            {"sg_id": 3, "enabled": False, "name": "sg-3"},
+        ]
+    }
+    settings = CmtsOrchestratorSettings.model_validate(payload)
+
+    result = StaticServiceGroupDiscovery().discover(settings)
+
+    assert result == [ServiceGroupId(1), ServiceGroupId(2)]
+
+
+@pytest.mark.unit
+def test_static_discovery_empty_config_returns_empty_list() -> None:
+    settings = CmtsOrchestratorSettings.model_validate({"sgw": {"discovery": {"mode": "static"}}})
+
+    result = StaticServiceGroupDiscovery().discover(settings)
+
+    assert result == []
+
+
+@pytest.mark.unit
+def test_static_discovery_invalid_sg_id_raises() -> None:
+    payload = {
+        "sgw": {"discovery": {"mode": "static"}},
+        "service_groups": [{"sg_id": 0, "enabled": True, "name": "bad"}],
+    }
+
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(payload)
+
+# FILE: tests/test_sgw_manager_metrics_error_duration.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import REFRESH_MODE_HEAVY, SgwManager
+from pypnm_cmts.sgw.metrics import InMemorySgwMetrics
+from pypnm_cmts.sgw.models import SgwSnapshotPayloadModel
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_sgw_manager_records_duration_on_error() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "adapter": {"hostname": "cmts.example", "community": "public"},
+            "sgw": {
+                "poll_light_seconds": 1,
+                "poll_heavy_seconds": 1,
+                "refresh_jitter_seconds": 0,
+            }
+        }
+    )
+    sg_id = ServiceGroupId(9)
+    store = SgwCacheStore()
+    metrics = InMemorySgwMetrics()
+
+    def _raise(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+    ) -> SgwSnapshotPayloadModel:
+        raise RuntimeError("  bad error  ")
+
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=_raise,
+        metrics=metrics,
+    )
+
+    manager.refresh_once(1_000.0)
+
+    assert metrics.refresh_durations_ms.get(REFRESH_MODE_HEAVY)
+    assert metrics.refresh_error_counts.get(REFRESH_MODE_HEAVY) == 1
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.metadata.last_error == "bad error"
+
+# FILE: tests/test_sgw_manager_refresh.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+DEFAULT_CHANNEL_IDS = [1, 2]
+
+
+def _settings(
+    poll_light_seconds: int,
+    poll_heavy_seconds: int,
+    refresh_jitter_seconds: int,
+    cache_max_age_seconds: int,
+) -> CmtsOrchestratorSettings:
+    payload = {
+        "adapter": {"hostname": "cmts.example", "community": "public"},
+        "sgw": {
+            "poll_light_seconds": poll_light_seconds,
+            "poll_heavy_seconds": poll_heavy_seconds,
+            "refresh_jitter_seconds": refresh_jitter_seconds,
+            "cache_max_age_seconds": cache_max_age_seconds,
+        }
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+def test_sgw_manager_heavy_refresh_sets_light_timestamp() -> None:
+    poll_light_seconds = 300
+    poll_heavy_seconds = 900
+    refresh_jitter_seconds = 0
+    cache_max_age_seconds = 1200
+    now_epoch = 1000.0
+    sg_id = ServiceGroupId(1)
+
+    settings = _settings(poll_light_seconds, poll_heavy_seconds, refresh_jitter_seconds, cache_max_age_seconds)
+    store = SgwCacheStore()
+    payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=len(DEFAULT_CHANNEL_IDS), channel_ids=DEFAULT_CHANNEL_IDS),
+        us_channels=SgwChannelSummaryModel(count=1, channel_ids=[10]),
+        cable_modems=[SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100", ipv6="2001:db8::1")],
+    )
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: payload,
+    )
+
+    result = manager.refresh_once(now_epoch)
+
+    assert result.heavy_refreshed_sg_ids == [sg_id]
+    assert result.light_refreshed_sg_ids == [sg_id]
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.metadata.last_heavy_refresh_epoch == now_epoch
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+    assert entry.snapshot.ds_channels.count == len(DEFAULT_CHANNEL_IDS)
+
+
+def test_sgw_manager_light_refresh_only() -> None:
+    poll_light_seconds = 300
+    poll_heavy_seconds = 900
+    refresh_jitter_seconds = 0
+    cache_max_age_seconds = 1200
+    now_epoch = 1000.0
+    sg_id = ServiceGroupId(2)
+
+    settings = _settings(poll_light_seconds, poll_heavy_seconds, refresh_jitter_seconds, cache_max_age_seconds)
+    store = SgwCacheStore()
+    payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=1, channel_ids=[1]),
+        us_channels=SgwChannelSummaryModel(count=1, channel_ids=[10]),
+        cable_modems=[SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100", ipv6="2001:db8::1")],
+    )
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: payload,
+        light_poller=lambda *_args: [],
+    )
+
+    manager.refresh_once(now_epoch)
+    result = manager.refresh_once(now_epoch + float(poll_light_seconds))
+
+    assert result.heavy_refreshed_sg_ids == []
+    assert result.light_refreshed_sg_ids == [sg_id]
+
+
+def test_sgw_manager_jitter_delays_refresh_and_marks_stale() -> None:
+    poll_light_seconds = 300
+    poll_heavy_seconds = 900
+    refresh_jitter_seconds = 300
+    cache_max_age_seconds = 300
+    base_epoch = 1000.0
+    now_epoch = 1301.0
+    sg_id = ServiceGroupId(3)
+
+    settings = _settings(poll_light_seconds, poll_heavy_seconds, refresh_jitter_seconds, cache_max_age_seconds)
+    store = SgwCacheStore()
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    manager = SgwManager(settings=settings, store=store, service_groups=[sg_id], jitter_provider=lambda *_args: 300)
+
+    result = manager.refresh_once(now_epoch)
+
+    assert result.heavy_refreshed_sg_ids == []
+    assert result.light_refreshed_sg_ids == []
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.metadata.refresh_state == SgwRefreshState.STALE
+
+
+def test_sgw_manager_heavy_refresh_replaces_snapshot_payload() -> None:
+    poll_light_seconds = 300
+    poll_heavy_seconds = 900
+    refresh_jitter_seconds = 0
+    cache_max_age_seconds = 1200
+    now_epoch = 2000.0
+    sg_id = ServiceGroupId(4)
+    ds_channels_initial = [1]
+    us_channels_initial = [10]
+    ds_channels_updated = [1, 2]
+    us_channels_updated = [10, 20]
+    initial_payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=len(ds_channels_initial), channel_ids=ds_channels_initial),
+        us_channels=SgwChannelSummaryModel(count=len(us_channels_initial), channel_ids=us_channels_initial),
+        cable_modems=[],
+    )
+    updated_payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=len(ds_channels_updated), channel_ids=ds_channels_updated),
+        us_channels=SgwChannelSummaryModel(count=len(us_channels_updated), channel_ids=us_channels_updated),
+        cable_modems=[],
+    )
+    settings = _settings(poll_light_seconds, poll_heavy_seconds, refresh_jitter_seconds, cache_max_age_seconds)
+    store = SgwCacheStore()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: initial_payload,
+    )
+
+    manager.refresh_once(now_epoch)
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: updated_payload,
+    )
+    manager.refresh_once(now_epoch + float(poll_heavy_seconds))
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.ds_channels.count == 2
+
+
+@pytest.mark.skip(reason="Deferred: slow in full suite, revisit in Phase 7.8.")
+def test_sgw_manager_refresh_forever_uses_clock_and_stops() -> None:
+    poll_light_seconds = 300
+    poll_heavy_seconds = 900
+    refresh_jitter_seconds = 0
+    cache_max_age_seconds = 1200
+    sg_id = ServiceGroupId(5)
+    time_first = 1000.0
+    time_second = 1300.0
+    time_third = 1600.0
+    times = [time_first, time_second, time_third]
+    payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(),
+        us_channels=SgwChannelSummaryModel(),
+        cable_modems=[],
+    )
+    settings = _settings(poll_light_seconds, poll_heavy_seconds, refresh_jitter_seconds, cache_max_age_seconds)
+    store = SgwCacheStore()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: payload,
+    )
+    clock_calls = {"idx": 0}
+
+    def _clock() -> float:
+        value = times[clock_calls["idx"]]
+        clock_calls["idx"] += 1
+        return value
+
+    results = manager.refresh_forever(clock=_clock, max_cycles=2)
+
+    assert len(results) == 2
+    assert results[0].snapshot_time_epoch == times[0]
+    assert results[1].snapshot_time_epoch == times[1]
+
+# FILE: tests/test_sgw_manager_refresh_extra.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+POLL_LIGHT_SECONDS = 300
+POLL_HEAVY_SECONDS = 900
+REFRESH_JITTER_SECONDS = 0
+CACHE_MAX_AGE_SECONDS = 1200
+
+
+def _settings() -> CmtsOrchestratorSettings:
+    payload = {
+        "adapter": {"hostname": "cmts.example", "community": "public"},
+        "sgw": {
+            "enabled": True,
+            "poll_light_seconds": POLL_LIGHT_SECONDS,
+            "poll_heavy_seconds": POLL_HEAVY_SECONDS,
+            "refresh_jitter_seconds": REFRESH_JITTER_SECONDS,
+            "cache_max_age_seconds": CACHE_MAX_AGE_SECONDS,
+        }
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+@pytest.mark.unit
+def test_sgw_manager_heavy_refresh_writes_snapshot() -> None:
+    now_epoch = 1_000.0
+    sg_id = ServiceGroupId(10)
+    payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=1, channel_ids=[1]),
+        us_channels=SgwChannelSummaryModel(count=1, channel_ids=[10]),
+        cable_modems=[SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100")],
+    )
+    store = SgwCacheStore()
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: payload,
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.ds_channels.count == 1
+    assert entry.snapshot.us_channels.count == 1
+    assert len(entry.snapshot.cable_modems) == 1
+    assert entry.snapshot.metadata.snapshot_time_epoch == now_epoch
+    assert entry.snapshot.metadata.last_heavy_refresh_epoch == now_epoch
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+
+@pytest.mark.unit
+def test_sgw_manager_light_refresh_updates_modems() -> None:
+    base_epoch = 2_000.0
+    now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
+    sg_id = ServiceGroupId(11)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.10"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.20"),
+    ]
+    initial_metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
+    store = SgwCacheStore()
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    updated_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.30"),
+    ]
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        light_poller=lambda *_args: list(updated_modems),
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:01",
+        "aa:bb:cc:dd:ee:ff",
+    ]
+    assert str(entry.snapshot.cable_modems[1].ipv4) == "192.168.0.100"
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+
+@pytest.mark.unit
+def test_sgw_manager_light_refresh_preserves_membership_on_empty_update() -> None:
+    base_epoch = 3_000.0
+    now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
+    sg_id = ServiceGroupId(12)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.11"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.12"),
+    ]
+    initial_metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
+    store = SgwCacheStore()
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        light_poller=lambda *_args: [],
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:01",
+        "aa:bb:cc:dd:ee:02",
+    ]
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+# FILE: tests/test_serving_group_cache_service.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.api.routes.serving_group.schemas import (
+    GetServingGroupCableModemsRequest,
+)
+from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import SgwCacheEntryModel, SgwSnapshotModel
+from pypnm_cmts.sgw.runtime_state import (
+    reset_sgw_runtime_state,
+    set_sgw_startup_success,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+def _seed_snapshot(store: SgwCacheStore, sg_id: ServiceGroupId, snapshot_time: float) -> None:
+    metadata = SgwCacheMetadataModel(snapshot_time_epoch=snapshot_time, age_seconds=0.0)
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+
+@pytest.mark.unit
+def test_aggregate_require_fresh_waits_for_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    service = ServingGroupCacheService()
+    store = SgwCacheStore()
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+    for sg_id in sg_ids:
+        _seed_snapshot(store, sg_id, 1_000.0)
+
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, 1_000.0)
+
+    call_state = {"count": 0}
+
+    def _fake_sleep(_: float) -> None:
+        call_state["count"] += 1
+        if call_state["count"] == 1:
+            entry = store.get_entry(sg_ids[0])
+            if entry is not None:
+                metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
+                entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+                store.upsert_entry(entry)
+        elif call_state["count"] == 2:
+            entry = store.get_entry(sg_ids[1])
+            if entry is not None:
+                metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
+                entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+                store.upsert_entry(entry)
+
+    monotonic_state = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        monotonic_state["value"] += 0.1
+        return monotonic_state["value"]
+
+    monkeypatch.setattr(ServingGroupCacheService, "_sleep", staticmethod(_fake_sleep))
+    monkeypatch.setattr(ServingGroupCacheService, "_monotonic", staticmethod(_fake_monotonic))
+
+    request = GetServingGroupCableModemsRequest(
+        sg_id=ServiceGroupId(0),
+        page=1,
+        page_size=1,
+        require_fresh=True,
+        max_wait_seconds=5.0,
+    )
+
+    waited_seconds = service._wait_for_refresh(
+        request=request,
+        sg_ids=sg_ids,
+        store=store,
+        refresh_applied=True,
+    )
+
+    assert waited_seconds > 0.0
+    assert call_state["count"] >= 2
+
+
+@pytest.mark.unit
+def test_aggregate_require_fresh_times_out_when_not_all_advance(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    service = ServingGroupCacheService()
+    store = SgwCacheStore()
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+    for sg_id in sg_ids:
+        _seed_snapshot(store, sg_id, 1_000.0)
+
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
+    manager = SgwManager(settings=settings, store=store, service_groups=sg_ids)
+    set_sgw_startup_success(sg_ids, store, manager, 1_000.0)
+
+    sleep_calls = {"count": 0}
+
+    def _fake_sleep(_: float) -> None:
+        sleep_calls["count"] += 1
+        entry = store.get_entry(sg_ids[0])
+        if entry is not None:
+            metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
+            entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+            store.upsert_entry(entry)
+
+    monotonic_state = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        monotonic_state["value"] += 0.3
+        return monotonic_state["value"]
+
+    monkeypatch.setattr(ServingGroupCacheService, "_sleep", staticmethod(_fake_sleep))
+    monkeypatch.setattr(ServingGroupCacheService, "_monotonic", staticmethod(_fake_monotonic))
+
+    request = GetServingGroupCableModemsRequest(
+        sg_id=ServiceGroupId(0),
+        page=1,
+        page_size=1,
+        require_fresh=True,
+        max_wait_seconds=1.0,
+    )
+
+    waited_seconds = service._wait_for_refresh(
+        request=request,
+        sg_ids=sg_ids,
+        store=store,
+        refresh_applied=True,
+    )
+
+    assert waited_seconds >= 1.0
+    assert sleep_calls["count"] > 0
+
+# FILE: docs/bundles/phase-8/phase-8-step-7g.md
+# Phase 8 · Step 7g
+
+## Goal
+Default SGW discovery mode to snmp and update tests/docs to provide adapter configuration explicitly.
+
+## Summary of changes
+- Switched the default SGW discovery mode to snmp.
+- Updated discovery mode documentation to match the new default.
+- Adjusted tests to provide adapter.hostname/community where default snmp validation applies.
+
+## Files changed
+- src/pypnm_cmts/config/orchestrator_config.py
+- docs/architecture/service-group-workers.md
+- tests/test_api_operational.py
+- tests/test_orchestrator_runtime_contracts.py
+- tests/test_orchestrator_settings.py
+- tests/test_serving_group_cache_service.py
+- tests/test_sgw_background_refresh.py
+- tests/test_sgw_discovery_static.py
+- tests/test_sgw_endpoints.py
+- tests/test_sgw_manager_metrics_error_duration.py
+- tests/test_sgw_manager_refresh.py
+- tests/test_sgw_manager_refresh_extra.py
+- tests/test_sgw_manager_stop.py
+- tests/test_sgw_manager_stop_prestart.py
+- tests/test_sgw_observability.py
+- tests/test_sgw_readiness.py
+- tests/test_sgw_settings.py
+- tests/test_sgw_store_aliasing.py
+- tests/test_sgw_worker.py
+
+## Tests run
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m py_compile src/pypnm_cmts/config/orchestrator_config.py tests/test_sgw_settings.py tests/test_sgw_manager_stop.py tests/test_sgw_manager_stop_prestart.py tests/test_sgw_endpoints.py tests/test_sgw_store_aliasing.py tests/test_sgw_background_refresh.py tests/test_sgw_observability.py tests/test_sgw_worker.py tests/test_orchestrator_settings.py tests/test_orchestrator_runtime_contracts.py tests/test_api_operational.py tests/test_sgw_readiness.py tests/test_sgw_discovery_static.py tests/test_sgw_manager_metrics_error_duration.py tests/test_sgw_manager_refresh.py tests/test_sgw_manager_refresh_extra.py tests/test_serving_group_cache_service.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_settings.py tests/test_orchestrator_settings.py tests/test_sgw_endpoints.py tests/test_sgw_background_refresh.py tests/test_sgw_observability.py tests/test_sgw_worker.py tests/test_serving_group_cache_service.py tests/test_sgw_manager_stop.py tests/test_sgw_manager_stop_prestart.py tests/test_sgw_store_aliasing.py tests/test_sgw_manager_metrics_error_duration.py tests/test_sgw_manager_refresh.py tests/test_sgw_manager_refresh_extra.py tests/test_sgw_readiness.py tests/test_api_operational.py tests/test_orchestrator_runtime_contracts.py tests/test_sgw_discovery_static.py
+
+## Results / Notes
+- Default discovery mode is now snmp; tests provide adapter configuration explicitly.

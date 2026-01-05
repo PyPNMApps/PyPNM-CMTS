@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pypnm.lib.inet import InetAddressStr
+from pypnm.lib.types import HostNameStr
 
 from pypnm_cmts.api.main import app
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
@@ -17,6 +19,7 @@ from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.discovery import ServiceGroupDiscovery
 from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.models import SgwCableModemModel, SgwSnapshotPayloadModel
+from pypnm_cmts.sgw.precheck import CmtsStartupPrecheckResult
 from pypnm_cmts.sgw.runtime_state import (
     get_sgw_manager,
     get_sgw_startup_status,
@@ -272,6 +275,16 @@ def test_startup_snmp_mode_uses_threaded_discovery(monkeypatch: object, tmp_path
     )
     _patch_pollers(monkeypatch)
 
+    async def _fake_precheck(self: object, _settings: CmtsOrchestratorSettings) -> CmtsStartupPrecheckResult:
+        return CmtsStartupPrecheckResult(
+            ping_ok=True,
+            snmp_ok=True,
+            hostname=HostNameStr("cmts.example"),
+            inet=InetAddressStr("192.168.0.100"),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.CmtsStartupPrecheck.run", _fake_precheck)
+
     async def _fake_discover_service_groups(self: object) -> list[CmtsServiceGroupModel]:
         return [
             CmtsServiceGroupModel(md_cm_sg_id=3),
@@ -293,3 +306,44 @@ def test_startup_snmp_mode_uses_threaded_discovery(monkeypatch: object, tmp_path
     status = get_sgw_startup_status()
     assert status.discovery_ok is True
     assert status.discovered_sg_ids == [ServiceGroupId(1), ServiceGroupId(3)]
+
+
+@pytest.mark.unit
+def test_startup_snmp_mode_precheck_failure(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    payload = {
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+            "write_community": "",
+            "port": 161,
+        },
+        "state_dir": str(tmp_path / "coordination"),
+        "sgw": {"discovery": {"mode": "snmp"}},
+    }
+    settings = CmtsOrchestratorSettings.model_validate(payload)
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    async def _fake_precheck(self: object, _settings: CmtsOrchestratorSettings) -> CmtsStartupPrecheckResult:
+        return CmtsStartupPrecheckResult(
+            ping_ok=False,
+            snmp_ok=False,
+            hostname=HostNameStr("cmts.example"),
+            inet=InetAddressStr("192.168.0.100"),
+            error_message="cmts ping check failed",
+        )
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.CmtsStartupPrecheck.run", _fake_precheck)
+
+    asyncio.run(SgwStartupService().initialize())
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is False
+    assert status.error_message == "cmts ping check failed"

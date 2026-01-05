@@ -55,6 +55,7 @@ def _build_settings(
         "state_dir": str(state_dir),
         "service_groups": [entry.model_dump() for entry in service_groups],
         "default_tests": ["test-a"],
+        "adapter": {"hostname": "cmts.example", "community": "public"},
     }
     if election_name is not None:
         payload["election_name"] = election_name

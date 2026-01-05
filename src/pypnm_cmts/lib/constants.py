@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -29,8 +29,15 @@ class CacheRefreshMode(str, Enum):
     HEAVY = "heavy"
 
 
+class RfChannelType(str, Enum):
+    SC_QAM = "sc_qam"
+    OFDM = "ofdm"
+    OFDMA = "ofdma"
+
+
 __all__ = [
     "CacheRefreshMode",
     "OperationalStatus",
+    "RfChannelType",
     "ReadinessCheck",
 ]

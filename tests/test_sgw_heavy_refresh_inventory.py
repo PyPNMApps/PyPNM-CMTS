@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import ServiceGroupId
-from pypnm_cmts.sgw.models import SgwCableModemModel
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwHeavyInventoryModel
 from pypnm_cmts.sgw.pollers.heavy import HeavyInventoryProvider, sgw_heavy_poller
 
 
@@ -18,11 +18,11 @@ class FakeInventoryProvider:
         self,
         _sg_id: ServiceGroupId,
         _settings: CmtsOrchestratorSettings,
-    ) -> tuple[list[int], list[int], list[SgwCableModemModel]]:
-        return (
-            [3, 1, 3, 2, 0, -1],
-            [5, 4, 4, 0],
-            [
+    ) -> SgwHeavyInventoryModel:
+        return SgwHeavyInventoryModel(
+            ds_channel_ids=[3, 1, 3, 2, 0, -1],
+            us_channel_ids=[5, 4, 4, 0],
+            cable_modems=[
                 SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.2", ipv6=""),
                 SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.1", ipv6=""),
                 SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.2", ipv6=""),

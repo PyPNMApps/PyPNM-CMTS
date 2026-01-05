@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import pytest
 
 from pypnm_cmts.api.routes.serving_group.schemas import (
     GetServingGroupCableModemsRequest,
+    ServingGroupCableModemEntryModel,
 )
 from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
@@ -35,7 +36,9 @@ def test_service_response_mutation_does_not_alias_store() -> None:
     try:
         service = ServingGroupCacheService()
         store = SgwCacheStore()
-        settings = CmtsOrchestratorSettings()
+        settings = CmtsOrchestratorSettings.model_validate(
+            {"adapter": {"hostname": "cmts.example", "community": "public"}}
+        )
         sg_id = ServiceGroupId(1)
         metadata = SgwCacheMetadataModel(snapshot_time_epoch=1_000.0, age_seconds=0.0)
         snapshot = SgwSnapshotModel(
@@ -54,19 +57,19 @@ def test_service_response_mutation_does_not_alias_store() -> None:
         set_sgw_startup_success([sg_id], store, manager, 1_000.0)
 
         request = GetServingGroupCableModemsRequest(
-            sg_id=sg_id,
+            cmts={"serving_group": {"id": [int(sg_id)]}},
             page=1,
             page_size=10,
         )
         response = service.get_cable_modems(request)
-        response.items.append(
-            SgwCableModemModel(
-                mac="aa:bb:cc:dd:ee:01",
+        response.groups[0].items.append(
+            ServingGroupCableModemEntryModel(
+                mac_address="aa:bb:cc:dd:ee:01",
                 ipv4="192.168.0.101",
                 ipv6="2001:db8::2",
             )
         )
-        response.metadata.last_error = "mutated"
+        response.groups[0].metadata.last_error = "mutated"
 
         stored = store.get_entry(sg_id)
         assert stored is not None
@@ -83,6 +86,7 @@ def test_concurrent_refresh_and_reads_do_not_alias_or_throw() -> None:
         store = SgwCacheStore()
         settings = CmtsOrchestratorSettings.model_validate(
             {
+                "adapter": {"hostname": "cmts.example", "community": "public"},
                 "sgw": {
                     "poll_light_seconds": 1,
                     "poll_heavy_seconds": 1,
@@ -142,12 +146,12 @@ def test_concurrent_refresh_and_reads_do_not_alias_or_throw() -> None:
                     if entry is not None:
                         _ = entry.snapshot.metadata.snapshot_time_epoch
                     request = GetServingGroupCableModemsRequest(
-                        sg_id=sg_id,
+                        cmts={"serving_group": {"id": [int(sg_id)]}},
                         page=1,
                         page_size=10,
                     )
                     response = service.get_cable_modems(request)
-                    assert response.sg_id == sg_id
+                    assert response.resolved_sg_ids == [sg_id]
             except BaseException as exc:
                 exceptions.put(exc)
 

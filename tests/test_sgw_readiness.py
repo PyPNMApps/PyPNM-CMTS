@@ -39,6 +39,7 @@ def _build_settings(state_dir: Path) -> CmtsOrchestratorSettings:
     payload = {
         "mode": OrchestratorMode.STANDALONE,
         "state_dir": str(state_dir),
+        "adapter": {"hostname": "cmts.example", "community": "public"},
     }
     return CmtsOrchestratorSettings.model_validate(payload)
 

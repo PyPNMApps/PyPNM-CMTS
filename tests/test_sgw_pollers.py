@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
+import pytest
 from pypnm.lib.types import InetAddressStr, IPv4Str, IPv6Str, MacAddressStr
 
 from pypnm_cmts.cmts.discovery_models import (
@@ -12,6 +13,18 @@ from pypnm_cmts.cmts.discovery_models import (
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
     CmtsServiceGroupTopologyModel,
+)
+from pypnm_cmts.docsis.data_type.docs_if31_cmts_ds_ofdm_chan_entry import (
+    DocsIf31CmtsDsOfdmChanRecord,
+)
+from pypnm_cmts.docsis.data_type.docs_if31_cmts_us_ofdma_chan_entry import (
+    DocsIf31CmtsUsOfdmaChanRecord,
+)
+from pypnm_cmts.docsis.data_type.docs_if_downstream_channel_entry import (
+    DocsIfDownstreamChannelEntry,
+)
+from pypnm_cmts.docsis.data_type.docs_if_upstream_channel_entry import (
+    DocsIfUpstreamChannelEntry,
 )
 from pypnm_cmts.lib.types import MdCmSgId, MdDsSgId, MdUsSgId, ServiceGroupId
 from pypnm_cmts.orchestrator.models import SGW_LAST_ERROR_MAX_LENGTH, SgwRefreshState
@@ -75,7 +88,7 @@ def _fake_modem_inventory() -> list[ServiceGroupCableModemInventoryModel]:
     ]
 
 
-def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: object) -> None:
+def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _build_settings()
     store = SgwCacheStore()
     manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID], heavy_poller=sgw_heavy_poller)
@@ -83,12 +96,28 @@ def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: object) -> None:
     async def _fake_fetch_topology(*_args: object, **_kwargs: object) -> tuple[list[CmtsServiceGroupTopologyModel], InetAddressStr]:
         return (_fake_topology(), InetAddressStr("192.168.0.100"))
 
+    async def _fake_fetch_channels(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[
+        list[DocsIfDownstreamChannelEntry],
+        list[DocsIfUpstreamChannelEntry],
+        list[DocsIf31CmtsDsOfdmChanRecord],
+        list[DocsIf31CmtsUsOfdmaChanRecord],
+        InetAddressStr,
+    ]:
+        return ([], [], [], [], InetAddressStr("192.168.0.100"))
+
     async def _fake_discover(self: object, _sg_ids: list[ServiceGroupId]) -> list[ServiceGroupCableModemInventoryModel]:
         return _fake_modem_inventory()
 
     monkeypatch.setattr(
         "pypnm_cmts.cmts.service_group_topology_collector.CmtsTopologyCollector.fetch_service_group_topology",
         _fake_fetch_topology,
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.channel_inventory_collector.CmtsChannelInventoryCollector.fetch_channel_inventory",
+        _fake_fetch_channels,
     )
     monkeypatch.setattr(
         "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_registered_cms_by_sg",
@@ -108,7 +137,7 @@ def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: object) -> None:
     ]
 
 
-def test_sgw_manager_heavy_refresh_error_marks_cache(monkeypatch: object) -> None:
+def test_sgw_manager_heavy_refresh_error_marks_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _build_settings()
     store = SgwCacheStore()
     manager = SgwManager(settings=settings, store=store, service_groups=[SG_ID], heavy_poller=sgw_heavy_poller)

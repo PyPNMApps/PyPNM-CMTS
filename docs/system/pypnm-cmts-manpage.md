@@ -77,6 +77,7 @@ pypnm-cmts serve [options]
 - `--read-community`: SNMPv2c read community string (default: `public`).
 - `--write-community`: SNMPv2c write community string (defaults to read community when empty).
 - `--port`: SNMP port for discovery (default: `161`).
+- `--port` applies only to `discover`; `run` and `serve` use `--snmp-port` (`--cmts-port` is deprecated).
 - `--config`: Path to `system.json` (defaults to built-in config).
 - `--state-dir`: Override coordination state directory for snapshot persistence.
 - `--text`: Emit text output instead of JSON.
@@ -113,7 +114,8 @@ pypnm-cmts serve --reload
 
 ## Configuration Notes
 
-- `serve` uses `system.json` for CMTS hostname and community settings; `--cmts-hostname`, `--read-community`, and `--write-community` can override them for startup discovery.
+- `serve` uses `CmtsOrchestrator` settings for SGW discovery; `--cmts-hostname`, `--read-community`, and `--write-community` override adapter values at startup.
+- `sgw.discovery.mode` controls how SG IDs are obtained (`snmp` by default, `static` for fixed lists).
 - For MAC or IP examples in docs, use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
 
 ## Exit Codes

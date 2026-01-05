@@ -59,7 +59,9 @@ def _build_worker(
     clock: FakeClock,
     client: FakeCmtsServingGroupClient,
 ) -> ServingGroupWorker:
-    settings = CmtsOrchestratorSettings()
+    settings = CmtsOrchestratorSettings.model_validate(
+        {"adapter": {"hostname": "cmts.example", "community": "public"}}
+    )
     return ServingGroupWorker(
         sg_id=ServiceGroupId(1),
         client=client,

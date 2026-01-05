@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -11,16 +11,10 @@ from pypnm.lib.inet import Inet
 from pypnm.lib.types import HostNameStr, InetAddressStr
 
 from pypnm_cmts.api.routes.system.schemas import (
-    CmtsServiceGroupTopologyRequest,
-    CmtsServiceGroupTopologyResponse,
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
 )
-from pypnm_cmts.cmts.service_group_topology_collector import CmtsTopologyCollector
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
-from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
-    CmtsServiceGroupTopologyModel,
-)
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
 logger = logging.getLogger(__name__)
@@ -36,7 +30,7 @@ class SystemCmtsSnmpService:
         """
         Retrieve sysDescr for a CMTS using SNMP.
         """
-        hostname_value = request.cmts.hostname
+        hostname_value = request.target.hostname
         if hostname_value == "":
             return CmtsSysDescrResponse(
                 hostname=hostname_value,
@@ -104,59 +98,6 @@ class SystemCmtsSnmpService:
             status=ServiceStatusCode.SUCCESS,
             message="",
             results=system_description,
-        )
-
-    @staticmethod
-    async def get_service_group_topology(
-        request: CmtsServiceGroupTopologyRequest,
-    ) -> CmtsServiceGroupTopologyResponse:
-        """
-        Retrieve service-group topology data for a CMTS using SNMP.
-        """
-        hostname_value = request.cmts.hostname
-        if hostname_value == "":
-            return CmtsServiceGroupTopologyResponse(
-                hostname=hostname_value,
-                ip_address=InetAddressStr(""),
-                status=ServiceStatusCode.FAILURE,
-                message="CMTS hostname is required.",
-                results=[],
-            )
-
-        topology: list[CmtsServiceGroupTopologyModel]
-        resolved_ip = InetAddressStr("")
-        try:
-            topology, resolved_ip = await CmtsTopologyCollector.fetch_service_group_topology(
-                cmts_hostname=HostNameStr(hostname_value),
-                read_community=request.snmp.snmp_v2c.community,
-                write_community=request.snmp.snmp_v2c.community,
-                port=request.snmp.port,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to retrieve topology: {exc}", exc_info=True)
-            return CmtsServiceGroupTopologyResponse(
-                hostname=hostname_value,
-                ip_address=resolved_ip,
-                status=ServiceStatusCode.FAILURE,
-                message=str(exc),
-                results=[],
-            )
-
-        if not topology:
-            return CmtsServiceGroupTopologyResponse(
-                hostname=hostname_value,
-                ip_address=resolved_ip,
-                status=ServiceStatusCode.UNREACHABLE_SNMP,
-                message="SNMP topology returned empty.",
-                results=[],
-            )
-
-        return CmtsServiceGroupTopologyResponse(
-            hostname=hostname_value,
-            ip_address=resolved_ip,
-            status=ServiceStatusCode.SUCCESS,
-            message="",
-            results=topology,
         )
 
     @staticmethod

@@ -13,6 +13,7 @@ from pypnm_cmts.sgw.discovery import StaticServiceGroupDiscovery
 @pytest.mark.unit
 def test_static_discovery_dedupes_and_sorts_enabled() -> None:
     payload = {
+        "sgw": {"discovery": {"mode": "static"}},
         "service_groups": [
             {"sg_id": 2, "enabled": True, "name": "sg-2"},
             {"sg_id": 1, "enabled": True, "name": "sg-1"},
@@ -29,7 +30,7 @@ def test_static_discovery_dedupes_and_sorts_enabled() -> None:
 
 @pytest.mark.unit
 def test_static_discovery_empty_config_returns_empty_list() -> None:
-    settings = CmtsOrchestratorSettings.model_validate({})
+    settings = CmtsOrchestratorSettings.model_validate({"sgw": {"discovery": {"mode": "static"}}})
 
     result = StaticServiceGroupDiscovery().discover(settings)
 
@@ -38,7 +39,10 @@ def test_static_discovery_empty_config_returns_empty_list() -> None:
 
 @pytest.mark.unit
 def test_static_discovery_invalid_sg_id_raises() -> None:
-    payload = {"service_groups": [{"sg_id": 0, "enabled": True, "name": "bad"}]}
+    payload = {
+        "sgw": {"discovery": {"mode": "static"}},
+        "service_groups": [{"sg_id": 0, "enabled": True, "name": "bad"}],
+    }
 
     with pytest.raises(ValueError):
         CmtsOrchestratorSettings.model_validate(payload)

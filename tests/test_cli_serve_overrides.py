@@ -11,18 +11,29 @@ from pypnm_cmts.config.orchestrator_config import (
     ENV_ADAPTER_READ_COMMUNITY,
     ENV_ADAPTER_WRITE_COMMUNITY,
 )
+from pypnm_cmts.config.request_defaults import (
+    ENV_CM_SNMPV2C_WRITE_COMMUNITY,
+    ENV_CM_TFTP_IPV4,
+    ENV_CM_TFTP_IPV6,
+)
 
 CMTS_HOSTNAME = "cmts.example"
 READ_COMMUNITY = "public"
 WRITE_COMMUNITY = "private"
 HOST = "127.0.0.1"
 PORT = 8000
+CM_SNMPV2C_WRITE_COMMUNITY = "private-write"
+CM_TFTP_IPV4 = "192.168.0.100"
+CM_TFTP_IPV6 = "::1"
 
 
 def test_cli_serve_sets_adapter_overrides(monkeypatch: object) -> None:
     monkeypatch.delenv(ENV_ADAPTER_HOSTNAME, raising=False)
     monkeypatch.delenv(ENV_ADAPTER_READ_COMMUNITY, raising=False)
     monkeypatch.delenv(ENV_ADAPTER_WRITE_COMMUNITY, raising=False)
+    monkeypatch.delenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, raising=False)
+    monkeypatch.delenv(ENV_CM_TFTP_IPV4, raising=False)
+    monkeypatch.delenv(ENV_CM_TFTP_IPV6, raising=False)
 
     class _Args:
         command = "serve"
@@ -42,6 +53,9 @@ def test_cli_serve_sets_adapter_overrides(monkeypatch: object) -> None:
         cmts_hostname = CMTS_HOSTNAME
         read_community = READ_COMMUNITY
         write_community = WRITE_COMMUNITY
+        cm_snmpv2c_write_community = CM_SNMPV2C_WRITE_COMMUNITY
+        cm_tftp_ipv4 = CM_TFTP_IPV4
+        cm_tftp_ipv6 = CM_TFTP_IPV6
 
     monkeypatch.setattr(
         cli_module,
@@ -61,4 +75,7 @@ def test_cli_serve_sets_adapter_overrides(monkeypatch: object) -> None:
     assert os.environ[ENV_ADAPTER_HOSTNAME] == CMTS_HOSTNAME
     assert os.environ[ENV_ADAPTER_READ_COMMUNITY] == READ_COMMUNITY
     assert os.environ[ENV_ADAPTER_WRITE_COMMUNITY] == WRITE_COMMUNITY
+    assert os.environ[ENV_CM_SNMPV2C_WRITE_COMMUNITY] == CM_SNMPV2C_WRITE_COMMUNITY
+    assert os.environ[ENV_CM_TFTP_IPV4] == CM_TFTP_IPV4
+    assert os.environ[ENV_CM_TFTP_IPV6] == CM_TFTP_IPV6
     assert called["host"] == HOST

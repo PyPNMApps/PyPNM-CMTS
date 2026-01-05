@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ import logging
 import os
 import time
 
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.config.orchestrator_config import (
+    DEFAULT_SGW_DISCOVERY_MODE,
+    CmtsOrchestratorSettings,
+)
+from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.discovery import (
     ServiceGroupDiscovery,
     SnmpServiceGroupDiscovery,
@@ -17,6 +21,7 @@ from pypnm_cmts.sgw.discovery import (
 from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
 from pypnm_cmts.sgw.pollers.light import sgw_light_poller
+from pypnm_cmts.sgw.precheck import CmtsStartupPrecheck
 from pypnm_cmts.sgw.runtime_state import (
     compute_sgw_cache_ready,
     set_sgw_startup_failure,
@@ -54,6 +59,27 @@ class SgwStartupService:
                 self.logger.error("SG discovery failed: %s", message)
                 return
 
+            mode_value = str(settings.sgw.discovery.mode).strip().lower()
+            if mode_value == "":
+                mode_value = DEFAULT_SGW_DISCOVERY_MODE
+            self.logger.info("SGW discovery mode: %s", mode_value)
+
+            if self._precheck_required(settings):
+                precheck = CmtsStartupPrecheck()
+                precheck_result = await precheck.run(settings)
+                self.logger.info(
+                    "CMTS precheck: hostname=%s inet=%s ping=%s snmp=%s",
+                    str(precheck_result.hostname),
+                    str(precheck_result.inet),
+                    "ok" if precheck_result.ping_ok else "failed",
+                    "ok" if precheck_result.snmp_ok else "failed",
+                )
+                if not precheck_result.is_ok():
+                    message = precheck_result.error_message if precheck_result.error_message != "" else "cmts precheck failed"
+                    set_sgw_startup_failure(message)
+                    self.logger.error("SG discovery failed: %s", message)
+                    return
+
             try:
                 discovery = self._resolve_discovery(settings)
                 discovered_sg_ids = await asyncio.to_thread(discovery.discover, settings)
@@ -85,6 +111,7 @@ class SgwStartupService:
 
             ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
             self.logger.info("Discovered SG IDs: %s", [int(sg_id) for sg_id in discovered_sg_ids])
+            self.logger.info("SGWorkerID: %s", [self._format_worker_id(sg_id) for sg_id in discovered_sg_ids])
             self.logger.info("SGW initialized for %d service groups.", len(discovered_sg_ids))
             self.logger.info("SGW readiness after prime: %s", "ready" if ready else "not_ready")
         except Exception as exc:
@@ -104,9 +131,22 @@ class SgwStartupService:
         if self._discovery is not None:
             return self._discovery
         mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        if mode_value == "":
+            mode_value = DEFAULT_SGW_DISCOVERY_MODE
         if mode_value == "snmp":
             return SnmpServiceGroupDiscovery()
         return StaticServiceGroupDiscovery()
+
+    @staticmethod
+    def _precheck_required(settings: CmtsOrchestratorSettings) -> bool:
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        if mode_value == "":
+            mode_value = DEFAULT_SGW_DISCOVERY_MODE
+        return mode_value == "snmp"
+
+    @staticmethod
+    def _format_worker_id(sg_id: ServiceGroupId) -> str:
+        return f"sgw-{int(sg_id)}"
 
 
 __all__ = [

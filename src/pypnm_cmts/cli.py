@@ -14,6 +14,11 @@ import uvicorn
 from pydantic import ValidationError
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
+from pypnm_cmts.config.request_defaults import (
+    ENV_CM_SNMPV2C_WRITE_COMMUNITY,
+    ENV_CM_TFTP_IPV4,
+    ENV_CM_TFTP_IPV6,
+)
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     OwnerId,
@@ -136,6 +141,21 @@ def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Override leader election namespace.",
     )
+    parser.add_argument(
+        "--cm-snmpv2c-write-community",
+        default="",
+        help="Override CM SNMPv2c write community for request defaults.",
+    )
+    parser.add_argument(
+        "--cm-tftp-ipv4",
+        default="",
+        help="Override CM TFTP IPv4 for request defaults.",
+    )
+    parser.add_argument(
+        "--cm-tftp-ipv6",
+        default="",
+        help="Override CM TFTP IPv6 for request defaults.",
+    )
 
 
 def _add_discover_args(parser: argparse.ArgumentParser) -> None:
@@ -243,6 +263,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--write-community",
         default="",
         help="Override adapter.write_community for SGW startup discovery.",
+    )
+    serve_parser.add_argument(
+        "--cm-snmpv2c-write-community",
+        default="",
+        help="Override CM SNMPv2c write community for request defaults.",
+    )
+    serve_parser.add_argument(
+        "--cm-tftp-ipv4",
+        default="",
+        help="Override CM TFTP IPv4 for request defaults.",
+    )
+    serve_parser.add_argument(
+        "--cm-tftp-ipv6",
+        default="",
+        help="Override CM TFTP IPv6 for request defaults.",
     )
     serve_parser.add_argument(
         "--with-runner",
@@ -553,6 +588,12 @@ def _run_cli() -> int:
             os.environ[ENV_ADAPTER_READ_COMMUNITY] = str(args.read_community).strip()
         if str(args.write_community).strip() != "":
             os.environ[ENV_ADAPTER_WRITE_COMMUNITY] = str(args.write_community).strip()
+        if str(args.cm_snmpv2c_write_community).strip() != "":
+            os.environ[ENV_CM_SNMPV2C_WRITE_COMMUNITY] = str(args.cm_snmpv2c_write_community).strip()
+        if str(args.cm_tftp_ipv4).strip() != "":
+            os.environ[ENV_CM_TFTP_IPV4] = str(args.cm_tftp_ipv4).strip()
+        if str(args.cm_tftp_ipv6).strip() != "":
+            os.environ[ENV_CM_TFTP_IPV6] = str(args.cm_tftp_ipv6).strip()
 
         uvicorn_args = {
             "app": "pypnm_cmts.api.main:app",

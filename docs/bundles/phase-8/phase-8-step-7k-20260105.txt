@@ -1,0 +1,193 @@
+# FILE: src/pypnm_cmts/api/routes/serving_group/schemas.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.lib.types import IPv4Str, IPv6Str, MacAddressStr
+
+from pypnm_cmts.api.common.cmts_request import (
+    CmtsRequestEnvelopeModel,
+    CmtsServingGroupFilterModel,
+)
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ChSetId, CmtsCmRegState, ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwChannelSummaryModel
+from pypnm_cmts.sgw.runtime_state import SgwStartupStatusModel
+
+DEFAULT_PAGE_NUMBER = 1
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 1000
+DEFAULT_REFRESH_MODE = CacheRefreshMode.NONE
+DEFAULT_MAX_WAIT_SECONDS = 0.0
+MAX_WAIT_SECONDS = 10.0
+DEFAULT_TOPOLOGY_SG_ID = ServiceGroupId(0)
+DEFAULT_CHANNEL_SET_ID = ChSetId(0)
+DEFAULT_REGISTRATION_STATUS = CmtsCmRegState(0)
+
+
+class CacheResponseBase(BaseModel):
+    """Base response model for cache-backed endpoints."""
+
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
+    message: str = Field(default="", description="Informational or error message.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+
+
+class GetServingGroupIdsRequest(BaseModel):
+    """Request model for serving group id retrieval."""
+
+    cmts: CmtsRequestEnvelopeModel | None = Field(default=None, description="Optional CMTS request envelope.")
+
+
+class ServingGroupCacheSummaryModel(BaseModel):
+    """Cache summary for a serving group snapshot."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    metadata: SgwCacheMetadataModel | None = Field(default=None, description="Cache metadata for the snapshot.")
+
+
+class GetServingGroupIdsResponse(CacheResponseBase):
+    """Response model for serving group id retrieval."""
+
+    discovered_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Discovered service group identifiers.")
+    sgw_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    summaries: list[ServingGroupCacheSummaryModel] = Field(default_factory=list, description="Per-SG cache summary entries.")
+
+
+class ServingGroupStatusResponse(CacheResponseBase):
+    """Response model for serving group cache and runtime status."""
+
+    startup_status: SgwStartupStatusModel = Field(default_factory=SgwStartupStatusModel, description="SGW startup status snapshot.")
+    refresh_running: bool = Field(default=False, description="Whether the SGW background refresh loop is running.")
+    discovered_count: int = Field(default=0, description="Count of discovered service groups.")
+    cache_ready: bool = Field(default=False, description="Whether SGW cache is primed for all discovered SGs.")
+    missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers missing cache snapshots.")
+
+
+class ServingGroupOnlyEnvelopeModel(BaseModel):
+    """CMTS envelope limited to serving group selection."""
+
+    serving_group: CmtsServingGroupFilterModel = Field(default_factory=CmtsServingGroupFilterModel, description="Serving group selection.")
+
+
+class GetServingGroupCableModemsRequest(BaseModel):
+    """Request model for serving group cable modem retrieval."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    cmts: ServingGroupOnlyEnvelopeModel = Field(default_factory=ServingGroupOnlyEnvelopeModel, description="Serving group request envelope.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupCableModemsRequest:
+        for sg_id in self.cmts.serving_group.id:
+            if int(sg_id) <= 0:
+                raise ValueError("serving_group.id must be greater than zero.")
+        return self
+
+
+class ServingGroupCableModemEntryModel(BaseModel):
+    """Cable modem entry for serving group modem responses."""
+
+    mac_address: MacAddressStr = Field(default=MacAddressStr(""), description="Cable modem MAC address.")
+    ipv4: IPv4Str = Field(default=IPv4Str(""), description="Cable modem IPv4 address.")
+    ipv6: IPv6Str = Field(default=IPv6Str(""), description="Cable modem IPv6 address.")
+    ds_channel_set: ChSetId = Field(default=DEFAULT_CHANNEL_SET_ID, description="Downstream channel set identifier.")
+    us_channel_set: ChSetId = Field(default=DEFAULT_CHANNEL_SET_ID, description="Upstream channel set identifier.")
+    registration_status: CmtsCmRegState = Field(default=DEFAULT_REGISTRATION_STATUS, description="Cable modem registration status.")
+
+
+class ServingGroupCableModemsGroupModel(BaseModel):
+    """Grouped cable modem results for a service group."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, description="Current page number.")
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, description="Requested page size.")
+    total_items: int = Field(default=0, description="Total number of modems for the service group.")
+    total_pages: int = Field(default=0, description="Total pages for the service group.")
+    items: list[ServingGroupCableModemEntryModel] = Field(default_factory=list, description="Paged cable modem entries.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+
+
+class GetServingGroupCableModemsResponse(CacheResponseBase):
+    """Response model for serving group cable modem retrieval."""
+
+    requested_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers.")
+    resolved_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Resolved service group identifiers.")
+    missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers not found.")
+    groups: list[ServingGroupCableModemsGroupModel] = Field(default_factory=list, description="Grouped cable modem entries by service group.")
+
+
+class GetServingGroupTopologyRequest(BaseModel):
+    """Request model for serving group topology retrieval."""
+
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    sg_id: ServiceGroupId | None = Field(default=None, description="Legacy service group identifier.")
+    refresh: CacheRefreshMode = Field(default=DEFAULT_REFRESH_MODE, description="Optional refresh mode for the request.")
+    max_wait_seconds: float = Field(default=DEFAULT_MAX_WAIT_SECONDS, ge=0.0, le=MAX_WAIT_SECONDS, description="Maximum time to wait for a refresh.")
+    require_fresh: bool = Field(default=False, description="Wait for a refreshed snapshot when refresh is requested.")
+
+    @model_validator(mode="after")
+    def _validate_sg_id(self) -> GetServingGroupTopologyRequest:
+        selected = list(self.cmts.serving_group.id)
+        if not selected and self.sg_id is not None:
+            if int(self.sg_id) <= 0:
+                raise ValueError("sg_id must be greater than zero for topology requests.")
+            updated_sg = self.cmts.serving_group.model_copy(update={"id": [self.sg_id]})
+            self.cmts = self.cmts.model_copy(update={"serving_group": updated_sg})
+            selected = [self.sg_id]
+        if not selected or len(selected) != 1:
+            raise ValueError("topology requests require exactly one serving_group.id.")
+        if int(selected[0]) <= 0:
+            raise ValueError("serving_group.id must be greater than zero for topology requests.")
+        self.sg_id = selected[0]
+        return self
+
+
+class ServingGroupTopologyModel(BaseModel):
+    """Topology summary payload for a serving group."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+
+
+class GetServingGroupTopologyResponse(CacheResponseBase):
+    """Response model for serving group topology retrieval."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers included in aggregation.")
+    topology: ServingGroupTopologyModel = Field(default_factory=lambda: ServingGroupTopologyModel(sg_id=DEFAULT_TOPOLOGY_SG_ID), description="Cached topology summary.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+    refresh_applied: bool = Field(default=False, description="Whether a refresh request was accepted for processing.")
+    waited_seconds: float = Field(default=0.0, description="Seconds waited for a refresh to advance.")
+
+
+__all__ = [
+    "CacheResponseBase",
+    "DEFAULT_PAGE_NUMBER",
+    "DEFAULT_PAGE_SIZE",
+    "DEFAULT_REFRESH_MODE",
+    "DEFAULT_MAX_WAIT_SECONDS",
+    "DEFAULT_TOPOLOGY_SG_ID",
+    "MAX_PAGE_SIZE",
+    "MAX_WAIT_SECONDS",
+    "GetServingGroupIdsRequest",
+    "GetServingGroupIdsResponse",
+    "ServingGroupStatusResponse",
+    "ServingGroupOnlyEnvelopeModel",
+    "GetServingGroupCableModemsRequest",
+    "GetServingGroupCableModemsResponse",
+    "ServingGroupCableModemEntryModel",
+    "ServingGroupCableModemsGroupModel",
+    "GetServingGroupTopologyRequest",
+    "GetServingGroupTopologyResponse",
+    "ServingGroupCacheSummaryModel",
+    "ServingGroupTopologyModel",
+]
+

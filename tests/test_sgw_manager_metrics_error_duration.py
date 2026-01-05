@@ -17,6 +17,7 @@ from pypnm_cmts.sgw.store import SgwCacheStore
 def test_sgw_manager_records_duration_on_error() -> None:
     settings = CmtsOrchestratorSettings.model_validate(
         {
+            "adapter": {"hostname": "cmts.example", "community": "public"},
             "sgw": {
                 "poll_light_seconds": 1,
                 "poll_heavy_seconds": 1,

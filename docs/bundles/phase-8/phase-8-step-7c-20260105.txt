@@ -1,0 +1,615 @@
+# FILE: src/pypnm_cmts/sgw/precheck.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+
+from pydantic import BaseModel, Field
+from pypnm.lib.host_endpoint import HostEndpoint
+from pypnm.lib.inet import Inet, InetAddressStr
+from pypnm.lib.ping import Ping
+from pypnm.lib.types import HostNameStr
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.docsis.cmts_operation import CmtsOperation
+
+
+class CmtsStartupPrecheckResult(BaseModel):
+    """Result of CMTS startup prechecks."""
+
+    ping_ok: bool = Field(default=False, description="Whether ICMP ping succeeded.")
+    snmp_ok: bool = Field(default=False, description="Whether SNMP sysDescr succeeded.")
+    hostname: HostNameStr = Field(default=HostNameStr(""), description="CMTS hostname.")
+    inet: InetAddressStr = Field(default=InetAddressStr(""), description="Resolved CMTS IP address.")
+    error_message: str = Field(default="", description="Precheck failure message.")
+
+    def is_ok(self) -> bool:
+        """Return True when both ping and SNMP checks succeed."""
+        return bool(self.ping_ok) and bool(self.snmp_ok) and self.error_message == ""
+
+
+class CmtsStartupPrecheck:
+    """Run CMTS reachability checks before SGW discovery."""
+
+    def __init__(self) -> None:
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+
+    async def run(self, settings: CmtsOrchestratorSettings) -> CmtsStartupPrecheckResult:
+        """
+        Perform ping and SNMP reachability checks.
+        """
+        hostname_value = str(settings.adapter.hostname).strip()
+        if hostname_value == "":
+            return CmtsStartupPrecheckResult(error_message="adapter.hostname must be set for CMTS precheck")
+        community_value = str(settings.adapter.community).strip()
+        if community_value == "":
+            return CmtsStartupPrecheckResult(error_message="adapter.community must be set for CMTS precheck")
+        port_value = int(settings.adapter.port)
+
+        inet = self._resolve_inet(hostname_value)
+        if inet is None:
+            return CmtsStartupPrecheckResult(
+                hostname=HostNameStr(hostname_value),
+                error_message="cmts hostname resolution failed",
+            )
+
+        inet_address = InetAddressStr(str(inet))
+        ping_ok = self._ping_check(inet_address)
+        snmp_ok = await self._snmp_check(inet, community_value, port_value)
+        error_message = ""
+        if not ping_ok:
+            error_message = "cmts ping check failed"
+        if ping_ok and not snmp_ok:
+            error_message = "cmts snmp check failed"
+
+        return CmtsStartupPrecheckResult(
+            ping_ok=ping_ok,
+            snmp_ok=snmp_ok,
+            hostname=HostNameStr(hostname_value),
+            inet=inet_address,
+            error_message=error_message,
+        )
+
+    @staticmethod
+    def _resolve_inet(hostname: str) -> Inet | None:
+        endpoint = HostEndpoint(HostNameStr(hostname))
+        addresses = endpoint.resolve()
+        if not addresses:
+            return None
+        try:
+            return Inet(addresses[0])
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _ping_check(inet_address: InetAddressStr) -> bool:
+        return bool(Ping.is_reachable(inet_address))
+
+    async def _snmp_check(self, inet: Inet, community: str, port: int) -> bool:
+        try:
+            operation = CmtsOperation(inet=inet, write_community=community, port=port)
+            sys_descr = await operation.getSysDescr()
+        except Exception as exc:
+            self.logger.error("SNMP precheck failed: %s", exc)
+            return False
+        return not sys_descr.is_empty
+
+
+__all__ = [
+    "CmtsStartupPrecheck",
+    "CmtsStartupPrecheckResult",
+]
+
+# FILE: src/pypnm_cmts/sgw/startup.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.sgw.discovery import (
+    ServiceGroupDiscovery,
+    SnmpServiceGroupDiscovery,
+    StaticServiceGroupDiscovery,
+)
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
+from pypnm_cmts.sgw.pollers.light import sgw_light_poller
+from pypnm_cmts.sgw.precheck import CmtsStartupPrecheck
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    set_sgw_startup_failure,
+    set_sgw_startup_prime_failure,
+    set_sgw_startup_success,
+    start_sgw_background_refresh,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+class SgwStartupService:
+    """Service for SG discovery and SGW priming at startup."""
+
+    def __init__(self, discovery: ServiceGroupDiscovery | None = None) -> None:
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._discovery = discovery
+
+    async def initialize(self) -> None:
+        """
+        Discover SGs and prime SGW cache at startup.
+        """
+        settings = CmtsOrchestratorSettings.from_system_config()
+        try:
+            if not bool(settings.sgw.enabled):
+                store = SgwCacheStore()
+                manager = SgwManager(settings=settings, store=store, service_groups=[])
+                set_sgw_startup_success([], store, manager, self._now_epoch())
+                self.logger.info("SGW startup skipped (sgw.enabled is false).")
+                return
+
+            state_dir_value = str(settings.state_dir).strip() if settings.state_dir is not None else ""
+            if state_dir_value == "":
+                message = "state_dir must be set for SGW discovery"
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+
+            if self._precheck_required(settings):
+                precheck = CmtsStartupPrecheck()
+                precheck_result = await precheck.run(settings)
+                self.logger.info(
+                    "CMTS precheck: hostname=%s inet=%s ping=%s snmp=%s",
+                    str(precheck_result.hostname),
+                    str(precheck_result.inet),
+                    "ok" if precheck_result.ping_ok else "failed",
+                    "ok" if precheck_result.snmp_ok else "failed",
+                )
+                if not precheck_result.is_ok():
+                    message = precheck_result.error_message if precheck_result.error_message != "" else "cmts precheck failed"
+                    set_sgw_startup_failure(message)
+                    self.logger.error("SG discovery failed: %s", message)
+                    return
+
+            try:
+                discovery = self._resolve_discovery(settings)
+                discovered_sg_ids = await asyncio.to_thread(discovery.discover, settings)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+
+            store = SgwCacheStore()
+            manager = SgwManager(
+                settings=settings,
+                store=store,
+                service_groups=discovered_sg_ids,
+                heavy_poller=sgw_heavy_poller,
+                light_poller=sgw_light_poller,
+            )
+            now_epoch = self._now_epoch()
+            try:
+                await asyncio.to_thread(manager.refresh_once, now_epoch)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_prime_failure(discovered_sg_ids, message)
+                self.logger.exception("SGW priming failed: %s", message)
+                return
+            set_sgw_startup_success(discovered_sg_ids, store, manager, now_epoch)
+            if not self._pytest_running():
+                start_sgw_background_refresh()
+
+            ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+            self.logger.info("Discovered SG IDs: %s", [int(sg_id) for sg_id in discovered_sg_ids])
+            self.logger.info("SGW initialized for %d service groups.", len(discovered_sg_ids))
+            self.logger.info("SGW readiness after prime: %s", "ready" if ready else "not_ready")
+        except Exception as exc:
+            message = str(exc)
+            set_sgw_startup_failure(message)
+            self.logger.exception("SGW startup failed: %s", message)
+
+    @staticmethod
+    def _now_epoch() -> float:
+        return float(time.time())
+
+    @staticmethod
+    def _pytest_running() -> bool:
+        return os.getenv("PYTEST_CURRENT_TEST") is not None
+
+    def _resolve_discovery(self, settings: CmtsOrchestratorSettings) -> ServiceGroupDiscovery:
+        if self._discovery is not None:
+            return self._discovery
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        if mode_value == "snmp":
+            return SnmpServiceGroupDiscovery()
+        return StaticServiceGroupDiscovery()
+
+    @staticmethod
+    def _precheck_required(settings: CmtsOrchestratorSettings) -> bool:
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        return mode_value == "snmp"
+
+
+__all__ = [
+    "SgwStartupService",
+]
+
+# FILE: tests/test_sgw_startup.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.lib.inet import InetAddressStr
+from pypnm.lib.types import HostNameStr
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
+from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.discovery import ServiceGroupDiscovery
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwSnapshotPayloadModel
+from pypnm_cmts.sgw.precheck import CmtsStartupPrecheckResult
+from pypnm_cmts.sgw.runtime_state import (
+    get_sgw_manager,
+    get_sgw_startup_status,
+    get_sgw_store,
+    reset_sgw_runtime_state,
+)
+from pypnm_cmts.sgw.startup import SgwStartupService
+
+
+def _build_settings(state_dir: Path) -> CmtsOrchestratorSettings:
+    payload = {
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+            "write_community": "",
+            "port": 161,
+        },
+        "state_dir": str(state_dir),
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+class FakeDiscovery:
+    """Test discovery provider for deterministic SG results."""
+
+    def __init__(self, sg_ids: list[ServiceGroupId], error: Exception | None = None) -> None:
+        self._sg_ids = list(sg_ids)
+        self._error = error
+
+    def discover(self, _settings: CmtsOrchestratorSettings) -> list[ServiceGroupId]:
+        if self._error is not None:
+            raise self._error
+        return list(self._sg_ids)
+
+
+def _patch_pollers(monkeypatch: object) -> None:
+    def _fake_heavy(_sg_id: ServiceGroupId, _settings: CmtsOrchestratorSettings) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    def _fake_light(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_heavy_poller", _fake_heavy)
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_light_poller", _fake_light)
+
+
+def _set_discovery(monkeypatch: object, discovery: ServiceGroupDiscovery) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.api.main._sgw_startup_service",
+        SgwStartupService(discovery=discovery),
+    )
+
+
+def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2), ServiceGroupId(3)]
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+
+    with TestClient(app):
+        status = get_sgw_startup_status()
+        assert status.discovery_ok is True
+        assert status.discovered_sg_ids == sg_ids
+        store = get_sgw_store()
+        assert store is not None
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            assert entry is not None
+            assert float(entry.snapshot.metadata.snapshot_time_epoch) > 0.0
+
+
+def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 4321.0),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == OperationalStatus.OK.value
+        assert payload["discovery_ok"] is True
+        assert payload["sgw_ready"] is True
+        assert payload["discovered_sg_ids"] == [1, 2]
+
+
+def test_readiness_false_when_discovery_fails(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    _set_discovery(monkeypatch, FakeDiscovery([], error=RuntimeError("discovery failed")))
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["failed_check"] == ReadinessCheck.SGW_DISCOVERY.value
+        assert payload["message"] != ""
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is False
+    assert status.prime_failed is False
+    assert status.error_message != ""
+
+
+def test_startup_disabled_mode_uses_coherent_store_and_manager(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    now_epoch = 1234.0
+    settings = CmtsOrchestratorSettings.model_validate({"sgw": {"enabled": False}})
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    asyncio.run(SgwStartupService(discovery=FakeDiscovery([])).initialize())
+
+    store = get_sgw_store()
+    manager = get_sgw_manager()
+    assert store is not None
+    assert manager is not None
+    assert manager.get_store() is store
+
+
+def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    error_message = "prime failed"
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+
+    def _raise_refresh(self: SgwManager, _now_epoch: float) -> None:
+        raise RuntimeError(error_message)
+
+    monkeypatch.setattr(SgwManager, "refresh_once", _raise_refresh)
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["failed_check"] == ReadinessCheck.SGW_PRIME.value
+        assert error_message in payload["message"]
+        assert payload["discovered_sg_ids"] == [1]
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is True
+    assert status.prime_failed is True
+    assert status.discovered_sg_ids == sg_ids
+    assert error_message in status.error_message
+
+
+@pytest.mark.unit
+def test_startup_starts_background_refresh(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    start_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._pytest_running",
+        staticmethod(lambda: False),
+    )
+
+    def _start_refresh() -> bool:
+        start_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.start_sgw_background_refresh", _start_refresh)
+
+    asyncio.run(SgwStartupService(discovery=FakeDiscovery(sg_ids)).initialize())
+
+    assert start_calls["count"] == 1
+
+
+def test_startup_snmp_mode_uses_threaded_discovery(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    payload = {
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+            "write_community": "",
+            "port": 161,
+        },
+        "state_dir": str(tmp_path / "coordination"),
+        "sgw": {"discovery": {"mode": "snmp"}},
+    }
+    settings = CmtsOrchestratorSettings.model_validate(payload)
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    async def _fake_precheck(self: object, _settings: CmtsOrchestratorSettings) -> CmtsStartupPrecheckResult:
+        return CmtsStartupPrecheckResult(
+            ping_ok=True,
+            snmp_ok=True,
+            hostname=HostNameStr("cmts.example"),
+            inet=InetAddressStr("192.168.0.100"),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.CmtsStartupPrecheck.run", _fake_precheck)
+
+    async def _fake_discover_service_groups(self: object) -> list[CmtsServiceGroupModel]:
+        return [
+            CmtsServiceGroupModel(md_cm_sg_id=3),
+            CmtsServiceGroupModel(md_cm_sg_id=1),
+            CmtsServiceGroupModel(md_cm_sg_id=3),
+        ]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_service_groups",
+        _fake_discover_service_groups,
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+
+    asyncio.run(SgwStartupService().initialize())
+
+    status = get_sgw_startup_status()
+    assert status.discovery_ok is True
+    assert status.discovered_sg_ids == [ServiceGroupId(1), ServiceGroupId(3)]
+
+
+@pytest.mark.unit
+def test_startup_snmp_mode_precheck_failure(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    payload = {
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+            "write_community": "",
+            "port": 161,
+        },
+        "state_dir": str(tmp_path / "coordination"),
+        "sgw": {"discovery": {"mode": "snmp"}},
+    }
+    settings = CmtsOrchestratorSettings.model_validate(payload)
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    async def _fake_precheck(self: object, _settings: CmtsOrchestratorSettings) -> CmtsStartupPrecheckResult:
+        return CmtsStartupPrecheckResult(
+            ping_ok=False,
+            snmp_ok=False,
+            hostname=HostNameStr("cmts.example"),
+            inet=InetAddressStr("192.168.0.100"),
+            error_message="cmts ping check failed",
+        )
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.CmtsStartupPrecheck.run", _fake_precheck)
+
+    asyncio.run(SgwStartupService().initialize())
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is False
+    assert status.error_message == "cmts ping check failed"
+
+# FILE: docs/bundles/phase-8/phase-8-step-7c.md
+# Phase 8 · Step 7c
+
+## Goal
+Add a startup precheck class for CMTS ping and SNMP reachability, wire it into SGW startup for SNMP discovery mode, and add hermetic tests.
+
+## Summary of changes
+- Added CMTS startup precheck class with ping and SNMP sysDescr checks.
+- Wired precheck into SGW startup for SNMP discovery mode and logged results.
+- Added startup tests for precheck success and failure paths.
+
+## Files changed
+- src/pypnm_cmts/sgw/precheck.py
+- src/pypnm_cmts/sgw/startup.py
+- tests/test_sgw_startup.py
+
+## Tests run
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m py_compile src/pypnm_cmts/sgw/precheck.py src/pypnm_cmts/sgw/startup.py tests/test_sgw_startup.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_startup.py
+
+## Results / Notes
+- Precheck runs only for sgw.discovery.mode == snmp and logs ping/SNMP status before discovery.

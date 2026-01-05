@@ -1,27 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
 import asyncio
 
-from pypnm.lib.types import (
-    HostNameStr,
-    IPv4Str,
-    IPv6Str,
-    MacAddressStr,
-    SnmpReadCommunity,
-    SnmpWriteCommunity,
-)
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
+    DocsIf3CmtsCmRegStatusEntry,
+)
 from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
 from pypnm_cmts.lib.types import (
-    CableModemIndex,
-    IPv6LinkLocalStr,
+    ChSetId,
+    CmtsCmRegState,
     MdCmSgId,
-    RegisterCmMacInetAddress,
 )
 
 
@@ -44,34 +39,37 @@ class _FakeOperation:
             ),
         ]
 
-    async def getAllRegisterCmMacInetAddress(
-        self,
-        serving_group_id: MdCmSgId,
-    ) -> list[RegisterCmMacInetAddress]:
+    async def getAllRegisterCm(self, serving_group_id: MdCmSgId) -> list[DocsIf3CmtsCmRegStatusEntry]:
         if int(serving_group_id) == 1:
             return [
-                (
-                    CableModemIndex(1),
-                    MacAddressStr("ff:ff:ff:ff:ff:ff"),
-                    IPv4Str("192.168.0.11"),
-                    IPv6Str(""),
-                    IPv6LinkLocalStr(IPv6Str("")),
+                DocsIf3CmtsCmRegStatusEntry(
+                    docsIf3CmtsCmRegStatusMacAddr="aa:bb:cc:dd:ee:01",
+                    docsIf3CmtsCmRegStatusIPv4Addr="192.168.0.11",
+                    docsIf3CmtsCmRegStatusIPv6Addr="",
+                    docsIf3CmtsCmRegStatusIPv6LinkLocal="",
+                    docsIf3CmtsCmRegStatusValue=CmtsCmRegState(5),
+                    docsIf3CmtsCmRegStatusRcsId=ChSetId(10),
+                    docsIf3CmtsCmRegStatusTcsId=ChSetId(20),
                 ),
-                (
-                    CableModemIndex(2),
-                    MacAddressStr("00:11:22:33:44:55"),
-                    IPv4Str("192.168.0.10"),
-                    IPv6Str(""),
-                    IPv6LinkLocalStr(IPv6Str("")),
+                DocsIf3CmtsCmRegStatusEntry(
+                    docsIf3CmtsCmRegStatusMacAddr="00:11:22:33:44:55",
+                    docsIf3CmtsCmRegStatusIPv4Addr="192.168.0.10",
+                    docsIf3CmtsCmRegStatusIPv6Addr="",
+                    docsIf3CmtsCmRegStatusIPv6LinkLocal="",
+                    docsIf3CmtsCmRegStatusValue=CmtsCmRegState(6),
+                    docsIf3CmtsCmRegStatusRcsId=ChSetId(11),
+                    docsIf3CmtsCmRegStatusTcsId=ChSetId(21),
                 ),
             ]
         return [
-            (
-                CableModemIndex(3),
-                MacAddressStr("aa:bb:cc:dd:ee:ff"),
-                IPv4Str(""),
-                IPv6Str(""),
-                IPv6LinkLocalStr(IPv6Str("")),
+            DocsIf3CmtsCmRegStatusEntry(
+                docsIf3CmtsCmRegStatusMacAddr="aa:bb:cc:dd:ee:ff",
+                docsIf3CmtsCmRegStatusIPv4Addr="",
+                docsIf3CmtsCmRegStatusIPv6Addr="",
+                docsIf3CmtsCmRegStatusIPv6LinkLocal="",
+                docsIf3CmtsCmRegStatusValue=CmtsCmRegState(7),
+                docsIf3CmtsCmRegStatusRcsId=ChSetId(12),
+                docsIf3CmtsCmRegStatusTcsId=ChSetId(22),
             ),
         ]
 
@@ -98,12 +96,16 @@ def test_discovery_inventory_orders_service_groups_and_cms(monkeypatch: object) 
     assert sg_1.cm_count == 2
     assert [str(cm.mac) for cm in sg_1.cms] == [
         "00:11:22:33:44:55",
-        "ff:ff:ff:ff:ff:ff",
+        "aa:bb:cc:dd:ee:01",
     ]
+    assert int(sg_1.cms[0].ds_channel_set) == 11
+    assert int(sg_1.cms[0].us_channel_set) == 21
+    assert int(sg_1.cms[0].registration_status) == 6
 
     sg_2 = result.per_sg[1]
     assert sg_2.cm_count == 1
     assert str(sg_2.cms[0].mac) == "aa:bb:cc:dd:ee:ff"
+    assert int(sg_2.cms[0].ds_channel_set) == 12
 
 
 def test_build_operation_uses_write_community_fallback(monkeypatch: object) -> None:

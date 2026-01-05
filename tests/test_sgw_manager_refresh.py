@@ -28,6 +28,7 @@ def _settings(
     cache_max_age_seconds: int,
 ) -> CmtsOrchestratorSettings:
     payload = {
+        "adapter": {"hostname": "cmts.example", "community": "public"},
         "sgw": {
             "poll_light_seconds": poll_light_seconds,
             "poll_heavy_seconds": poll_heavy_seconds,

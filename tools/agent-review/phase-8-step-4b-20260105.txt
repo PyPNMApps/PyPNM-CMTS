@@ -1,0 +1,423 @@
+# FILE: docs/api/fast-api/index.md
+# FastAPI Reference
+
+FastAPI Endpoint Documentation For PyPNM-CMTS Lives Here.
+
+## Running The Service
+
+Start the FastAPI service using the CLI:
+
+```bash
+pypnm-cmts serve --host 127.0.0.1 --port 8000
+```
+
+Example health checks:
+
+```bash
+curl http://127.0.0.1:8000/ops/health
+curl http://127.0.0.1:8000/ops/ready
+```
+
+SGW refresh runs in a background loop after startup prime. Cache-first endpoints
+may request a refresh, but they do not execute SNMP in the request thread.
+
+## Current Endpoints
+
+- `POST /system/sysDescr` - CMTS sysDescr lookup.
+- `POST /system/serviceGroupTopology` - CMTS service-group topology lookup.
+- `POST /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
+- `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
+- `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
+- `GET /ops/health` - Liveness probe.
+- `GET /ops/ready` - Readiness probe.
+- `GET /ops/version` - Service identity and version.
+- `GET /ops/status` - Operational process status snapshot.
+
+## Endpoint Documentation
+
+- [Operational endpoints](operational.md)
+- [Serving group endpoints](serving-group.md)
+
+## POST /system/sysDescr
+
+Request Envelope: Canonical CMTS request envelope with target and SNMP settings.
+Selection Rules: serving_group and cable_modem filters are accepted but ignored by this endpoint.
+
+Request body:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": []
+    },
+    "cable_modem": {
+      "mac_address": []
+    }
+  },
+  "target": {
+    "hostname": "192.168.0.100"
+  },
+  "snmp": {
+    "snmpV2c": {
+      "community": "public"
+    }
+  }
+}
+```
+
+Legacy request (still accepted):
+
+```json
+{
+  "cmts": {
+    "hostname": "192.168.0.100"
+  },
+  "snmp": {
+    "snmp_v2c": {
+      "community": "public"
+    }
+  }
+}
+```
+
+## POST /system/serviceGroupTopology
+
+Request Envelope: Canonical CMTS request envelope with target and SNMP settings.
+Selection Rules: serving_group and cable_modem filters are accepted but ignored by this endpoint.
+
+Request body:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": []
+    },
+    "cable_modem": {
+      "mac_address": []
+    }
+  },
+  "target": {
+    "hostname": "192.168.0.100"
+  },
+  "snmp": {
+    "snmpV2c": {
+      "community": "public"
+    }
+  }
+}
+```
+
+Legacy request (still accepted):
+
+```json
+{
+  "cmts": {
+    "hostname": "192.168.0.100"
+  },
+  "snmp": {
+    "snmp_v2c": {
+      "community": "public"
+    }
+  }
+}
+```
+
+## Next Steps
+
+- Add endpoint summaries as routes are added.
+- Link each route section to the owning module under `src/pypnm_cmts/api`.
+
+# FILE: src/pypnm_cmts/api/common/cmts/schema.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pypnm.api.routes.common.classes.common_endpoint_classes.schema.base_snmp import (
+    SNMPv2c,
+    SNMPv3,
+    to_camel,
+)
+from pypnm.lib.types import HostNameStr
+from pypnm.snmp.snmp_v2c import Snmp_v2c
+
+from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
+
+
+class CmtsSnmpConfig(BaseModel):
+    """
+    SNMP configuration model supporting both v2c and optional v3 settings.
+    """
+    model_config        = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    port: int           = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
+
+    snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
+    snmp_v3: SNMPv3 | None = Field(default=None, description="SNMP v3 settings")
+
+
+class CmtsTarget(BaseModel):
+    """
+    CMTS connection target details.
+    """
+    hostname: HostNameStr = Field(
+        default_factory=lambda: CmtsSystemConfigSettings.cmts_device_hostname(0),
+        description="CMTS hostname or label.",
+    )
+
+class CommonCmtsRequest(BaseModel):
+    """
+    Common request model for CMTS endpoints.
+    """
+    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    target: CmtsTarget = Field(default_factory=CmtsTarget, description="CMTS connection details.")
+    snmp: CmtsSnmpConfig = Field(default_factory=CmtsSnmpConfig, description="SNMP connection settings.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_request(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        if "target" in values:
+            return values
+        cmts_value = values.get("cmts")
+        if isinstance(cmts_value, dict) and "hostname" in cmts_value:
+            normalized = dict(values)
+            normalized["target"] = cmts_value
+            normalized["cmts"] = {}
+            return normalized
+        return values
+
+# FILE: tests/test_system_endpoints.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.lib.types import HostNameStr, InetAddressStr
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.api.routes.system.schemas import (
+    CmtsServiceGroupTopologyResponse,
+    CmtsSysDescrResponse,
+)
+from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+
+
+async def _noop() -> None:
+    return
+
+
+def _disable_startup(monkeypatch: object) -> None:
+    monkeypatch.setattr("pypnm_cmts.api.main._sgw_startup_service.initialize", _noop)
+
+
+def _legacy_request(hostname: str, community: str) -> dict[str, object]:
+    return {
+        "cmts": {"hostname": hostname},
+        "snmp": {"snmp_v2c": {"community": community}},
+    }
+
+
+def _canonical_request(hostname: str, community: str) -> dict[str, object]:
+    return {
+        "cmts": {
+            "serving_group": {"id": []},
+            "cable_modem": {"mac_address": []},
+        },
+        "target": {"hostname": hostname},
+        "snmp": {"snmp_v2c": {"community": community}},
+    }
+
+
+def _canonical_request_camel(hostname: str, community: str) -> dict[str, object]:
+    return {
+        "cmts": {
+            "serving_group": {"id": []},
+            "cable_modem": {"mac_address": []},
+        },
+        "target": {"hostname": hostname},
+        "snmp": {"snmpV2c": {"community": community}},
+    }
+
+
+@pytest.mark.unit
+def test_system_sysdescr_accepts_canonical_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_sysdescr(_request: object) -> CmtsSysDescrResponse:
+        return CmtsSysDescrResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=CmtsSysDescrModel.empty(),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_sysdescr", _fake_sysdescr)
+
+    with TestClient(app) as client:
+        response = client.post("/system/sysDescr", json=_canonical_request("192.168.0.100", "public"))
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_sysdescr_accepts_canonical_envelope_camelcase(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_sysdescr(_request: object) -> CmtsSysDescrResponse:
+        return CmtsSysDescrResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=CmtsSysDescrModel.empty(),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_sysdescr", _fake_sysdescr)
+
+    with TestClient(app) as client:
+        response = client.post("/system/sysDescr", json=_canonical_request_camel("192.168.0.100", "public"))
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_sysdescr_accepts_legacy_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_sysdescr(_request: object) -> CmtsSysDescrResponse:
+        return CmtsSysDescrResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=CmtsSysDescrModel.empty(),
+        )
+
+    monkeypatch.setattr("pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_sysdescr", _fake_sysdescr)
+
+    with TestClient(app) as client:
+        response = client.post("/system/sysDescr", json=_legacy_request("192.168.0.100", "public"))
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_service_group_topology_accepts_canonical_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_topology(_request: object) -> CmtsServiceGroupTopologyResponse:
+        return CmtsServiceGroupTopologyResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_service_group_topology",
+        _fake_topology,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/system/serviceGroupTopology", json=_canonical_request("192.168.0.100", "public"))
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_service_group_topology_accepts_canonical_envelope_camelcase(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_topology(_request: object) -> CmtsServiceGroupTopologyResponse:
+        return CmtsServiceGroupTopologyResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_service_group_topology",
+        _fake_topology,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/system/serviceGroupTopology",
+            json=_canonical_request_camel("192.168.0.100", "public"),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_service_group_topology_accepts_legacy_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_startup(monkeypatch)
+
+    async def _fake_topology(_request: object) -> CmtsServiceGroupTopologyResponse:
+        return CmtsServiceGroupTopologyResponse(
+            hostname=HostNameStr("192.168.0.100"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            results=[],
+        )
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.system.service.SystemCmtsSnmpService.get_service_group_topology",
+        _fake_topology,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/system/serviceGroupTopology", json=_legacy_request("192.168.0.100", "public"))
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["hostname"] == "192.168.0.100"
+
+# FILE: docs/bundles/phase-8/phase-8-step-4b.md
+# Phase 8 · Step 4b Bundle Report
+
+## Goal
+Stabilize system endpoint request models by removing import-time schema shape changes, enforce canonical camelCase JSON examples, and extend tests for camelCase acceptance.
+
+## Summary of changes
+- Made CMTS SNMP config schema stable by defining SNMP fields unconditionally and using runtime hostname defaults.
+- Updated FastAPI docs examples to use camelCase `snmpV2c` in canonical requests while keeping legacy examples intact.
+- Added camelCase request coverage for system endpoint tests.
+
+## Files changed
+- docs/api/fast-api/index.md
+- src/pypnm_cmts/api/common/cmts/schema.py
+- tests/test_system_endpoints.py
+
+## Tests run
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m py_compile src/pypnm_cmts/api/common/cmts/schema.py tests/test_system_endpoints.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_system_endpoints.py
+
+## Results / Notes
+- py_compile succeeded.
+- pytest: 6 passed.
+- Follow-on: ensure future endpoint docs align camelCase with to_camel aliases.
+

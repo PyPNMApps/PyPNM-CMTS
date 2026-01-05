@@ -295,6 +295,11 @@ class SgwManager:
                     result = REFRESH_RESULT_ERROR
                 elif stale:
                     result = REFRESH_RESULT_STALE
+                interval_seconds = 0.0
+                if refresh_mode == REFRESH_MODE_HEAVY:
+                    interval_seconds = float(self._settings.sgw.poll_heavy_seconds)
+                elif refresh_mode == REFRESH_MODE_LIGHT:
+                    interval_seconds = float(self._settings.sgw.poll_light_seconds)
                 self._log_refresh_event(
                     sg_id=sg_id,
                     refresh_mode=refresh_mode,
@@ -302,6 +307,7 @@ class SgwManager:
                     result=result,
                     snapshot_time_epoch=float(metadata.snapshot_time_epoch),
                     age_seconds=float(metadata.age_seconds),
+                    interval_seconds=interval_seconds,
                     error_message=error_message,
                 )
 
@@ -344,8 +350,12 @@ class SgwManager:
         )
         entry.snapshot = entry.snapshot.model_copy(
             update={
+                "ds_ch_set_id": payload.ds_ch_set_id,
+                "us_ch_set_id": payload.us_ch_set_id,
                 "ds_channels": payload.ds_channels,
                 "us_channels": payload.us_channels,
+                "ds_rf_channels": list(payload.ds_rf_channels),
+                "us_rf_channels": list(payload.us_rf_channels),
                 "cable_modems": list(payload.cable_modems),
                 "metadata": metadata,
             }
@@ -384,33 +394,45 @@ class SgwManager:
         result: str,
         snapshot_time_epoch: float,
         age_seconds: float,
+        interval_seconds: float,
         error_message: str,
     ) -> None:
+        worker_id = self._format_worker_id(sg_id)
         if error_message != "":
             self.logger.warning(
-                "sgw refresh error",
+                "sgw refresh error SGWorkerID: %s",
+                worker_id,
                 extra={
                     "sg_id": int(sg_id),
+                    "worker_id": worker_id,
                     "refresh_mode": refresh_mode,
                     "duration_ms": duration_ms,
                     "result": result,
                     "snapshot_time_epoch": snapshot_time_epoch,
                     "age_seconds": age_seconds,
+                    "interval_seconds": interval_seconds,
                     "error_message": error_message,
                 },
             )
             return
         self.logger.info(
-            "sgw refresh",
+            "sgw refresh SGWorkerID: %s",
+            worker_id,
             extra={
                 "sg_id": int(sg_id),
+                "worker_id": worker_id,
                 "refresh_mode": refresh_mode,
                 "duration_ms": duration_ms,
                 "result": result,
                 "snapshot_time_epoch": snapshot_time_epoch,
                 "age_seconds": age_seconds,
+                "interval_seconds": interval_seconds,
             },
         )
+
+    @staticmethod
+    def _format_worker_id(sg_id: ServiceGroupId) -> str:
+        return f"sgw-{int(sg_id)}"
 
     @staticmethod
     def _normalize_error_message(message: str) -> str:
