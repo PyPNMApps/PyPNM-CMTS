@@ -7,10 +7,13 @@ import asyncio
 import logging
 import os
 import time
-from pathlib import Path
 
-from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.sgw.discovery import (
+    ServiceGroupDiscovery,
+    SnmpServiceGroupDiscovery,
+    StaticServiceGroupDiscovery,
+)
 from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
 from pypnm_cmts.sgw.pollers.light import sgw_light_poller
@@ -27,8 +30,9 @@ from pypnm_cmts.sgw.store import SgwCacheStore
 class SgwStartupService:
     """Service for SG discovery and SGW priming at startup."""
 
-    def __init__(self) -> None:
+    def __init__(self, discovery: ServiceGroupDiscovery | None = None) -> None:
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._discovery = discovery
 
     async def initialize(self) -> None:
         """
@@ -50,22 +54,9 @@ class SgwStartupService:
                 self.logger.error("SG discovery failed: %s", message)
                 return
 
-            hostname = str(settings.adapter.hostname).strip()
-            if hostname == "":
-                message = "adapter.hostname must be set for SG discovery"
-                set_sgw_startup_failure(message)
-                self.logger.error("SG discovery failed: %s", message)
-                return
-
             try:
-                service = CmtsInventoryDiscoveryService(
-                    cmts_hostname=settings.adapter.hostname,
-                    read_community=settings.adapter.community,
-                    write_community=settings.adapter.write_community,
-                    port=int(settings.adapter.port),
-                )
-                result = await service.discover_inventory(state_dir=Path(state_dir_value))
-                discovered_sg_ids = sorted(result.discovered_sg_ids, key=int)
+                discovery = self._resolve_discovery(settings)
+                discovered_sg_ids = await asyncio.to_thread(discovery.discover, settings)
             except Exception as exc:
                 message = str(exc)
                 set_sgw_startup_failure(message)
@@ -108,6 +99,14 @@ class SgwStartupService:
     @staticmethod
     def _pytest_running() -> bool:
         return os.getenv("PYTEST_CURRENT_TEST") is not None
+
+    def _resolve_discovery(self, settings: CmtsOrchestratorSettings) -> ServiceGroupDiscovery:
+        if self._discovery is not None:
+            return self._discovery
+        mode_value = str(settings.sgw.discovery.mode).strip().lower()
+        if mode_value == "snmp":
+            return SnmpServiceGroupDiscovery()
+        return StaticServiceGroupDiscovery()
 
 
 __all__ = [

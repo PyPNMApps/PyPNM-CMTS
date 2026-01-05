@@ -136,6 +136,7 @@ def start_sgw_background_refresh(
     with _sgw_refresh_lock:
         if _sgw_refresh_thread is not None and _sgw_refresh_thread.is_alive():
             return True
+        manager.reset_stop()
         _sgw_refresh_running = True
         _sgw_refresh_thread = threading.Thread(
             target=_run_sgw_refresh_loop,

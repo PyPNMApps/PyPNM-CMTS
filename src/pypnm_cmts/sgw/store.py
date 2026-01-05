@@ -64,7 +64,7 @@ class SgwCacheStore:
                 snapshot = SgwSnapshotModel(sg_id=sg_id)
                 entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
 
-            trimmed = error_message[:SGW_LAST_ERROR_MAX_LENGTH]
+            trimmed = self._normalize_error_message(error_message)
             metadata = entry.snapshot.metadata.model_copy(
                 update={
                     "snapshot_time_epoch": float(now_epoch),
@@ -77,6 +77,13 @@ class SgwCacheStore:
             new_entry = entry.model_copy(update={"snapshot": snapshot})
             self._entries[sg_id] = new_entry.model_copy(deep=True)
             return metadata
+
+    @staticmethod
+    def _normalize_error_message(message: str) -> str:
+        trimmed = message.strip()
+        if trimmed == "":
+            return ""
+        return trimmed[:SGW_LAST_ERROR_MAX_LENGTH]
 
     @staticmethod
     def compute_staleness(age_seconds: float, cache_max_age_seconds: int) -> bool:

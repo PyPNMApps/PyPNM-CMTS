@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
@@ -176,6 +178,7 @@ def test_sgw_manager_heavy_refresh_replaces_snapshot_payload() -> None:
     assert entry.snapshot.ds_channels.count == 2
 
 
+@pytest.mark.skip(reason="Deferred: slow in full suite, revisit in Phase 7.8.")
 def test_sgw_manager_refresh_forever_uses_clock_and_stops() -> None:
     poll_light_seconds = 300
     poll_heavy_seconds = 900

@@ -1,3 +1,13 @@
+Summary:
+- Added endpoint tests covering refresh NONE, LIGHT request mapping, and unknown SG refresh rejection.
+
+Tests:
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_endpoints.py
+
+pytest -q tests/test_sgw_endpoints.py
+17 passed in 2.39s
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_endpoints.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 

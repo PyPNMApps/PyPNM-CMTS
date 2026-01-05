@@ -1,7 +1,7 @@
-from __future__ import annotations
-
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -36,6 +36,10 @@ DEFAULT_SGW_POLL_HEAVY_SECONDS = 900
 DEFAULT_SGW_REFRESH_JITTER_SECONDS = 30
 DEFAULT_SGW_CACHE_MAX_AGE_SECONDS = 1200
 DEFAULT_SGW_MAX_WORKERS = 0
+SGW_DISCOVERY_MODE_STATIC = "static"
+SGW_DISCOVERY_MODE_SNMP = "snmp"
+SGW_DISCOVERY_MODE_OPTIONS = (SGW_DISCOVERY_MODE_STATIC, SGW_DISCOVERY_MODE_SNMP)
+DEFAULT_SGW_DISCOVERY_MODE = SGW_DISCOVERY_MODE_STATIC
 SHARD_MODE_SEQUENTIAL = "sequential"
 SHARD_MODE_SCORE = "score"
 SHARD_MODE_OPTIONS = (SHARD_MODE_SEQUENTIAL, SHARD_MODE_SCORE)
@@ -72,10 +76,27 @@ class ServiceGroupDescriptor(BaseModel):
         return self
 
 
+class SgwDiscoverySettings(BaseModel):
+    """Serving group discovery settings."""
+
+    mode: str = Field(default=DEFAULT_SGW_DISCOVERY_MODE, description="Service group discovery mode: static or snmp.")
+
+    @model_validator(mode="after")
+    def _validate_mode(self) -> SgwDiscoverySettings:
+        mode_value = str(self.mode).strip().lower()
+        if mode_value == "":
+            mode_value = DEFAULT_SGW_DISCOVERY_MODE
+        if mode_value not in SGW_DISCOVERY_MODE_OPTIONS:
+            raise ValueError("sgw.discovery.mode must be 'static' or 'snmp'.")
+        self.mode = mode_value
+        return self
+
+
 class SgwSettings(BaseModel):
     """Serving group worker settings constrained by light/heavy refresh and cache age bounds."""
 
     enabled: bool = Field(default=DEFAULT_SGW_ENABLED, description="Enable serving group worker orchestration.")
+    discovery: SgwDiscoverySettings = Field(default_factory=SgwDiscoverySettings, description="Serving group discovery settings.")
     poll_heavy_seconds: int = Field(default=DEFAULT_SGW_POLL_HEAVY_SECONDS, description="Heavy inventory refresh interval in seconds.")
     poll_light_seconds: int = Field(default=DEFAULT_SGW_POLL_LIGHT_SECONDS, description="Light state refresh interval in seconds.")
     max_workers: int = Field(default=DEFAULT_SGW_MAX_WORKERS, description="Maximum SGW workers (0 means derive from discovery).")
@@ -136,6 +157,13 @@ class CmtsOrchestratorSettings(BaseModel):
             raise ValueError("leader_ttl_seconds must be greater than zero.")
         if int(self.lease_ttl_seconds) <= 0:
             raise ValueError("lease_ttl_seconds must be greater than zero.")
+        if bool(self.sgw.enabled) and str(self.sgw.discovery.mode).strip().lower() == SGW_DISCOVERY_MODE_SNMP:
+            hostname_value = str(self.adapter.hostname).strip()
+            if hostname_value == "":
+                raise ValueError("adapter.hostname must be set for snmp discovery.")
+            community_value = str(self.adapter.community).strip()
+            if community_value == "":
+                raise ValueError("adapter.community must be set for snmp discovery.")
         min_ttl = min(int(self.leader_ttl_seconds), int(self.lease_ttl_seconds))
         if float(self.tick_interval_seconds) >= float(min_ttl):
             raise ValueError("tick_interval_seconds must be less than leader_ttl_seconds and lease_ttl_seconds.")

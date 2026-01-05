@@ -13,6 +13,8 @@ nav:
       - Service Group Workers And Zero-Touch Operation: architecture/service-group-workers.md
       - Phase 3 Definition Of Done: architecture/phase3_definition_of_done.md
       - Phase 4 Zero-Touch Worker Enablement: architecture/phase4_zero_touch_worker_enablement.md
+      - Phase 7.8 Burndown: architecture/phase-7.8-burndown.md
+      - Phase 7.7 Archive: architecture/archive/phase-7.7/README.md
   - Definition: definition/index.md
   - Planning:
       - Overview: planning/index.md

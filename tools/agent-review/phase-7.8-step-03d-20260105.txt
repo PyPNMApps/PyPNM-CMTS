@@ -1,3 +1,21 @@
+Summary:
+- Strengthened the SNMP startup regression test to exercise _run_asyncio by patching the CMTS discovery coroutine.
+
+Tests:
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_startup.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_discovery_snmp_contract.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_settings.py
+
+pytest -q tests/test_sgw_startup.py
+7 passed in 2.31s
+
+pytest -q tests/test_sgw_discovery_snmp_contract.py
+5 passed in 0.45s
+
+pytest -q tests/test_sgw_settings.py
+14 passed in 0.46s
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_startup.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 

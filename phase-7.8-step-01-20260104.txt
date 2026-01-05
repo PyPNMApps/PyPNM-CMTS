@@ -1,0 +1,258 @@
+Summary:
+- Added Phase 7.8 burndown plan with scope, operating model, step plan, and exit criteria.
+- Reset TODO tracking to Phase 7.8 step numbering with Phase 7.7 archive references.
+- Archived Phase 7.7 references and verified bundle list against repo contents.
+
+Checklist:
+- [x] Create Phase 7.8 burndown doc
+- [x] Reset canonical TODO for Phase 7.8
+- [x] Archive Phase 7.7 documentation references
+- [x] Keep step numbering clean
+- [x] Provide deliverable bundle at repo root
+
+Tests:
+- Not run (docs-only)
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/phase-7.8-burndown.md
+# Phase 7.8 Burndown
+
+## Scope
+
+Phase 7.8 focuses on hardening SG worker discovery, refresh lanes, and cache-first endpoint behavior while improving operational resilience and observability. The SG worker scaling model remains one SGW per `sg_id`, and cache-first reads remain the default contract for all endpoints.
+
+## Non-Goals
+
+- No Kubernetes API implementations.
+- No database persistence.
+- No new CMTS vendor support beyond the existing adapter contracts.
+- No API response shape changes unless explicitly approved in later steps.
+
+## Operating Model
+
+### Cache-First Reads
+
+Endpoints return SGW cache snapshots by default, including freshness metadata. Live polling remains opt-in and rate-limited.
+
+### Heavy vs Light Refresh Lanes
+
+Heavy refresh updates inventory and topology (DS/US + membership). Light refresh updates registration/state deltas for already-known modems.
+
+### SG Worker Scaling
+
+One SGW per `sg_id`. Worker count scales with discovered SG count and remains bounded by configuration caps.
+
+## Step Plan
+
+### Phase 7.8 · Step 1
+
+Goal: Reset burndown and TODO planning for Phase 7.8.
+
+Checklist:
+- [ ] Create Phase 7.8 burndown document.
+- [ ] Reset TODO list to Phase 7.8 step numbering.
+- [ ] Archive Phase 7.7 documentation references.
+
+Acceptance criteria:
+- Burndown and TODO are Phase 7.8 labeled.
+- Phase 7.7 artifacts are discoverable via archive references.
+
+Tests to run:
+- None.
+
+### Phase 7.8 · Step 2
+
+Goal: Define the SG discovery contract and a static discovery implementation.
+
+Checklist:
+- [ ] Document SG discovery interface and expected outputs.
+- [ ] Add a static discovery provider with deterministic test data.
+
+Acceptance criteria:
+- Discovery contract documented and consumed by SGW startup.
+- Static provider used in hermetic tests.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_startup.py`
+
+### Phase 7.8 · Step 3
+
+Goal: Implement real SNMP-based SG discovery via PyPNM integration.
+
+Checklist:
+- [ ] Wire the discovery adapter to PyPNM SNMP services.
+- [ ] Add fallback behavior when SNMP is unavailable.
+
+Acceptance criteria:
+- Discovery path uses PyPNM SNMP and returns typed models.
+- Failure modes are explicit and logged.
+
+Tests to run:
+- `python -m pytest -q tests/test_cmts_inventory_discovery.py`
+
+### Phase 7.8 · Step 4
+
+Goal: Harden heavy refresh inventory pipeline.
+
+Checklist:
+- [ ] Validate DS/US channel collection in heavy refresh.
+- [ ] Ensure membership snapshots are consistent and ordered.
+
+Acceptance criteria:
+- Heavy refresh populates cache with correct channel and modem data.
+- Cache metadata reflects heavy refresh timestamps.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh.py::test_sgw_manager_heavy_refresh_replaces_snapshot_payload`
+
+### Phase 7.8 · Step 5
+
+Goal: Harden light refresh delta pipeline.
+
+Checklist:
+- [ ] Define light refresh state model expectations.
+- [ ] Ensure light refresh respects membership list boundaries.
+
+Acceptance criteria:
+- Light refresh updates only state fields and preserves membership list.
+- Rate limits and cache age updates behave deterministically.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems`
+
+### Phase 7.8 · Step 6
+
+Goal: Harden SGW lifecycle start/stop behavior.
+
+Checklist:
+- [ ] Validate startup prime and background refresh shutdown hooks.
+- [ ] Confirm stop signals cleanly terminate refresh threads.
+
+Acceptance criteria:
+- Background refresh stops cleanly and does not hang on shutdown.
+- Startup readiness accurately reflects cache priming.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_background_refresh.py`
+
+### Phase 7.8 · Step 7
+
+Goal: Validate endpoint refresh semantics and rate limiting.
+
+Checklist:
+- [ ] Confirm refresh request modes map to manager requests.
+- [ ] Validate max-wait and require-fresh behavior under load.
+
+Acceptance criteria:
+- Refresh requests respect rate limits and wait semantics.
+- Endpoints return consistent metadata for refresh outcomes.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_endpoints.py`
+
+### Phase 7.8 · Step 8
+
+Goal: Observability pass (structured logs and metrics stubs).
+
+Checklist:
+- [ ] Add structured fields to SGW logs.
+- [ ] Add metrics stubs for refresh durations and staleness.
+
+Acceptance criteria:
+- Logs include `sg_id`, `refresh_mode`, and timing fields.
+- Metrics stubs are documented and unit-tested.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_readiness.py`
+
+### Phase 7.8 · Step 9
+
+Goal: Load-safety and contention review.
+
+Checklist:
+- [ ] Review store copy boundaries under load.
+- [ ] Validate lock usage in high-frequency reads/writes.
+
+Acceptance criteria:
+- Store remains safe under concurrent access.
+- No aliasing regressions reintroduced.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_store_thread_safety.py`
+
+### Phase 7.8 · Step 10
+
+Goal: Final QA and release readiness.
+
+Checklist:
+- [ ] Run targeted regression suite.
+- [ ] Perform legacy-key hygiene scan.
+- [ ] Update release readiness notes.
+
+Acceptance criteria:
+- Regression suite passes cleanly.
+- Legacy-key hygiene scan completed and documented.
+
+Tests to run:
+- `python -m pytest -q`
+
+## Exit Criteria
+
+- All Phase 7.8 steps completed with acceptance criteria met.
+- Cache-first endpoint behavior and SGW scaling model validated.
+- Regression tests pass with no new warnings.
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/archive/phase-7.7/README.md
+# Phase 7.7 Archive
+
+Phase 7.7 is closed. It covered SGW cache manager/store hardening, config normalization, and warning cleanup. This folder captures references to the Phase 7.7 artifacts so the history remains discoverable without mixing it into Phase 7.8 work.
+
+## Agent Review Bundles
+
+- tools/agent-review/phase-7.7-step-10-20260104.txt
+- tools/agent-review/phase-7.7-step-11-20260104.txt
+- tools/agent-review/phase-7.7-step-1-20260103.txt
+- tools/agent-review/phase-7.7-step-12-20260104.txt
+- tools/agent-review/phase-7.7-step-13-20260104.txt
+- tools/agent-review/phase-7.7-step-14-20260104.txt
+- tools/agent-review/phase-7.7-step-15-20260104.txt
+- tools/agent-review/phase-7.7-step-16-20260104.txt
+- tools/agent-review/phase-7.7-step-17-20260104.txt
+- tools/agent-review/phase-7.7-step-18-20260104.txt
+- tools/agent-review/phase-7.7-step-2-20260103.txt
+- tools/agent-review/phase-7.7-step-3-20260103.txt
+- tools/agent-review/phase-7.7-step-4-20260103.txt
+- tools/agent-review/phase-7.7-step-5-20260103.txt
+- tools/agent-review/phase-7.7-step-5a-20260103.txt
+- tools/agent-review/phase-7.7-step-6-20260103.txt
+- tools/agent-review/phase-7.7-step-7-20260104.txt
+- tools/agent-review/phase-7.7-step-8-20260104.txt
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/todo/todo.md
+# PyPNM-CMTS TODO (Phase 7.8)
+
+Last Updated: 2026-01-04 (America/Denver)
+
+This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
+
+## Completed (Phase 7.7)
+
+Phase 7.7 is closed. Archive references live at:
+- docs/architecture/archive/phase-7.7/README.md
+
+## Completed (Phase 7.8)
+
+- [x] Phase 7.8 · Step 1: Burndown + TODO reset (2026-01-04)
+
+## Open Items (Phase 7.8)
+
+- [ ] Phase 7.8 · Step 2: SG discovery contract + static discovery implementation
+- [ ] Phase 7.8 · Step 3: SNMP discovery implementation (real)
+- [ ] Phase 7.8 · Step 4: Heavy refresh inventory pipeline hardening
+- [ ] Phase 7.8 · Step 5: Light refresh delta pipeline hardening
+- [ ] Phase 7.8 · Step 6: SGW background scheduler/worker lifecycle hardening
+- [ ] Phase 7.8 · Step 7: Endpoint refresh semantics + rate limiting validation
+- [ ] Phase 7.8 · Step 8: Observability pass (structured logs, metrics stubs, readiness clarity)
+- [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
+- [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
+
+## Deferred Items
+
+- [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite.

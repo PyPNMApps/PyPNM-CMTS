@@ -105,7 +105,7 @@ Message observed:
 - `Empty configuration value for 'PnmFileRetrieval.retrieval_method.methods.tftp.remote_dir'; using default ''`
 
 Likely issues:
-- path typo: `retrival_method` vs `retrieval_method`
+- path typo in legacy configs for retrieval_method (corrected in current config)
 - warning policy: `--help` should be quiet and side-effect free
 
 ## Practical Mode Contract Table (Current Behavior)

@@ -1,0 +1,1113 @@
+Summary:
+- Reverted the Phase 7.8 Step 1 scope drift by restoring the SGW refresh test to its original execution.
+- Completed Step 1 cleanup: delivered the repo-root Step 1 bundle, marked Step 1 complete in TODO, and verified Phase 7.7 archive references against the filesystem.
+- Introduced a service group discovery contract with a static provider and wired SGW startup to use it.
+- Added static discovery unit tests and updated SGW startup tests to use the discovery contract.
+
+Checklist:
+- [x] A1: Revert Step 1 scope drift in tests/test_sgw_manager_refresh.py
+- [x] A2: Create phase-7.8-step-01-20260104.txt bundle at repo root with full contents
+- [x] A3: Mark Step 1 complete in docs/todo/todo.md
+- [x] A4: Archive Phase 7.7 references reflect only existing bundle files
+- [x] B1: Define SG discovery contract
+- [x] B2: Implement static discovery provider
+- [x] B3: Wire startup to use discovery provider
+- [x] B4: Add unit tests for static discovery and update startup tests
+- [x] C: Create phase-7.8-step-02-20260104.txt bundle with full contents and test outputs
+
+Tests:
+python3 -m pytest -q tests/test_sgw_startup.py
+
+----------------------------- live log collection ------------------------------
+INFO root:76 | ==== PyPNM REST API Starting ====
+INFO root:76 | ==== PyPNM REST API Starting ====
+
+tests/test_sgw_startup.py::test_startup_discovers_sgs_and_primes_cache 
+-------------------------------- live log call ---------------------------------
+INFO SgwStartupService:83 | Discovered SG IDs: [1, 2, 3]
+INFO SgwStartupService:84 | SGW initialized for 3 service groups.
+INFO SgwStartupService:85 | SGW readiness after prime: ready
+PASSED                                                                   [ 16%]
+tests/test_sgw_startup.py::test_readiness_true_when_discovery_succeeds 
+-------------------------------- live log call ---------------------------------
+INFO SgwStartupService:83 | Discovered SG IDs: [1, 2]
+INFO SgwStartupService:84 | SGW initialized for 2 service groups.
+INFO SgwStartupService:85 | SGW readiness after prime: ready
+INFO httpx:1038 | HTTP Request: GET http://testserver/ops/ready "HTTP/1.1 200 OK"
+PASSED                                                                   [ 33%]
+tests/test_sgw_startup.py::test_readiness_false_when_discovery_fails 
+-------------------------------- live log call ---------------------------------
+ERROR SgwStartupService:57 | SG discovery failed: discovery failed
+INFO httpx:1038 | HTTP Request: GET http://testserver/ops/ready "HTTP/1.1 503 Service Unavailable"
+PASSED                                                                   [ 50%]
+tests/test_sgw_startup.py::test_startup_disabled_mode_uses_coherent_store_and_manager 
+-------------------------------- live log call ---------------------------------
+INFO SgwStartupService:42 | SGW startup skipped (sgw.enabled is false).
+PASSED                                                                   [ 66%]
+tests/test_sgw_startup.py::test_startup_prime_failure_records_failure 
+-------------------------------- live log call ---------------------------------
+ERROR SgwStartupService:76 | SGW priming failed: prime failed
+Traceback (most recent call last):
+  File "/home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/startup.py", line 72, in initialize
+    await asyncio.to_thread(manager.refresh_once, now_epoch)
+  File "/usr/lib/python3.10/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_startup.py", line 199, in _raise_refresh
+    raise RuntimeError(error_message)
+RuntimeError: prime failed
+INFO httpx:1038 | HTTP Request: GET http://testserver/ops/ready "HTTP/1.1 503 Service Unavailable"
+PASSED                                                                   [ 83%]
+tests/test_sgw_startup.py::test_startup_starts_background_refresh 
+-------------------------------- live log call ---------------------------------
+INFO SgwStartupService:83 | Discovered SG IDs: [1]
+INFO SgwStartupService:84 | SGW initialized for 1 service groups.
+INFO SgwStartupService:85 | SGW readiness after prime: ready
+PASSED                                                                   [100%]
+
+============================== 6 passed in 2.30s ===============================
+
+python3 -m pytest -q tests/test_sgw_endpoints.py
+
+----------------------------- live log collection ------------------------------
+INFO root:76 | ==== PyPNM REST API Starting ====
+INFO root:76 | ==== PyPNM REST API Starting ====
+
+tests/test_sgw_endpoints.py::test_serving_group_ids_returns_cache_summary 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/ids "HTTP/1.1 200 OK"
+PASSED                                                                   [  7%]
+tests/test_sgw_endpoints.py::test_serving_group_status_reports_cache_readiness 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: GET http://testserver/cmts/servingGroup/status "HTTP/1.1 200 OK"
+PASSED                                                                   [ 14%]
+tests/test_sgw_endpoints.py::test_serving_group_ids_not_ready_returns_success 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/ids "HTTP/1.1 200 OK"
+PASSED                                                                   [ 21%]
+tests/test_sgw_endpoints.py::test_serving_group_ids_missing_store_returns_error_metadata 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/ids "HTTP/1.1 200 OK"
+PASSED                                                                   [ 28%]
+tests/test_sgw_endpoints.py::test_serving_group_cable_modems_requires_sg_id 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 422 Unprocessable Entity"
+PASSED                                                                   [ 35%]
+tests/test_sgw_endpoints.py::test_serving_group_cable_modems_pagination 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [ 42%]
+tests/test_sgw_endpoints.py::test_serving_group_cable_modems_missing_store_returns_error 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [ 50%]
+tests/test_sgw_endpoints.py::test_serving_group_topology_requires_sg_id 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/topology "HTTP/1.1 422 Unprocessable Entity"
+PASSED                                                                   [ 57%]
+tests/test_sgw_endpoints.py::test_serving_group_topology_returns_summary 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/topology "HTTP/1.1 200 OK"
+PASSED                                                                   [ 64%]
+tests/test_sgw_endpoints.py::test_serving_group_cable_modems_aggregate_dedupes 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [ 71%]
+tests/test_sgw_endpoints.py::test_serving_group_topology_aggregate_dedupes 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/topology "HTTP/1.1 200 OK"
+PASSED                                                                   [ 78%]
+tests/test_sgw_endpoints.py::test_serving_group_metadata_age_seconds_uses_request_time 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [ 85%]
+tests/test_sgw_endpoints.py::test_serving_group_refresh_waits_for_snapshot 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [ 92%]
+tests/test_sgw_endpoints.py::test_serving_group_refresh_rate_limited 
+-------------------------------- live log call ---------------------------------
+INFO httpx:1038 | HTTP Request: POST http://testserver/cmts/servingGroup/get/cableModems "HTTP/1.1 200 OK"
+PASSED                                                                   [100%]
+
+============================== 14 passed in 2.32s ==============================
+
+python3 -m pytest -q tests/test_sgw_store_thread_safety.py
+
+tests/test_sgw_store_thread_safety.py::test_sgw_store_copy_on_read_does_not_mutate_store PASSED [ 33%]
+tests/test_sgw_store_thread_safety.py::test_sgw_store_copy_on_write_does_not_mutate_store PASSED [ 66%]
+tests/test_sgw_store_thread_safety.py::test_sgw_store_thread_safety_smoke PASSED [100%]
+
+============================== 3 passed in 0.49s ===============================
+
+python3 -m pytest -q tests/test_sgw_discovery_static.py
+
+tests/test_sgw_discovery_static.py::test_static_discovery_dedupes_and_sorts_enabled PASSED [ 33%]
+tests/test_sgw_discovery_static.py::test_static_discovery_empty_config_returns_empty_list PASSED [ 66%]
+tests/test_sgw_discovery_static.py::test_static_discovery_invalid_sg_id_raises PASSED [100%]
+
+============================== 3 passed in 0.44s ===============================
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/archive/phase-7.7/README.md
+# Phase 7.7 Archive
+
+Phase 7.7 is closed. It covered SGW cache manager/store hardening, config normalization, and warning cleanup. This folder captures references to the Phase 7.7 artifacts so the history remains discoverable without mixing it into Phase 7.8 work.
+
+## Agent Review Bundles
+
+- tools/agent-review/phase-7.7-step-10-20260104.txt
+- tools/agent-review/phase-7.7-step-11-20260104.txt
+- tools/agent-review/phase-7.7-step-1-20260103.txt
+- tools/agent-review/phase-7.7-step-12-20260104.txt
+- tools/agent-review/phase-7.7-step-13-20260104.txt
+- tools/agent-review/phase-7.7-step-14-20260104.txt
+- tools/agent-review/phase-7.7-step-15-20260104.txt
+- tools/agent-review/phase-7.7-step-16-20260104.txt
+- tools/agent-review/phase-7.7-step-17-20260104.txt
+- tools/agent-review/phase-7.7-step-18-20260104.txt
+- tools/agent-review/phase-7.7-step-2-20260103.txt
+- tools/agent-review/phase-7.7-step-3-20260103.txt
+- tools/agent-review/phase-7.7-step-4-20260103.txt
+- tools/agent-review/phase-7.7-step-5-20260103.txt
+- tools/agent-review/phase-7.7-step-5a-20260103.txt
+- tools/agent-review/phase-7.7-step-6-20260103.txt
+- tools/agent-review/phase-7.7-step-7-20260104.txt
+- tools/agent-review/phase-7.7-step-8-20260104.txt
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/phase-7.8-burndown.md
+# Phase 7.8 Burndown
+
+## Scope
+
+Phase 7.8 focuses on hardening SG worker discovery, refresh lanes, and cache-first endpoint behavior while improving operational resilience and observability. The SG worker scaling model remains one SGW per `sg_id`, and cache-first reads remain the default contract for all endpoints.
+
+## Non-Goals
+
+- No Kubernetes API implementations.
+- No database persistence.
+- No new CMTS vendor support beyond the existing adapter contracts.
+- No API response shape changes unless explicitly approved in later steps.
+
+## Operating Model
+
+### Cache-First Reads
+
+Endpoints return SGW cache snapshots by default, including freshness metadata. Live polling remains opt-in and rate-limited.
+
+### Heavy vs Light Refresh Lanes
+
+Heavy refresh updates inventory and topology (DS/US + membership). Light refresh updates registration/state deltas for already-known modems.
+
+### SG Worker Scaling
+
+One SGW per `sg_id`. Worker count scales with discovered SG count and remains bounded by configuration caps.
+
+## Step Plan
+
+### Phase 7.8 · Step 1
+
+Goal: Reset burndown and TODO planning for Phase 7.8.
+
+Checklist:
+- [ ] Create Phase 7.8 burndown document.
+- [ ] Reset TODO list to Phase 7.8 step numbering.
+- [ ] Archive Phase 7.7 documentation references.
+
+Acceptance criteria:
+- Burndown and TODO are Phase 7.8 labeled.
+- Phase 7.7 artifacts are discoverable via archive references.
+
+Tests to run:
+- None.
+
+### Phase 7.8 · Step 2
+
+Goal: Define the SG discovery contract and a static discovery implementation.
+
+Checklist:
+- [ ] Document SG discovery interface and expected outputs.
+- [ ] Add a static discovery provider with deterministic test data.
+
+Acceptance criteria:
+- Discovery contract documented and consumed by SGW startup.
+- Static provider used in hermetic tests.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_startup.py`
+
+### Phase 7.8 · Step 3
+
+Goal: Implement real SNMP-based SG discovery via PyPNM integration.
+
+Checklist:
+- [ ] Wire the discovery adapter to PyPNM SNMP services.
+- [ ] Add fallback behavior when SNMP is unavailable.
+
+Acceptance criteria:
+- Discovery path uses PyPNM SNMP and returns typed models.
+- Failure modes are explicit and logged.
+
+Tests to run:
+- `python -m pytest -q tests/test_cmts_inventory_discovery.py`
+
+### Phase 7.8 · Step 4
+
+Goal: Harden heavy refresh inventory pipeline.
+
+Checklist:
+- [ ] Validate DS/US channel collection in heavy refresh.
+- [ ] Ensure membership snapshots are consistent and ordered.
+
+Acceptance criteria:
+- Heavy refresh populates cache with correct channel and modem data.
+- Cache metadata reflects heavy refresh timestamps.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh.py::test_sgw_manager_heavy_refresh_replaces_snapshot_payload`
+
+### Phase 7.8 · Step 5
+
+Goal: Harden light refresh delta pipeline.
+
+Checklist:
+- [ ] Define light refresh state model expectations.
+- [ ] Ensure light refresh respects membership list boundaries.
+
+Acceptance criteria:
+- Light refresh updates only state fields and preserves membership list.
+- Rate limits and cache age updates behave deterministically.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems`
+
+### Phase 7.8 · Step 6
+
+Goal: Harden SGW lifecycle start/stop behavior.
+
+Checklist:
+- [ ] Validate startup prime and background refresh shutdown hooks.
+- [ ] Confirm stop signals cleanly terminate refresh threads.
+
+Acceptance criteria:
+- Background refresh stops cleanly and does not hang on shutdown.
+- Startup readiness accurately reflects cache priming.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_background_refresh.py`
+
+### Phase 7.8 · Step 7
+
+Goal: Validate endpoint refresh semantics and rate limiting.
+
+Checklist:
+- [ ] Confirm refresh request modes map to manager requests.
+- [ ] Validate max-wait and require-fresh behavior under load.
+
+Acceptance criteria:
+- Refresh requests respect rate limits and wait semantics.
+- Endpoints return consistent metadata for refresh outcomes.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_endpoints.py`
+
+### Phase 7.8 · Step 8
+
+Goal: Observability pass (structured logs and metrics stubs).
+
+Checklist:
+- [ ] Add structured fields to SGW logs.
+- [ ] Add metrics stubs for refresh durations and staleness.
+
+Acceptance criteria:
+- Logs include `sg_id`, `refresh_mode`, and timing fields.
+- Metrics stubs are documented and unit-tested.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_readiness.py`
+
+### Phase 7.8 · Step 9
+
+Goal: Load-safety and contention review.
+
+Checklist:
+- [ ] Review store copy boundaries under load.
+- [ ] Validate lock usage in high-frequency reads/writes.
+
+Acceptance criteria:
+- Store remains safe under concurrent access.
+- No aliasing regressions reintroduced.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_store_thread_safety.py`
+
+### Phase 7.8 · Step 10
+
+Goal: Final QA and release readiness.
+
+Checklist:
+- [ ] Run targeted regression suite.
+- [ ] Perform legacy-key hygiene scan.
+- [ ] Update release readiness notes.
+
+Acceptance criteria:
+- Regression suite passes cleanly.
+- Legacy-key hygiene scan completed and documented.
+
+Tests to run:
+- `python -m pytest -q`
+
+## Exit Criteria
+
+- All Phase 7.8 steps completed with acceptance criteria met.
+- Cache-first endpoint behavior and SGW scaling model validated.
+- Regression tests pass with no new warnings.
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/todo/todo.md
+# PyPNM-CMTS TODO (Phase 7.8)
+
+Last Updated: 2026-01-04 (America/Denver)
+
+This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
+
+## Completed (Phase 7.7)
+
+Phase 7.7 is closed. Archive references live at:
+- docs/architecture/archive/phase-7.7/README.md
+
+## Completed (Phase 7.8)
+
+- [x] Phase 7.8 · Step 1: Burndown + TODO reset (2026-01-04)
+
+## Open Items (Phase 7.8)
+
+- [ ] Phase 7.8 · Step 2: SG discovery contract + static discovery implementation
+- [ ] Phase 7.8 · Step 3: SNMP discovery implementation (real)
+- [ ] Phase 7.8 · Step 4: Heavy refresh inventory pipeline hardening
+- [ ] Phase 7.8 · Step 5: Light refresh delta pipeline hardening
+- [ ] Phase 7.8 · Step 6: SGW background scheduler/worker lifecycle hardening
+- [ ] Phase 7.8 · Step 7: Endpoint refresh semantics + rate limiting validation
+- [ ] Phase 7.8 · Step 8: Observability pass (structured logs, metrics stubs, readiness clarity)
+- [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
+- [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
+
+## Deferred Items
+
+- [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite.
+# FILE: /home/dev01/Projects/PyPNM-CMTS/phase-7.8-step-01-20260104.txt
+Summary:
+- Added Phase 7.8 burndown plan with scope, operating model, step plan, and exit criteria.
+- Reset TODO tracking to Phase 7.8 step numbering with Phase 7.7 archive references.
+- Archived Phase 7.7 references and verified bundle list against repo contents.
+
+Checklist:
+- [x] Create Phase 7.8 burndown doc
+- [x] Reset canonical TODO for Phase 7.8
+- [x] Archive Phase 7.7 documentation references
+- [x] Keep step numbering clean
+- [x] Provide deliverable bundle at repo root
+
+Tests:
+- Not run (docs-only)
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/phase-7.8-burndown.md
+# Phase 7.8 Burndown
+
+## Scope
+
+Phase 7.8 focuses on hardening SG worker discovery, refresh lanes, and cache-first endpoint behavior while improving operational resilience and observability. The SG worker scaling model remains one SGW per `sg_id`, and cache-first reads remain the default contract for all endpoints.
+
+## Non-Goals
+
+- No Kubernetes API implementations.
+- No database persistence.
+- No new CMTS vendor support beyond the existing adapter contracts.
+- No API response shape changes unless explicitly approved in later steps.
+
+## Operating Model
+
+### Cache-First Reads
+
+Endpoints return SGW cache snapshots by default, including freshness metadata. Live polling remains opt-in and rate-limited.
+
+### Heavy vs Light Refresh Lanes
+
+Heavy refresh updates inventory and topology (DS/US + membership). Light refresh updates registration/state deltas for already-known modems.
+
+### SG Worker Scaling
+
+One SGW per `sg_id`. Worker count scales with discovered SG count and remains bounded by configuration caps.
+
+## Step Plan
+
+### Phase 7.8 · Step 1
+
+Goal: Reset burndown and TODO planning for Phase 7.8.
+
+Checklist:
+- [ ] Create Phase 7.8 burndown document.
+- [ ] Reset TODO list to Phase 7.8 step numbering.
+- [ ] Archive Phase 7.7 documentation references.
+
+Acceptance criteria:
+- Burndown and TODO are Phase 7.8 labeled.
+- Phase 7.7 artifacts are discoverable via archive references.
+
+Tests to run:
+- None.
+
+### Phase 7.8 · Step 2
+
+Goal: Define the SG discovery contract and a static discovery implementation.
+
+Checklist:
+- [ ] Document SG discovery interface and expected outputs.
+- [ ] Add a static discovery provider with deterministic test data.
+
+Acceptance criteria:
+- Discovery contract documented and consumed by SGW startup.
+- Static provider used in hermetic tests.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_startup.py`
+
+### Phase 7.8 · Step 3
+
+Goal: Implement real SNMP-based SG discovery via PyPNM integration.
+
+Checklist:
+- [ ] Wire the discovery adapter to PyPNM SNMP services.
+- [ ] Add fallback behavior when SNMP is unavailable.
+
+Acceptance criteria:
+- Discovery path uses PyPNM SNMP and returns typed models.
+- Failure modes are explicit and logged.
+
+Tests to run:
+- `python -m pytest -q tests/test_cmts_inventory_discovery.py`
+
+### Phase 7.8 · Step 4
+
+Goal: Harden heavy refresh inventory pipeline.
+
+Checklist:
+- [ ] Validate DS/US channel collection in heavy refresh.
+- [ ] Ensure membership snapshots are consistent and ordered.
+
+Acceptance criteria:
+- Heavy refresh populates cache with correct channel and modem data.
+- Cache metadata reflects heavy refresh timestamps.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh.py::test_sgw_manager_heavy_refresh_replaces_snapshot_payload`
+
+### Phase 7.8 · Step 5
+
+Goal: Harden light refresh delta pipeline.
+
+Checklist:
+- [ ] Define light refresh state model expectations.
+- [ ] Ensure light refresh respects membership list boundaries.
+
+Acceptance criteria:
+- Light refresh updates only state fields and preserves membership list.
+- Rate limits and cache age updates behave deterministically.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems`
+
+### Phase 7.8 · Step 6
+
+Goal: Harden SGW lifecycle start/stop behavior.
+
+Checklist:
+- [ ] Validate startup prime and background refresh shutdown hooks.
+- [ ] Confirm stop signals cleanly terminate refresh threads.
+
+Acceptance criteria:
+- Background refresh stops cleanly and does not hang on shutdown.
+- Startup readiness accurately reflects cache priming.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_background_refresh.py`
+
+### Phase 7.8 · Step 7
+
+Goal: Validate endpoint refresh semantics and rate limiting.
+
+Checklist:
+- [ ] Confirm refresh request modes map to manager requests.
+- [ ] Validate max-wait and require-fresh behavior under load.
+
+Acceptance criteria:
+- Refresh requests respect rate limits and wait semantics.
+- Endpoints return consistent metadata for refresh outcomes.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_endpoints.py`
+
+### Phase 7.8 · Step 8
+
+Goal: Observability pass (structured logs and metrics stubs).
+
+Checklist:
+- [ ] Add structured fields to SGW logs.
+- [ ] Add metrics stubs for refresh durations and staleness.
+
+Acceptance criteria:
+- Logs include `sg_id`, `refresh_mode`, and timing fields.
+- Metrics stubs are documented and unit-tested.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_readiness.py`
+
+### Phase 7.8 · Step 9
+
+Goal: Load-safety and contention review.
+
+Checklist:
+- [ ] Review store copy boundaries under load.
+- [ ] Validate lock usage in high-frequency reads/writes.
+
+Acceptance criteria:
+- Store remains safe under concurrent access.
+- No aliasing regressions reintroduced.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_store_thread_safety.py`
+
+### Phase 7.8 · Step 10
+
+Goal: Final QA and release readiness.
+
+Checklist:
+- [ ] Run targeted regression suite.
+- [ ] Perform legacy-key hygiene scan.
+- [ ] Update release readiness notes.
+
+Acceptance criteria:
+- Regression suite passes cleanly.
+- Legacy-key hygiene scan completed and documented.
+
+Tests to run:
+- `python -m pytest -q`
+
+## Exit Criteria
+
+- All Phase 7.8 steps completed with acceptance criteria met.
+- Cache-first endpoint behavior and SGW scaling model validated.
+- Regression tests pass with no new warnings.
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/archive/phase-7.7/README.md
+# Phase 7.7 Archive
+
+Phase 7.7 is closed. It covered SGW cache manager/store hardening, config normalization, and warning cleanup. This folder captures references to the Phase 7.7 artifacts so the history remains discoverable without mixing it into Phase 7.8 work.
+
+## Agent Review Bundles
+
+- tools/agent-review/phase-7.7-step-10-20260104.txt
+- tools/agent-review/phase-7.7-step-11-20260104.txt
+- tools/agent-review/phase-7.7-step-1-20260103.txt
+- tools/agent-review/phase-7.7-step-12-20260104.txt
+- tools/agent-review/phase-7.7-step-13-20260104.txt
+- tools/agent-review/phase-7.7-step-14-20260104.txt
+- tools/agent-review/phase-7.7-step-15-20260104.txt
+- tools/agent-review/phase-7.7-step-16-20260104.txt
+- tools/agent-review/phase-7.7-step-17-20260104.txt
+- tools/agent-review/phase-7.7-step-18-20260104.txt
+- tools/agent-review/phase-7.7-step-2-20260103.txt
+- tools/agent-review/phase-7.7-step-3-20260103.txt
+- tools/agent-review/phase-7.7-step-4-20260103.txt
+- tools/agent-review/phase-7.7-step-5-20260103.txt
+- tools/agent-review/phase-7.7-step-5a-20260103.txt
+- tools/agent-review/phase-7.7-step-6-20260103.txt
+- tools/agent-review/phase-7.7-step-7-20260104.txt
+- tools/agent-review/phase-7.7-step-8-20260104.txt
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/todo/todo.md
+# PyPNM-CMTS TODO (Phase 7.8)
+
+Last Updated: 2026-01-04 (America/Denver)
+
+This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
+
+## Completed (Phase 7.7)
+
+Phase 7.7 is closed. Archive references live at:
+- docs/architecture/archive/phase-7.7/README.md
+
+## Completed (Phase 7.8)
+
+- [x] Phase 7.8 · Step 1: Burndown + TODO reset (2026-01-04)
+
+## Open Items (Phase 7.8)
+
+- [ ] Phase 7.8 · Step 2: SG discovery contract + static discovery implementation
+- [ ] Phase 7.8 · Step 3: SNMP discovery implementation (real)
+- [ ] Phase 7.8 · Step 4: Heavy refresh inventory pipeline hardening
+- [ ] Phase 7.8 · Step 5: Light refresh delta pipeline hardening
+- [ ] Phase 7.8 · Step 6: SGW background scheduler/worker lifecycle hardening
+- [ ] Phase 7.8 · Step 7: Endpoint refresh semantics + rate limiting validation
+- [ ] Phase 7.8 · Step 8: Observability pass (structured logs, metrics stubs, readiness clarity)
+- [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
+- [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
+
+## Deferred Items
+
+- [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite.
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/discovery.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Protocol
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+
+
+class ServiceGroupDiscovery(Protocol):
+    """Contract for discovery providers that return service group identifiers."""
+
+    def discover(self, settings: CmtsOrchestratorSettings) -> list[ServiceGroupId]:
+        """
+        Discover service groups for the provided settings.
+
+        Returns:
+            list[ServiceGroupId]: Sorted list of service group identifiers.
+
+        Raises:
+            Exception: Raised when discovery fails and startup should report an error.
+        """
+
+
+class StaticServiceGroupDiscovery:
+    """Static discovery provider backed by configured service groups."""
+
+    def discover(self, settings: CmtsOrchestratorSettings) -> list[ServiceGroupId]:
+        """
+        Return service groups from configuration in sorted, deduped order.
+
+        Returns:
+            list[ServiceGroupId]: Sorted service group identifiers.
+        """
+        enabled_ids = self._enabled_service_groups(settings.service_groups)
+        unique = {int(sg_id): sg_id for sg_id in enabled_ids}
+        return [unique[key] for key in sorted(unique.keys())]
+
+    @staticmethod
+    def _enabled_service_groups(
+        service_groups: Iterable[object],
+    ) -> list[ServiceGroupId]:
+        result: list[ServiceGroupId] = []
+        for entry in service_groups:
+            enabled = getattr(entry, "enabled", True)
+            sg_id = getattr(entry, "sg_id", None)
+            if sg_id is None or not bool(enabled):
+                continue
+            result.append(sg_id)
+        return result
+
+
+__all__ = [
+    "ServiceGroupDiscovery",
+    "StaticServiceGroupDiscovery",
+]
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/startup.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.sgw.discovery import ServiceGroupDiscovery, StaticServiceGroupDiscovery
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
+from pypnm_cmts.sgw.pollers.light import sgw_light_poller
+from pypnm_cmts.sgw.runtime_state import (
+    compute_sgw_cache_ready,
+    set_sgw_startup_failure,
+    set_sgw_startup_prime_failure,
+    set_sgw_startup_success,
+    start_sgw_background_refresh,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+class SgwStartupService:
+    """Service for SG discovery and SGW priming at startup."""
+
+    def __init__(self, discovery: ServiceGroupDiscovery | None = None) -> None:
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._discovery = discovery if discovery is not None else StaticServiceGroupDiscovery()
+
+    async def initialize(self) -> None:
+        """
+        Discover SGs and prime SGW cache at startup.
+        """
+        settings = CmtsOrchestratorSettings.from_system_config()
+        try:
+            if not bool(settings.sgw.enabled):
+                store = SgwCacheStore()
+                manager = SgwManager(settings=settings, store=store, service_groups=[])
+                set_sgw_startup_success([], store, manager, self._now_epoch())
+                self.logger.info("SGW startup skipped (sgw.enabled is false).")
+                return
+
+            state_dir_value = str(settings.state_dir).strip() if settings.state_dir is not None else ""
+            if state_dir_value == "":
+                message = "state_dir must be set for SGW discovery"
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+
+            try:
+                discovered_sg_ids = self._discovery.discover(settings)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_failure(message)
+                self.logger.error("SG discovery failed: %s", message)
+                return
+            unique = {int(sg_id): sg_id for sg_id in discovered_sg_ids}
+            discovered_sg_ids = [unique[key] for key in sorted(unique.keys())]
+
+            store = SgwCacheStore()
+            manager = SgwManager(
+                settings=settings,
+                store=store,
+                service_groups=discovered_sg_ids,
+                heavy_poller=sgw_heavy_poller,
+                light_poller=sgw_light_poller,
+            )
+            now_epoch = self._now_epoch()
+            try:
+                await asyncio.to_thread(manager.refresh_once, now_epoch)
+            except Exception as exc:
+                message = str(exc)
+                set_sgw_startup_prime_failure(discovered_sg_ids, message)
+                self.logger.exception("SGW priming failed: %s", message)
+                return
+            set_sgw_startup_success(discovered_sg_ids, store, manager, now_epoch)
+            if not self._pytest_running():
+                start_sgw_background_refresh()
+
+            ready, _missing = compute_sgw_cache_ready(discovered_sg_ids, store)
+            self.logger.info("Discovered SG IDs: %s", [int(sg_id) for sg_id in discovered_sg_ids])
+            self.logger.info("SGW initialized for %d service groups.", len(discovered_sg_ids))
+            self.logger.info("SGW readiness after prime: %s", "ready" if ready else "not_ready")
+        except Exception as exc:
+            message = str(exc)
+            set_sgw_startup_failure(message)
+            self.logger.exception("SGW startup failed: %s", message)
+
+    @staticmethod
+    def _now_epoch() -> float:
+        return float(time.time())
+
+    @staticmethod
+    def _pytest_running() -> bool:
+        return os.getenv("PYTEST_CURRENT_TEST") is not None
+
+
+__all__ = [
+    "SgwStartupService",
+]
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_discovery_static.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.discovery import StaticServiceGroupDiscovery
+
+
+@pytest.mark.unit
+def test_static_discovery_dedupes_and_sorts_enabled() -> None:
+    payload = {
+        "service_groups": [
+            {"sg_id": 2, "enabled": True, "name": "sg-2"},
+            {"sg_id": 1, "enabled": True, "name": "sg-1"},
+            {"sg_id": 2, "enabled": True, "name": "sg-2-dup"},
+            {"sg_id": 3, "enabled": False, "name": "sg-3"},
+        ]
+    }
+    settings = CmtsOrchestratorSettings.model_validate(payload)
+
+    result = StaticServiceGroupDiscovery().discover(settings)
+
+    assert result == [ServiceGroupId(1), ServiceGroupId(2)]
+
+
+@pytest.mark.unit
+def test_static_discovery_empty_config_returns_empty_list() -> None:
+    settings = CmtsOrchestratorSettings.model_validate({})
+
+    result = StaticServiceGroupDiscovery().discover(settings)
+
+    assert result == []
+
+
+@pytest.mark.unit
+def test_static_discovery_invalid_sg_id_raises() -> None:
+    payload = {"service_groups": [{"sg_id": 0, "enabled": True, "name": "bad"}]}
+
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(payload)
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_startup.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from pypnm_cmts.api.main import app
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.discovery import ServiceGroupDiscovery
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import SgwCableModemModel, SgwSnapshotPayloadModel
+from pypnm_cmts.sgw.runtime_state import (
+    get_sgw_manager,
+    get_sgw_startup_status,
+    get_sgw_store,
+    reset_sgw_runtime_state,
+)
+from pypnm_cmts.sgw.startup import SgwStartupService
+
+
+def _build_settings(state_dir: Path) -> CmtsOrchestratorSettings:
+    payload = {
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+            "write_community": "",
+            "port": 161,
+        },
+        "state_dir": str(state_dir),
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+class FakeDiscovery:
+    """Test discovery provider for deterministic SG results."""
+
+    def __init__(self, sg_ids: list[ServiceGroupId], error: Exception | None = None) -> None:
+        self._sg_ids = list(sg_ids)
+        self._error = error
+
+    def discover(self, _settings: CmtsOrchestratorSettings) -> list[ServiceGroupId]:
+        if self._error is not None:
+            raise self._error
+        return list(self._sg_ids)
+
+
+def _patch_pollers(monkeypatch: object) -> None:
+    def _fake_heavy(_sg_id: ServiceGroupId, _settings: CmtsOrchestratorSettings) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    def _fake_light(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_heavy_poller", _fake_heavy)
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.sgw_light_poller", _fake_light)
+
+
+def _set_discovery(monkeypatch: object, discovery: ServiceGroupDiscovery) -> None:
+    monkeypatch.setattr(
+        "pypnm_cmts.api.main._sgw_startup_service",
+        SgwStartupService(discovery=discovery),
+    )
+
+
+def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2), ServiceGroupId(3)]
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+
+    with TestClient(app):
+        status = get_sgw_startup_status()
+        assert status.discovery_ok is True
+        assert status.discovered_sg_ids == sg_ids
+        store = get_sgw_store()
+        assert store is not None
+        for sg_id in sg_ids:
+            entry = store.get_entry(sg_id)
+            assert entry is not None
+            assert float(entry.snapshot.metadata.snapshot_time_epoch) > 0.0
+
+
+def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1), ServiceGroupId(2)]
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 4321.0),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == OperationalStatus.OK.value
+        assert payload["discovery_ok"] is True
+        assert payload["sgw_ready"] is True
+        assert payload["discovered_sg_ids"] == [1, 2]
+
+
+def test_readiness_false_when_discovery_fails(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+
+    _set_discovery(monkeypatch, FakeDiscovery([], error=RuntimeError("discovery failed")))
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["failed_check"] == ReadinessCheck.SGW_DISCOVERY.value
+        assert payload["message"] != ""
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is False
+    assert status.prime_failed is False
+    assert status.error_message != ""
+
+
+def test_startup_disabled_mode_uses_coherent_store_and_manager(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    now_epoch = 1234.0
+    settings = CmtsOrchestratorSettings.model_validate({"sgw": {"enabled": False}})
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: now_epoch),
+    )
+
+    asyncio.run(SgwStartupService(discovery=FakeDiscovery([])).initialize())
+
+    store = get_sgw_store()
+    manager = get_sgw_manager()
+    assert store is not None
+    assert manager is not None
+    assert manager.get_store() is store
+
+
+def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    error_message = "prime failed"
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+
+    def _raise_refresh(self: SgwManager, _now_epoch: float) -> None:
+        raise RuntimeError(error_message)
+
+    monkeypatch.setattr(SgwManager, "refresh_once", _raise_refresh)
+
+    with TestClient(app) as client:
+        response = client.get("/ops/ready")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["failed_check"] == ReadinessCheck.SGW_PRIME.value
+        assert error_message in payload["message"]
+        assert payload["discovered_sg_ids"] == [1]
+
+    status = get_sgw_startup_status()
+    assert status.startup_completed is True
+    assert status.discovery_ok is True
+    assert status.prime_failed is True
+    assert status.discovered_sg_ids == sg_ids
+    assert error_message in status.error_message
+
+
+@pytest.mark.unit
+def test_startup_starts_background_refresh(monkeypatch: object, tmp_path: Path) -> None:
+    reset_sgw_runtime_state()
+    settings = _build_settings(tmp_path / "coordination")
+    sg_ids = [ServiceGroupId(1)]
+    start_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        CmtsOrchestratorSettings,
+        "from_system_config",
+        classmethod(lambda cls: settings),
+    )
+    _patch_pollers(monkeypatch)
+    _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._now_epoch",
+        staticmethod(lambda: 1234.0),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.startup.SgwStartupService._pytest_running",
+        staticmethod(lambda: False),
+    )
+
+    def _start_refresh() -> bool:
+        start_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr("pypnm_cmts.sgw.startup.start_sgw_background_refresh", _start_refresh)
+
+    asyncio.run(SgwStartupService(discovery=FakeDiscovery(sg_ids)).initialize())
+
+    assert start_calls["count"] == 1

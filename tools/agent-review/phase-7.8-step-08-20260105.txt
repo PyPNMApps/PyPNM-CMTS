@@ -1,3 +1,271 @@
+Summary:
+- Added SGW metrics stubs (no-op + in-memory) and structured refresh logging with required fields.
+- Added observability tests for log fields and metrics/staleness tracking.
+- Updated Step 8 burndown tests list to include observability test.
+
+Tests:
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_readiness.py
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_observability.py
+
+pytest -q tests/test_sgw_readiness.py
+2 passed in 0.67s
+
+pytest -q tests/test_sgw_observability.py
+2 passed in 0.45s
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/docs/architecture/phase-7.8-burndown.md
+# Phase 7.8 Burndown
+
+## Scope
+
+Phase 7.8 focuses on hardening SG worker discovery, refresh lanes, and cache-first endpoint behavior while improving operational resilience and observability. The SG worker scaling model remains one SGW per `sg_id`, and cache-first reads remain the default contract for all endpoints.
+
+## Non-Goals
+
+- No Kubernetes API implementations.
+- No database persistence.
+- No new CMTS vendor support beyond the existing adapter contracts.
+- No API response shape changes unless explicitly approved in later steps.
+
+## Operating Model
+
+### Cache-First Reads
+
+Endpoints return SGW cache snapshots by default, including freshness metadata. Live polling remains opt-in and rate-limited.
+
+### Heavy vs Light Refresh Lanes
+
+Heavy refresh updates inventory and topology (DS/US + membership). Light refresh updates registration/state deltas for already-known modems.
+
+### SG Worker Scaling
+
+One SGW per `sg_id`. Worker count scales with discovered SG count and remains bounded by configuration caps.
+
+## Step Plan
+
+### Phase 7.8 · Step 1
+
+Goal: Reset burndown and TODO planning for Phase 7.8.
+
+Checklist:
+- [ ] Create Phase 7.8 burndown document.
+- [ ] Reset TODO list to Phase 7.8 step numbering.
+- [ ] Archive Phase 7.7 documentation references.
+
+Acceptance criteria:
+- Burndown and TODO are Phase 7.8 labeled.
+- Phase 7.7 artifacts are discoverable via archive references.
+
+Tests to run:
+- None.
+
+### Phase 7.8 · Step 2
+
+Goal: Define the SG discovery contract and a static discovery implementation.
+
+Checklist:
+- [ ] Document SG discovery interface and expected outputs.
+- [ ] Add a static discovery provider with deterministic test data.
+
+Acceptance criteria:
+- Discovery contract documented and consumed by SGW startup.
+- Static provider used in hermetic tests.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_startup.py`
+
+### Phase 7.8 · Step 3
+
+Goal: Implement real SNMP-based SG discovery via PyPNM integration.
+
+Checklist:
+- [ ] Add an SNMP discovery provider behind the discovery interface.
+- [ ] Add a discovery mode selector (static vs snmp) with safe defaults.
+- [ ] Add hermetic SNMP discovery contract tests.
+
+Acceptance criteria:
+- SNMP discovery returns sorted, deduped `ServiceGroupId` values.
+- Discovery mode selection defaults to static but supports SNMP when enabled.
+- Failure modes are explicit and surfaced to startup.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_discovery_snmp_contract.py`
+- `python -m pytest -q tests/test_sgw_startup.py`
+
+### Phase 7.8 · Step 4
+
+Goal: Harden heavy refresh inventory pipeline.
+
+Checklist:
+- [ ] Validate DS/US channel collection in heavy refresh.
+- [ ] Ensure membership snapshots are consistent and ordered.
+
+Acceptance criteria:
+- Heavy refresh populates cache with correct channel and modem data.
+- Cache metadata reflects heavy refresh timestamps.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh.py::test_sgw_manager_heavy_refresh_replaces_snapshot_payload`
+- `python -m pytest -q tests/test_sgw_heavy_refresh_inventory.py`
+
+### Phase 7.8 · Step 5
+
+Goal: Harden light refresh delta pipeline.
+
+Checklist:
+- [ ] Define light refresh state model expectations.
+- [ ] Ensure light refresh respects membership list boundaries.
+
+Acceptance criteria:
+- Light refresh updates only state fields and preserves membership list.
+- Rate limits and cache age updates behave deterministically.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems`
+
+### Phase 7.8 · Step 6
+
+Goal: Harden SGW lifecycle start/stop behavior.
+
+Checklist:
+- [ ] Validate startup prime and background refresh shutdown hooks.
+- [ ] Confirm stop signals cleanly terminate refresh threads.
+
+Acceptance criteria:
+- Background refresh stops cleanly and does not hang on shutdown.
+- Startup readiness accurately reflects cache priming.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_background_refresh.py`
+
+### Phase 7.8 · Step 7
+
+Goal: Validate endpoint refresh semantics and rate limiting.
+
+Checklist:
+- [ ] Confirm refresh request modes map to manager requests.
+- [ ] Validate max-wait and require-fresh behavior under load.
+
+Acceptance criteria:
+- Refresh requests respect rate limits and wait semantics.
+- Endpoints return consistent metadata for refresh outcomes.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_endpoints.py`
+
+### Phase 7.8 · Step 8
+
+Goal: Observability pass (structured logs and metrics stubs).
+
+Checklist:
+- [ ] Add structured fields to SGW logs.
+- [ ] Add metrics stubs for refresh durations and staleness.
+
+Acceptance criteria:
+- Logs include `sg_id`, `refresh_mode`, and timing fields.
+- Metrics stubs are documented and unit-tested.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_readiness.py`
+- `python -m pytest -q tests/test_sgw_observability.py`
+
+### Phase 7.8 · Step 9
+
+Goal: Load-safety and contention review.
+
+Checklist:
+- [ ] Review store copy boundaries under load.
+- [ ] Validate lock usage in high-frequency reads/writes.
+
+Acceptance criteria:
+- Store remains safe under concurrent access.
+- No aliasing regressions reintroduced.
+
+Tests to run:
+- `python -m pytest -q tests/test_sgw_store_thread_safety.py`
+
+### Phase 7.8 · Step 10
+
+Goal: Final QA and release readiness.
+
+Checklist:
+- [ ] Run targeted regression suite.
+- [ ] Perform legacy-key hygiene scan.
+- [ ] Update release readiness notes.
+
+Acceptance criteria:
+- Regression suite passes cleanly.
+- Legacy-key hygiene scan completed and documented.
+
+Tests to run:
+- `python -m pytest -q`
+
+## Exit Criteria
+
+- All Phase 7.8 steps completed with acceptance criteria met.
+- Cache-first endpoint behavior and SGW scaling model validated.
+- Regression tests pass with no new warnings.
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/metrics.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+
+class SgwMetrics:
+    """Minimal SGW metrics interface for refresh and staleness telemetry."""
+
+    def record_refresh_duration(self, mode: str, duration_ms: float) -> None:
+        """Record a refresh duration in milliseconds."""
+
+    def increment_refresh_error(self, mode: str) -> None:
+        """Increment a refresh error counter."""
+
+    def increment_staleness(self) -> None:
+        """Increment a staleness counter."""
+
+
+class NoOpSgwMetrics(SgwMetrics):
+    """No-op metrics implementation."""
+
+    def record_refresh_duration(self, mode: str, duration_ms: float) -> None:
+        return
+
+    def increment_refresh_error(self, mode: str) -> None:
+        return
+
+    def increment_staleness(self) -> None:
+        return
+
+
+class InMemorySgwMetrics(SgwMetrics):
+    """In-memory metrics collector for tests."""
+
+    def __init__(self) -> None:
+        self.refresh_durations_ms: dict[str, list[float]] = {}
+        self.refresh_error_counts: dict[str, int] = {}
+        self.staleness_count: int = 0
+
+    def record_refresh_duration(self, mode: str, duration_ms: float) -> None:
+        values = self.refresh_durations_ms.setdefault(mode, [])
+        values.append(float(duration_ms))
+
+    def increment_refresh_error(self, mode: str) -> None:
+        current = self.refresh_error_counts.get(mode, 0)
+        self.refresh_error_counts[mode] = current + 1
+
+    def increment_staleness(self) -> None:
+        self.staleness_count += 1
+
+
+__all__ = [
+    "InMemorySgwMetrics",
+    "NoOpSgwMetrics",
+    "SgwMetrics",
+]
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/manager.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
@@ -30,12 +298,6 @@ from pypnm_cmts.sgw.models import (
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 JITTER_MIN_SECONDS = 0
-REFRESH_MODE_NONE = "none"
-REFRESH_MODE_HEAVY = "heavy"
-REFRESH_MODE_LIGHT = "light"
-REFRESH_RESULT_OK = "ok"
-REFRESH_RESULT_ERROR = "error"
-REFRESH_RESULT_STALE = "stale"
 
 HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
 LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
@@ -212,7 +474,7 @@ class SgwManager:
             entry = self._ensure_entry(sg_id, now_epoch)
             metadata = entry.snapshot.metadata
             jitter_seconds = self._resolve_jitter_seconds(sg_id)
-            refresh_mode = REFRESH_MODE_NONE
+            refresh_mode = "none"
             refresh_applied = False
             error_message = ""
             start_time = self._monotonic()
@@ -239,16 +501,16 @@ class SgwManager:
                             int(self._settings.sgw.poll_light_seconds),
                             jitter_seconds,
                             now_epoch,
-                    )
+                        )
                 if heavy_due:
-                    refresh_mode = REFRESH_MODE_HEAVY
+                    refresh_mode = "heavy"
                     payload = self._heavy_poller(sg_id, self._settings)
                     self._refresh_heavy(sg_id, now_epoch, payload)
                     heavy_refreshed.append(sg_id)
                     light_refreshed.append(sg_id)
                     refresh_applied = True
                 elif light_due:
-                    refresh_mode = REFRESH_MODE_LIGHT
+                    refresh_mode = "light"
                     updated_modems = self._light_poller(
                         sg_id,
                         self._settings,
@@ -262,7 +524,7 @@ class SgwManager:
                     light_refreshed.append(sg_id)
                     refresh_applied = True
             except Exception as exc:
-                error_message = self._normalize_error_message(str(exc))
+                error_message = str(exc)[:SGW_LAST_ERROR_MAX_LENGTH]
                 metadata = self._store.mark_error(sg_id, error_message, now_epoch)
                 errors.append(SgwRefreshErrorModel(sg_id=sg_id, message=metadata.last_error or ""))
 
@@ -283,25 +545,24 @@ class SgwManager:
             self._store.upsert_entry(entry)
 
             duration_ms = max(0.0, (self._monotonic() - start_time) * 1000.0)
-            if refresh_mode != REFRESH_MODE_NONE and (refresh_applied or error_message != "" or stale):
+            if refresh_applied:
                 self._metrics.record_refresh_duration(refresh_mode, duration_ms)
-            if error_message != "" and refresh_mode != REFRESH_MODE_NONE:
+            if error_message != "":
                 self._metrics.increment_refresh_error(refresh_mode)
             if stale:
                 self._metrics.increment_staleness()
             if refresh_applied or error_message != "" or stale:
-                result = REFRESH_RESULT_OK
+                result = "ok"
                 if error_message != "":
-                    result = REFRESH_RESULT_ERROR
+                    result = "error"
                 elif stale:
-                    result = REFRESH_RESULT_STALE
+                    result = "stale"
                 self._log_refresh_event(
                     sg_id=sg_id,
                     refresh_mode=refresh_mode,
                     duration_ms=duration_ms,
                     result=result,
                     snapshot_time_epoch=float(metadata.snapshot_time_epoch),
-                    age_seconds=float(metadata.age_seconds),
                     error_message=error_message,
                 )
 
@@ -383,7 +644,6 @@ class SgwManager:
         duration_ms: float,
         result: str,
         snapshot_time_epoch: float,
-        age_seconds: float,
         error_message: str,
     ) -> None:
         if error_message != "":
@@ -395,7 +655,6 @@ class SgwManager:
                     "duration_ms": duration_ms,
                     "result": result,
                     "snapshot_time_epoch": snapshot_time_epoch,
-                    "age_seconds": age_seconds,
                     "error_message": error_message,
                 },
             )
@@ -408,16 +667,8 @@ class SgwManager:
                 "duration_ms": duration_ms,
                 "result": result,
                 "snapshot_time_epoch": snapshot_time_epoch,
-                "age_seconds": age_seconds,
             },
         )
-
-    @staticmethod
-    def _normalize_error_message(message: str) -> str:
-        trimmed = message.strip()
-        if trimmed == "":
-            return ""
-        return trimmed[:SGW_LAST_ERROR_MAX_LENGTH]
 
     @staticmethod
     def _monotonic() -> float:
@@ -516,11 +767,92 @@ class SgwManager:
 
 
 __all__ = [
-    "REFRESH_MODE_NONE",
-    "REFRESH_MODE_HEAVY",
-    "REFRESH_MODE_LIGHT",
-    "REFRESH_RESULT_OK",
-    "REFRESH_RESULT_ERROR",
-    "REFRESH_RESULT_STALE",
     "SgwManager",
 ]
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_observability.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.metrics import InMemorySgwMetrics
+from pypnm_cmts.sgw.models import SgwCacheEntryModel, SgwSnapshotModel, SgwSnapshotPayloadModel
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+
+@pytest.mark.unit
+def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> None:
+    settings = CmtsOrchestratorSettings()
+    sg_id = ServiceGroupId(21)
+    store = SgwCacheStore()
+    metrics = InMemorySgwMetrics()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: SgwSnapshotPayloadModel(),
+        metrics=metrics,
+    )
+
+    caplog.set_level(logging.INFO)
+    manager.refresh_once(1_000.0)
+
+    records = [record for record in caplog.records if record.name == "SgwManager"]
+    assert records
+    record = records[0]
+    assert record.sg_id == int(sg_id)
+    assert record.refresh_mode in ("heavy", "light", "none")
+    assert record.duration_ms >= 0.0
+    assert record.result in ("ok", "error", "stale")
+    assert record.snapshot_time_epoch >= 0.0
+
+
+@pytest.mark.unit
+def test_sgw_manager_metrics_capture_refresh_and_stale() -> None:
+    settings = CmtsOrchestratorSettings.model_validate(
+        {
+            "sgw": {
+                "cache_max_age_seconds": 1,
+                "poll_light_seconds": 1,
+                "poll_heavy_seconds": 1,
+                "refresh_jitter_seconds": 0,
+            }
+        }
+    )
+    sg_id = ServiceGroupId(22)
+    store = SgwCacheStore()
+    metrics = InMemorySgwMetrics()
+    manager = SgwManager(
+        settings=settings,
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: SgwSnapshotPayloadModel(),
+        metrics=metrics,
+    )
+
+    manager.refresh_once(1_000.0)
+
+    now_epoch = 1_005.0
+    metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=1.0,
+        last_heavy_refresh_epoch=now_epoch,
+        last_light_refresh_epoch=now_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+
+    manager.refresh_once(now_epoch)
+
+    assert metrics.refresh_durations_ms.get("heavy")
+    assert metrics.staleness_count >= 1

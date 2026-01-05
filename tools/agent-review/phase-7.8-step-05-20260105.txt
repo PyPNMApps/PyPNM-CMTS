@@ -1,9 +1,20 @@
+Summary:
+- Merged light refresh updates while preserving membership order and ignoring new modems.
+- Preserved membership when light poller returns an empty list.
+- Added tests for membership stability and empty-update behavior.
+
+Tests:
+- /home/dev01/Projects/PyPNM-CMTS/.env/bin/python -m pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems
+
+pytest -q tests/test_sgw_manager_refresh_extra.py::test_sgw_manager_light_refresh_updates_modems
+1 passed in 0.45s
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/src/pypnm_cmts/sgw/manager.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
 
 from __future__ import annotations
 
-import logging
 import random
 import threading
 import time
@@ -12,12 +23,7 @@ from collections.abc import Callable
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import CacheRefreshMode
 from pypnm_cmts.lib.types import ServiceGroupId
-from pypnm_cmts.orchestrator.models import (
-    SGW_LAST_ERROR_MAX_LENGTH,
-    SgwCacheMetadataModel,
-    SgwRefreshState,
-)
-from pypnm_cmts.sgw.metrics import NoOpSgwMetrics, SgwMetrics
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel, SgwRefreshState
 from pypnm_cmts.sgw.models import (
     DEFAULT_AGE_SECONDS,
     SgwCableModemModel,
@@ -30,12 +36,6 @@ from pypnm_cmts.sgw.models import (
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 JITTER_MIN_SECONDS = 0
-REFRESH_MODE_NONE = "none"
-REFRESH_MODE_HEAVY = "heavy"
-REFRESH_MODE_LIGHT = "light"
-REFRESH_RESULT_OK = "ok"
-REFRESH_RESULT_ERROR = "error"
-REFRESH_RESULT_STALE = "stale"
 
 HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
 LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
@@ -53,7 +53,6 @@ class SgwManager:
         jitter_provider: Callable[[ServiceGroupId, int], int] | None = None,
         heavy_poller: HeavyPoller | None = None,
         light_poller: LightPoller | None = None,
-        metrics: SgwMetrics | None = None,
     ) -> None:
         """
         Initialize the SGW manager.
@@ -65,16 +64,13 @@ class SgwManager:
             jitter_provider (Callable[[ServiceGroupId, int], int] | None): Optional jitter provider.
             heavy_poller (HeavyPoller | None): Optional heavy refresh poller.
             light_poller (LightPoller | None): Optional light refresh poller.
-            metrics (SgwMetrics | None): Optional metrics sink.
         """
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
         self._settings = settings
         self._store = store if store is not None else SgwCacheStore()
         self._service_groups = list(service_groups) if service_groups is not None else []
         self._jitter_provider = jitter_provider if jitter_provider is not None else self._default_jitter
         self._heavy_poller = heavy_poller if heavy_poller is not None else self._default_heavy_poller
         self._light_poller = light_poller if light_poller is not None else self._default_light_poller
-        self._metrics = metrics if metrics is not None else NoOpSgwMetrics()
         self._jitter_by_sg: dict[ServiceGroupId, int] = {}
         self._refresh_requests: dict[ServiceGroupId, CacheRefreshMode] = {}
         self._stop_requested = False
@@ -105,14 +101,6 @@ class SgwManager:
         with self._lock:
             self._stop_requested = True
             self._stop_event.set()
-
-    def reset_stop(self) -> None:
-        """
-        Clear stop flags to allow the refresh loop to restart.
-        """
-        with self._lock:
-            self._stop_requested = False
-            self._stop_event.clear()
 
     def request_refresh(
         self,
@@ -212,10 +200,6 @@ class SgwManager:
             entry = self._ensure_entry(sg_id, now_epoch)
             metadata = entry.snapshot.metadata
             jitter_seconds = self._resolve_jitter_seconds(sg_id)
-            refresh_mode = REFRESH_MODE_NONE
-            refresh_applied = False
-            error_message = ""
-            start_time = self._monotonic()
 
             try:
                 with self._lock:
@@ -239,16 +223,13 @@ class SgwManager:
                             int(self._settings.sgw.poll_light_seconds),
                             jitter_seconds,
                             now_epoch,
-                    )
+                        )
                 if heavy_due:
-                    refresh_mode = REFRESH_MODE_HEAVY
                     payload = self._heavy_poller(sg_id, self._settings)
                     self._refresh_heavy(sg_id, now_epoch, payload)
                     heavy_refreshed.append(sg_id)
                     light_refreshed.append(sg_id)
-                    refresh_applied = True
                 elif light_due:
-                    refresh_mode = REFRESH_MODE_LIGHT
                     updated_modems = self._light_poller(
                         sg_id,
                         self._settings,
@@ -260,10 +241,8 @@ class SgwManager:
                     )
                     self._refresh_light(sg_id, now_epoch, merged_modems)
                     light_refreshed.append(sg_id)
-                    refresh_applied = True
             except Exception as exc:
-                error_message = self._normalize_error_message(str(exc))
-                metadata = self._store.mark_error(sg_id, error_message, now_epoch)
+                metadata = self._store.mark_error(sg_id, str(exc), now_epoch)
                 errors.append(SgwRefreshErrorModel(sg_id=sg_id, message=metadata.last_error or ""))
 
             entry = self._store.get_entry(sg_id) or entry
@@ -271,39 +250,14 @@ class SgwManager:
             age_seconds = max(DEFAULT_AGE_SECONDS, float(now_epoch) - float(metadata.snapshot_time_epoch))
             metadata = metadata.model_copy(update={"age_seconds": age_seconds})
 
-            stale = False
             if metadata.refresh_state != SgwRefreshState.ERROR:
                 if self._store.compute_staleness(age_seconds, int(self._settings.sgw.cache_max_age_seconds)):
-                    stale = True
                     metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.STALE})
                 else:
                     metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.OK})
 
             entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
             self._store.upsert_entry(entry)
-
-            duration_ms = max(0.0, (self._monotonic() - start_time) * 1000.0)
-            if refresh_mode != REFRESH_MODE_NONE and (refresh_applied or error_message != "" or stale):
-                self._metrics.record_refresh_duration(refresh_mode, duration_ms)
-            if error_message != "" and refresh_mode != REFRESH_MODE_NONE:
-                self._metrics.increment_refresh_error(refresh_mode)
-            if stale:
-                self._metrics.increment_staleness()
-            if refresh_applied or error_message != "" or stale:
-                result = REFRESH_RESULT_OK
-                if error_message != "":
-                    result = REFRESH_RESULT_ERROR
-                elif stale:
-                    result = REFRESH_RESULT_STALE
-                self._log_refresh_event(
-                    sg_id=sg_id,
-                    refresh_mode=refresh_mode,
-                    duration_ms=duration_ms,
-                    result=result,
-                    snapshot_time_epoch=float(metadata.snapshot_time_epoch),
-                    age_seconds=float(metadata.age_seconds),
-                    error_message=error_message,
-                )
 
         return SgwRefreshResultModel(
             snapshot_time_epoch=float(now_epoch),
@@ -375,53 +329,6 @@ class SgwManager:
             }
         )
         self._store.upsert_entry(entry)
-
-    def _log_refresh_event(
-        self,
-        sg_id: ServiceGroupId,
-        refresh_mode: str,
-        duration_ms: float,
-        result: str,
-        snapshot_time_epoch: float,
-        age_seconds: float,
-        error_message: str,
-    ) -> None:
-        if error_message != "":
-            self.logger.warning(
-                "sgw refresh error",
-                extra={
-                    "sg_id": int(sg_id),
-                    "refresh_mode": refresh_mode,
-                    "duration_ms": duration_ms,
-                    "result": result,
-                    "snapshot_time_epoch": snapshot_time_epoch,
-                    "age_seconds": age_seconds,
-                    "error_message": error_message,
-                },
-            )
-            return
-        self.logger.info(
-            "sgw refresh",
-            extra={
-                "sg_id": int(sg_id),
-                "refresh_mode": refresh_mode,
-                "duration_ms": duration_ms,
-                "result": result,
-                "snapshot_time_epoch": snapshot_time_epoch,
-                "age_seconds": age_seconds,
-            },
-        )
-
-    @staticmethod
-    def _normalize_error_message(message: str) -> str:
-        trimmed = message.strip()
-        if trimmed == "":
-            return ""
-        return trimmed[:SGW_LAST_ERROR_MAX_LENGTH]
-
-    @staticmethod
-    def _monotonic() -> float:
-        return float(time.monotonic())
 
     @staticmethod
     def _merge_light_updates(
@@ -516,11 +423,151 @@ class SgwManager:
 
 
 __all__ = [
-    "REFRESH_MODE_NONE",
-    "REFRESH_MODE_HEAVY",
-    "REFRESH_MODE_LIGHT",
-    "REFRESH_RESULT_OK",
-    "REFRESH_RESULT_ERROR",
-    "REFRESH_RESULT_STALE",
     "SgwManager",
 ]
+
+# FILE: /home/dev01/Projects/PyPNM-CMTS/tests/test_sgw_manager_refresh_extra.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwChannelSummaryModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+POLL_LIGHT_SECONDS = 300
+POLL_HEAVY_SECONDS = 900
+REFRESH_JITTER_SECONDS = 0
+CACHE_MAX_AGE_SECONDS = 1200
+
+
+def _settings() -> CmtsOrchestratorSettings:
+    payload = {
+        "sgw": {
+            "enabled": True,
+            "poll_light_seconds": POLL_LIGHT_SECONDS,
+            "poll_heavy_seconds": POLL_HEAVY_SECONDS,
+            "refresh_jitter_seconds": REFRESH_JITTER_SECONDS,
+            "cache_max_age_seconds": CACHE_MAX_AGE_SECONDS,
+        }
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+@pytest.mark.unit
+def test_sgw_manager_heavy_refresh_writes_snapshot() -> None:
+    now_epoch = 1_000.0
+    sg_id = ServiceGroupId(10)
+    payload = SgwSnapshotPayloadModel(
+        ds_channels=SgwChannelSummaryModel(count=1, channel_ids=[1]),
+        us_channels=SgwChannelSummaryModel(count=1, channel_ids=[10]),
+        cable_modems=[SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100")],
+    )
+    store = SgwCacheStore()
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        heavy_poller=lambda *_args: payload,
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert entry.snapshot.ds_channels.count == 1
+    assert entry.snapshot.us_channels.count == 1
+    assert len(entry.snapshot.cable_modems) == 1
+    assert entry.snapshot.metadata.snapshot_time_epoch == now_epoch
+    assert entry.snapshot.metadata.last_heavy_refresh_epoch == now_epoch
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+
+@pytest.mark.unit
+def test_sgw_manager_light_refresh_updates_modems() -> None:
+    base_epoch = 2_000.0
+    now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
+    sg_id = ServiceGroupId(11)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:00", ipv4="192.168.0.10"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.20"),
+    ]
+    initial_metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
+    store = SgwCacheStore()
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    updated_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:11", ipv4="192.168.0.30"),
+    ]
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        light_poller=lambda *_args: list(updated_modems),
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:00",
+        "aa:bb:cc:dd:ee:ff",
+    ]
+    assert str(entry.snapshot.cable_modems[1].ipv4) == "192.168.0.100"
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+
+@pytest.mark.unit
+def test_sgw_manager_light_refresh_preserves_membership_on_empty_update() -> None:
+    base_epoch = 3_000.0
+    now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
+    sg_id = ServiceGroupId(12)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.11"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.12"),
+    ]
+    initial_metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
+    store = SgwCacheStore()
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        light_poller=lambda *_args: [],
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:01",
+        "aa:bb:cc:dd:ee:02",
+    ]
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch

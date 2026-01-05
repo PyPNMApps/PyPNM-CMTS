@@ -23,6 +23,7 @@ def test_sgw_settings_defaults() -> None:
     assert int(sgw.refresh_jitter_seconds) == 30
     assert int(sgw.cache_max_age_seconds) == 1200
     assert int(sgw.max_workers) == 0
+    assert sgw.discovery.mode == "static"
 
 
 def test_sgw_settings_rejects_non_positive_light_poll() -> None:
@@ -43,6 +44,37 @@ def test_sgw_settings_rejects_excessive_jitter() -> None:
 def test_sgw_settings_rejects_negative_max_workers() -> None:
     with pytest.raises(ValueError, match="sgw.max_workers must be non-negative."):
         CmtsOrchestratorSettings.model_validate({"sgw": {"max_workers": -1}})
+
+
+def test_sgw_settings_rejects_invalid_discovery_mode() -> None:
+    with pytest.raises(ValueError, match="sgw.discovery.mode must be 'static' or 'snmp'."):
+        CmtsOrchestratorSettings.model_validate({"sgw": {"discovery": {"mode": "invalid"}}})
+
+
+def test_sgw_settings_snmp_requires_hostname_and_community() -> None:
+    base_payload = {
+        "sgw": {"discovery": {"mode": "snmp"}},
+        "adapter": {
+            "hostname": "cmts.example",
+            "community": "public",
+        },
+    }
+    with pytest.raises(ValueError, match="adapter.hostname must be set for snmp discovery."):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                **base_payload,
+                "adapter": {"hostname": "", "community": "public"},
+            }
+        )
+    with pytest.raises(ValueError, match="adapter.community must be set for snmp discovery."):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                **base_payload,
+                "adapter": {"hostname": "cmts.example", "community": ""},
+            }
+        )
+    settings = CmtsOrchestratorSettings.model_validate(base_payload)
+    assert settings.sgw.discovery.mode == "snmp"
 
 
 def test_sgw_settings_rejects_small_cache_max_age() -> None:

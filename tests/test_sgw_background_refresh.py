@@ -49,3 +49,49 @@ def test_sgw_background_refresh_start_stop(monkeypatch: object) -> None:
     stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
     assert stopped.is_set() is True
     assert is_sgw_refresh_running() is False
+
+
+def test_sgw_background_refresh_restart_clears_stop(monkeypatch: object) -> None:
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    settings = CmtsOrchestratorSettings()
+    manager = SgwManager(settings=settings, store=store, service_groups=[])
+    started = Event()
+    stopped = Event()
+    reset_calls = {"count": 0}
+    original_reset_stop = manager.reset_stop
+
+    def _refresh_forever(*_args: object, **_kwargs: object) -> list[object]:
+        started.set()
+        stopped.wait(timeout=START_TIMEOUT_SECONDS)
+        return []
+
+    def _stop() -> None:
+        stopped.set()
+
+    def _reset_stop() -> None:
+        reset_calls["count"] += 1
+        original_reset_stop()
+
+    monkeypatch.setattr(manager, "refresh_forever", _refresh_forever)
+    monkeypatch.setattr(manager, "stop", _stop)
+    monkeypatch.setattr(manager, "reset_stop", _reset_stop)
+
+    set_sgw_startup_success([], store, manager, STARTUP_REFRESH_EPOCH)
+
+    assert start_sgw_background_refresh() is True
+    assert started.wait(timeout=START_TIMEOUT_SECONDS)
+    assert is_sgw_refresh_running() is True
+    stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
+    assert stopped.is_set() is True
+    assert is_sgw_refresh_running() is False
+
+    started.clear()
+    stopped.clear()
+    assert start_sgw_background_refresh() is True
+    assert started.wait(timeout=START_TIMEOUT_SECONDS)
+    assert is_sgw_refresh_running() is True
+    stop_sgw_background_refresh(timeout_seconds=STOP_TIMEOUT_SECONDS)
+    assert stopped.is_set() is True
+    assert is_sgw_refresh_running() is False
+    assert reset_calls["count"] == 2

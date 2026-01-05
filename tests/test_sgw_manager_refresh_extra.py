@@ -72,15 +72,22 @@ def test_sgw_manager_light_refresh_updates_modems() -> None:
     base_epoch = 2_000.0
     now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
     sg_id = ServiceGroupId(11)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:00", ipv4="192.168.0.10"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.20"),
+    ]
     initial_metadata = SgwCacheMetadataModel(
         snapshot_time_epoch=base_epoch,
         last_heavy_refresh_epoch=base_epoch,
         last_light_refresh_epoch=base_epoch,
     )
-    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata)
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
     store = SgwCacheStore()
     store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
-    updated_modems = [SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100")]
+    updated_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:11", ipv4="192.168.0.30"),
+    ]
     manager = SgwManager(
         settings=_settings(),
         store=store,
@@ -93,5 +100,45 @@ def test_sgw_manager_light_refresh_updates_modems() -> None:
 
     entry = store.get_entry(sg_id)
     assert entry is not None
-    assert len(entry.snapshot.cable_modems) == 1
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:00",
+        "aa:bb:cc:dd:ee:ff",
+    ]
+    assert str(entry.snapshot.cable_modems[1].ipv4) == "192.168.0.100"
+    assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
+
+
+@pytest.mark.unit
+def test_sgw_manager_light_refresh_preserves_membership_on_empty_update() -> None:
+    base_epoch = 3_000.0
+    now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
+    sg_id = ServiceGroupId(12)
+    initial_modems = [
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.11"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.12"),
+    ]
+    initial_metadata = SgwCacheMetadataModel(
+        snapshot_time_epoch=base_epoch,
+        last_heavy_refresh_epoch=base_epoch,
+        last_light_refresh_epoch=base_epoch,
+    )
+    snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=initial_metadata, cable_modems=list(initial_modems))
+    store = SgwCacheStore()
+    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    manager = SgwManager(
+        settings=_settings(),
+        store=store,
+        service_groups=[sg_id],
+        jitter_provider=lambda *_args: 0,
+        light_poller=lambda *_args: [],
+    )
+
+    manager.refresh_once(now_epoch)
+
+    entry = store.get_entry(sg_id)
+    assert entry is not None
+    assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
+        "aa:bb:cc:dd:ee:01",
+        "aa:bb:cc:dd:ee:02",
+    ]
     assert entry.snapshot.metadata.last_light_refresh_epoch == now_epoch
