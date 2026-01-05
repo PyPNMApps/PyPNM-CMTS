@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ def _build_settings(state_dir: Path) -> CmtsOrchestratorSettings:
             "write_community": "",
             "port": 161,
         },
+        "sgw": {"discovery": {"mode": "static"}},
         "state_dir": str(state_dir),
     }
     return CmtsOrchestratorSettings.model_validate(payload)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 from __future__ import annotations
 
 import json
@@ -21,10 +21,16 @@ from pypnm_cmts.cmts.discovery_models import (
     RegisteredCableModemModel,
     ServiceGroupCableModemInventoryModel,
 )
+from pypnm_cmts.config.orchestrator_config import (
+    ENV_ADAPTER_HOSTNAME,
+    ENV_ADAPTER_READ_COMMUNITY,
+)
 from pypnm_cmts.lib.types import IPv6LinkLocalStr, ServiceGroupId
 
 
 def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    monkeypatch.setenv(ENV_ADAPTER_HOSTNAME, "cmts.example")
+    monkeypatch.setenv(ENV_ADAPTER_READ_COMMUNITY, "public")
     class _Args:
         command = "discover"
         cmts_hostname = "192.168.0.100"
@@ -107,6 +113,8 @@ def test_cli_discover_outputs_json(monkeypatch: object, tmp_path: Path, capsys: 
 
 
 def test_cli_discover_write_override(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    monkeypatch.setenv(ENV_ADAPTER_HOSTNAME, "cmts.example")
+    monkeypatch.setenv(ENV_ADAPTER_READ_COMMUNITY, "public")
     class _Args:
         command = "discover"
         cmts_hostname = "192.168.0.100"
@@ -159,6 +167,8 @@ def test_cli_discover_write_override(monkeypatch: object, tmp_path: Path, capsys
 
 
 def test_cli_discover_outputs_text(monkeypatch: object, tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    monkeypatch.setenv(ENV_ADAPTER_HOSTNAME, "cmts.example")
+    monkeypatch.setenv(ENV_ADAPTER_READ_COMMUNITY, "public")
     class _Args:
         command = "discover"
         cmts_hostname = "192.168.0.100"

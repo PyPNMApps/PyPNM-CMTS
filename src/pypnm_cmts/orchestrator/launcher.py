@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 from __future__ import annotations
 
 import threading
@@ -577,7 +577,7 @@ class CmtsOrchestratorLauncher:
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
     ) -> tuple[list[ServiceGroupId], str]:
-        if bool(settings.auto_discover) or not settings.service_groups:
+        if bool(settings.auto_discover):
             return self._build_discovered_service_groups(settings, state_dir)
         return self._build_config_service_groups(settings)
 
@@ -776,7 +776,7 @@ class CmtsOrchestratorLauncher:
         return bool(held_sg_ids)
 
     def _should_discover(self, settings: CmtsOrchestratorSettings) -> bool:
-        return bool(settings.auto_discover) or not settings.service_groups
+        return bool(settings.auto_discover)
 
     def _apply_overrides(self, settings: CmtsOrchestratorSettings) -> CmtsOrchestratorSettings:
         data = settings.model_dump()

@@ -26,7 +26,7 @@ def _seed_snapshot(store: SgwCacheStore, sg_id: ServiceGroupId, snapshot_time: f
 
 
 @pytest.mark.unit
-def test_require_fresh_waits_for_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_fresh_returns_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     service = ServingGroupCacheService()
     store = SgwCacheStore()
@@ -38,25 +38,6 @@ def test_require_fresh_waits_for_snapshot(monkeypatch: pytest.MonkeyPatch) -> No
     )
     manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
     set_sgw_startup_success([sg_id], store, manager, 1_000.0)
-
-    call_state = {"count": 0}
-
-    def _fake_sleep(_: float) -> None:
-        call_state["count"] += 1
-        entry = store.get_entry(sg_id)
-        if entry is not None:
-            metadata = entry.snapshot.metadata.model_copy(update={"snapshot_time_epoch": 2_000.0})
-            entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
-            store.upsert_entry(entry)
-
-    monotonic_state = {"value": 0.0}
-
-    def _fake_monotonic() -> float:
-        monotonic_state["value"] += 0.1
-        return monotonic_state["value"]
-
-    monkeypatch.setattr(ServingGroupCacheService, "_sleep", staticmethod(_fake_sleep))
-    monkeypatch.setattr(ServingGroupCacheService, "_monotonic", staticmethod(_fake_monotonic))
 
     request = GetServingGroupTopologyRequest(
         cmts={"serving_group": {"id": [int(sg_id)]}},
@@ -72,12 +53,11 @@ def test_require_fresh_waits_for_snapshot(monkeypatch: pytest.MonkeyPatch) -> No
         refresh_applied=True,
     )
 
-    assert waited_seconds > 0.0
-    assert call_state["count"] >= 1
+    assert waited_seconds == 0.0
 
 
 @pytest.mark.unit
-def test_require_fresh_times_out_when_snapshot_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_fresh_returns_immediately_when_snapshot_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     service = ServingGroupCacheService()
     store = SgwCacheStore()
@@ -89,20 +69,6 @@ def test_require_fresh_times_out_when_snapshot_does_not_advance(monkeypatch: pyt
     )
     manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
     set_sgw_startup_success([sg_id], store, manager, 1_000.0)
-
-    sleep_calls = {"count": 0}
-
-    def _fake_sleep(_: float) -> None:
-        sleep_calls["count"] += 1
-
-    monotonic_state = {"value": 0.0}
-
-    def _fake_monotonic() -> float:
-        monotonic_state["value"] += 0.3
-        return monotonic_state["value"]
-
-    monkeypatch.setattr(ServingGroupCacheService, "_sleep", staticmethod(_fake_sleep))
-    monkeypatch.setattr(ServingGroupCacheService, "_monotonic", staticmethod(_fake_monotonic))
 
     request = GetServingGroupTopologyRequest(
         cmts={"serving_group": {"id": [int(sg_id)]}},
@@ -118,5 +84,4 @@ def test_require_fresh_times_out_when_snapshot_does_not_advance(monkeypatch: pyt
         refresh_applied=True,
     )
 
-    assert waited_seconds >= 1.0
-    assert sleep_calls["count"] > 0
+    assert waited_seconds == 0.0

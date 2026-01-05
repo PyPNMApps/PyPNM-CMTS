@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -51,12 +51,19 @@ def _run_package(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]
 def _write_system_config(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+                "write_community": "",
+                "port": 161,
+            },
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": True},
             ],
             "target_service_groups": 1,
             "shard_mode": "sequential",
             "default_tests": ["test-a"],
+            "sgw": {"discovery": {"mode": "static"}},
         }
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -65,12 +72,19 @@ def _write_system_config(path: Path) -> None:
 def _write_system_config_no_leases(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+                "write_community": "",
+                "port": 161,
+            },
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": True},
             ],
             "target_service_groups": 0,
             "shard_mode": "sequential",
             "default_tests": ["test-a"],
+            "sgw": {"discovery": {"mode": "static"}},
         }
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -79,6 +93,12 @@ def _write_system_config_no_leases(path: Path) -> None:
 def _write_system_config_multi(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+                "write_community": "",
+                "port": 161,
+            },
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": True},
                 {"sg_id": 2, "name": "sg-2", "enabled": True},
@@ -87,6 +107,7 @@ def _write_system_config_multi(path: Path) -> None:
             "target_service_groups": 1,
             "shard_mode": "sequential",
             "default_tests": ["test-a"],
+            "sgw": {"discovery": {"mode": "static"}},
         }
     }
     path.write_text(json.dumps(payload), encoding="utf-8")

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -12,6 +13,10 @@ from pathlib import Path
 import httpx
 
 CLI_SMOKE_TIMEOUT_SECONDS = 30.0
+ENV_ADAPTER_HOSTNAME = "PYPNM_CMTS_ADAPTER_HOSTNAME"
+ENV_ADAPTER_READ_COMMUNITY = "PYPNM_CMTS_ADAPTER_READ_COMMUNITY"
+DEFAULT_CMTS_HOSTNAME = "cmts.example"
+DEFAULT_CMTS_READ_COMMUNITY = "public"
 
 
 def _get_free_port() -> int:
@@ -57,6 +62,9 @@ def _wait_for_status(base_url: str, timeout_seconds: float) -> dict[str, object]
 def test_ops_version_smoke_starts_service() -> None:
     port = _get_free_port()
     base_url = f"http://127.0.0.1:{port}"
+    env = dict(os.environ)
+    env[ENV_ADAPTER_HOSTNAME] = DEFAULT_CMTS_HOSTNAME
+    env[ENV_ADAPTER_READ_COMMUNITY] = DEFAULT_CMTS_READ_COMMUNITY
 
     process = subprocess.Popen(
         [
@@ -74,6 +82,7 @@ def test_ops_version_smoke_starts_service() -> None:
         cwd=Path(__file__).resolve().parents[1],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
         text=True,
     )
 
@@ -96,6 +105,9 @@ def test_ops_version_smoke_starts_service() -> None:
 def test_ops_status_combined_mode_runner_available() -> None:
     port = _get_free_port()
     base_url = f"http://127.0.0.1:{port}"
+    env = dict(os.environ)
+    env[ENV_ADAPTER_HOSTNAME] = DEFAULT_CMTS_HOSTNAME
+    env[ENV_ADAPTER_READ_COMMUNITY] = DEFAULT_CMTS_READ_COMMUNITY
 
     process = subprocess.Popen(
         [
@@ -114,6 +126,7 @@ def test_ops_status_combined_mode_runner_available() -> None:
         cwd=Path(__file__).resolve().parents[1],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
         text=True,
     )
 

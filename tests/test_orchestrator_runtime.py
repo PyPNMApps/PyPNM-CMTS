@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ def _build_settings(tmp_path: Path) -> CmtsOrchestratorSettings:
         leader_ttl_seconds=5,
         lease_ttl_seconds=5,
         state_dir=tmp_path / "coordination",
+        adapter={"hostname": "cmts.example", "community": "public"},
+        sgw={"discovery": {"mode": "static"}},
     )
 
 

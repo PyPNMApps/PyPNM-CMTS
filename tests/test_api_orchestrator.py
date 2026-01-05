@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -15,12 +15,19 @@ from pydantic import ValidationError
 def _write_system_config(path: Path) -> None:
     payload = {
         "CmtsOrchestrator": {
+            "adapter": {
+                "hostname": "cmts.example",
+                "community": "public",
+                "write_community": "",
+                "port": 161,
+            },
             "service_groups": [
                 {"sg_id": 1, "name": "sg-1", "enabled": True},
             ],
             "target_service_groups": 1,
             "shard_mode": "sequential",
             "default_tests": ["test-a"],
+            "sgw": {"discovery": {"mode": "static"}},
         }
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
