@@ -502,7 +502,7 @@ def test_sgw_manager_light_refresh_updates_modems() -> None:
     now_epoch = base_epoch + float(POLL_LIGHT_SECONDS)
     sg_id = ServiceGroupId(11)
     initial_modems = [
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:00", ipv4="192.168.0.10"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.10"),
         SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.20"),
     ]
     initial_metadata = SgwCacheMetadataModel(
@@ -515,7 +515,7 @@ def test_sgw_manager_light_refresh_updates_modems() -> None:
     store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
     updated_modems = [
         SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100"),
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:11", ipv4="192.168.0.30"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.30"),
     ]
     manager = SgwManager(
         settings=_settings(),
@@ -530,7 +530,7 @@ def test_sgw_manager_light_refresh_updates_modems() -> None:
     entry = store.get_entry(sg_id)
     assert entry is not None
     assert [str(modem.mac) for modem in entry.snapshot.cable_modems] == [
-        "aa:bb:cc:dd:ee:00",
+        "aa:bb:cc:dd:ee:01",
         "aa:bb:cc:dd:ee:ff",
     ]
     assert str(entry.snapshot.cable_modems[1].ipv4) == "192.168.0.100"

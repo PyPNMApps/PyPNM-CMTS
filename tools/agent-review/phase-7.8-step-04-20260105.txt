@@ -218,7 +218,7 @@ class FakeInventoryProvider:
             [5, 4, 4],
             [
                 SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.2", ipv6=""),
-                SgwCableModemModel(mac="aa:bb:cc:dd:ee:00", ipv4="192.168.0.1", ipv6=""),
+                SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.1", ipv6=""),
                 SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.2", ipv6=""),
             ],
         )
@@ -245,6 +245,6 @@ def test_sgw_heavy_poller_orders_inventory() -> None:
     assert payload.us_channels.channel_ids == [4, 5]
     assert payload.us_channels.count == 2
     assert [str(modem.mac) for modem in payload.cable_modems] == [
-        "aa:bb:cc:dd:ee:00",
+        "aa:bb:cc:dd:ee:01",
         "aa:bb:cc:dd:ee:ff",
     ]

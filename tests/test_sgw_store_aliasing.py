@@ -61,7 +61,7 @@ def test_service_response_mutation_does_not_alias_store() -> None:
         response = service.get_cable_modems(request)
         response.items.append(
             SgwCableModemModel(
-                mac="aa:bb:cc:dd:ee:00",
+                mac="aa:bb:cc:dd:ee:01",
                 ipv4="192.168.0.101",
                 ipv6="2001:db8::2",
             )
@@ -93,8 +93,8 @@ def test_concurrent_refresh_and_reads_do_not_alias_or_throw() -> None:
         sg_id = ServiceGroupId(2)
         payload = SgwSnapshotPayloadModel(
             cable_modems=[
-                SgwCableModemModel(mac="aa:bb:cc:dd:ee:11", ipv4="192.168.0.111", ipv6="2001:db8::11"),
-                SgwCableModemModel(mac="aa:bb:cc:dd:ee:22", ipv4="192.168.0.112", ipv6="2001:db8::12"),
+                SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.111", ipv6="2001:db8::11"),
+                SgwCableModemModel(mac="aa:bb:cc:dd:ee:03", ipv4="192.168.0.112", ipv6="2001:db8::12"),
             ],
         )
 
@@ -165,6 +165,6 @@ def test_concurrent_refresh_and_reads_do_not_alias_or_throw() -> None:
         entry = store.get_entry(sg_id)
         assert entry is not None
         macs = [str(modem.mac) for modem in entry.snapshot.cable_modems]
-        assert macs == ["aa:bb:cc:dd:ee:11", "aa:bb:cc:dd:ee:22"]
+        assert macs == ["aa:bb:cc:dd:ee:02", "aa:bb:cc:dd:ee:03"]
     finally:
         reset_sgw_runtime_state()
