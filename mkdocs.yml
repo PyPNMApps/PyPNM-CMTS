@@ -33,6 +33,7 @@ nav:
       - Config workflow: system/config.md
       - Manpage: system/pypnm-cmts-manpage.md
   - CLI: system/cli.md
+  - FAQ: faq/index.md
   - Tools: tools/index.md
   - Scripts: scripts/index.md
   - Examples:

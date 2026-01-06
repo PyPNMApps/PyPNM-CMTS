@@ -28,6 +28,7 @@ Phase 7.7 is closed. Archive references live at:
 - [ ] Before proposing or making PyPNM (pypnm-docsis) changes, state the plan and rationale explicitly
 - [ ] Ensure any modified or newly created file updates the SPDX header year to 2026
 - [ ] If a file already has a SPDX year and the year has changed, update it as a range (example: 2025 -> 2025-2026)
+- [ ] When fixing an error, add or update the FAQ entry with the error and resolution
 
 ## Deferred Items
 
