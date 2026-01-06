@@ -60,6 +60,7 @@ Bug-Tracker = "https://github.com/PyPNMApps/PyPNM-CMTS/issues"
 
 [project.scripts]
 pypnm-cmts = "pypnm_cmts.cli:main"
+pypnm-cmts-release = "pypnm_cmts.tools.release_tool:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
