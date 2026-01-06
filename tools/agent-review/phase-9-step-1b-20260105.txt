@@ -1,3 +1,4 @@
+# FILE: install.sh
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
@@ -141,39 +142,27 @@ install_prereq_packages() {
   pm_update
 
   if [[ "${PM}" == "apt" ]]; then
-    if ! sudo apt-get install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with apt-get." >&2
-    fi
+    sudo apt-get install -y "$@"
     return
   fi
   if [[ "${PM}" == "dnf" ]]; then
-    if ! sudo dnf install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with dnf." >&2
-    fi
+    sudo dnf install -y "$@"
     return
   fi
   if [[ "${PM}" == "yum" ]]; then
-    if ! sudo yum install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with yum." >&2
-    fi
+    sudo yum install -y "$@"
     return
   fi
   if [[ "${PM}" == "zypper" ]]; then
-    if ! sudo zypper install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with zypper." >&2
-    fi
+    sudo zypper install -y "$@"
     return
   fi
   if [[ "${PM}" == "apk" ]]; then
-    if ! sudo apk add --no-cache "$@"; then
-      echo "⚠️  Failed to install prerequisites with apk." >&2
-    fi
+    sudo apk add --no-cache "$@"
     return
   fi
   if [[ "${PM}" == "brew" ]]; then
-    if ! brew install "$@"; then
-      echo "⚠️  Failed to install prerequisites with brew." >&2
-    fi
+    brew install "$@"
     return
   fi
 }
@@ -190,12 +179,8 @@ ensure_python() {
     elif [[ "${PM}" == "apk" ]]; then
       install_prereq_packages python3 py3-pip
     elif [[ "${PM}" == "brew" ]]; then
-      install_prereq_packages python
+      install_prereq_packages python@3
     fi
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 is required. Install Python 3.10+ and retry." >&2
-    exit 1
   fi
   require_command python3
 }
@@ -221,18 +206,11 @@ ensure_git() {
       install_prereq_packages git
     fi
   fi
-  if ! command -v git >/dev/null 2>&1; then
-    echo "ERROR: git is required. Install git and retry." >&2
-    exit 1
-  fi
   require_command git
 }
 
 ensure_venv_support() {
-  if python3 - <<'PYCODE'
-import venv
-PYCODE
-  then
+  if python3 -m venv --help >/dev/null 2>&1; then
     return
   fi
   echo "⚠️  python3 venv support missing; attempting to install." >&2
@@ -245,12 +223,9 @@ PYCODE
   elif [[ "${PM}" == "apk" ]]; then
     install_prereq_packages py3-virtualenv
   elif [[ "${PM}" == "brew" ]]; then
-    install_prereq_packages python
+    install_prereq_packages python@3
   fi
-  if ! python3 - <<'PYCODE'
-import venv
-PYCODE
-  then
+  if ! python3 -m venv --help >/dev/null 2>&1; then
     echo "ERROR: python3 venv support is required but still unavailable." >&2
     exit 1
   fi
@@ -402,17 +377,7 @@ install_standard() {
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
-  if python -m pip install -e "${PROJECT_ROOT}[dev,docs]"; then
-    return
-  fi
-  echo "⚠️  Install with [dev,docs] failed; falling back to [dev]." >&2
-  if python -m pip install -e "${PROJECT_ROOT}[dev]"; then
-    python -m pip install pytest mkdocs mkdocs-material
-    return
-  fi
-  echo "⚠️  Install with [dev] failed; falling back to base install." >&2
-  python -m pip install -e "${PROJECT_ROOT}"
-  python -m pip install pytest mkdocs mkdocs-material
+  python -m pip install -e "${PROJECT_ROOT}[dev,docs]"
 }
 
 install_from_tag() {
@@ -457,7 +422,7 @@ install_from_tag() {
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
-  python -m pip install --upgrade --force-reinstall "${worktree_dir}"
+  python -m pip install "${worktree_dir}"
   python - <<PYCODE
 import pypnm_cmts
 version = pypnm_cmts.__version__
@@ -479,11 +444,7 @@ verify_mkdocs() {
 }
 
 run_tests() {
-  if [[ ! -d "${PROJECT_ROOT}/tests" ]]; then
-    echo "⚠️  tests directory not found; skipping pytest."
-    return
-  fi
-  (cd "${PROJECT_ROOT}" && python -m pytest -v)
+  python -m pytest -v
 }
 
 if [[ $# -eq 0 ]]; then
@@ -603,3 +564,4 @@ echo "Next steps:"
 echo "  source ${VENV_DIR}/bin/activate"
 echo "  pypnm-cmts serve --help"
 echo "  mkdocs serve"
+

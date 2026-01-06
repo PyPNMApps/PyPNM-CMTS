@@ -1,3 +1,4 @@
+# FILE: git-save.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -101,7 +102,7 @@ if [[ "${skip_ruff}" != "true" ]]; then
 fi
 
 echo "Staging changes..."
-git add -A -- ':!.env' ':!.test'
+git add -A -- ':!.env'
 
 echo "Creating commit..."
 git commit -m "${final_msg}"
@@ -119,3 +120,4 @@ else
 fi
 
 echo "Done."
+

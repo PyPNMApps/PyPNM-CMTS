@@ -1,3 +1,4 @@
+# FILE: install.sh
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
@@ -5,7 +6,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-BANNER_PATH="${PROJECT_ROOT}/tools/banner.txt"
 VENV_DIR=".env"
 MODE="standard"
 UPDATE_TAG=""
@@ -57,13 +57,6 @@ require_command() {
   fi
 }
 
-print_banner() {
-  if [[ -f "${BANNER_PATH}" ]]; then
-    cat "${BANNER_PATH}"
-    echo
-  fi
-}
-
 detect_package_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     PM="apt"
@@ -91,89 +84,35 @@ detect_package_manager() {
   fi
 }
 
-sudo_available() {
-  if command -v sudo >/dev/null 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-pm_update() {
-  if [[ "${PM}" == "none" ]]; then
-    return
-  fi
-
-  if [[ "${PM}" == "apt" ]]; then
-    sudo apt-get update || true
-    return
-  fi
-  if [[ "${PM}" == "dnf" ]]; then
-    sudo dnf makecache || true
-    return
-  fi
-  if [[ "${PM}" == "yum" ]]; then
-    sudo yum makecache || true
-    return
-  fi
-  if [[ "${PM}" == "zypper" ]]; then
-    sudo zypper refresh || true
-    return
-  fi
-  if [[ "${PM}" == "apk" ]]; then
-    sudo apk update || true
-    return
-  fi
-  if [[ "${PM}" == "brew" ]]; then
-    brew update || true
-    return
-  fi
-}
-
-install_prereq_packages() {
+install_prereqs() {
   if [[ "${PM}" == "none" ]]; then
     echo "⚠️  Package manager not detected; skipping OS prereqs."
     return
   fi
-  if ! sudo_available; then
-    echo "⚠️  sudo not available; cannot install missing prerequisites."
-    return
-  fi
-  pm_update
 
   if [[ "${PM}" == "apt" ]]; then
-    if ! sudo apt-get install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with apt-get." >&2
-    fi
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-venv python3-pip git
     return
   fi
   if [[ "${PM}" == "dnf" ]]; then
-    if ! sudo dnf install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with dnf." >&2
-    fi
+    sudo dnf install -y python3 python3-virtualenv python3-pip git
     return
   fi
   if [[ "${PM}" == "yum" ]]; then
-    if ! sudo yum install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with yum." >&2
-    fi
+    sudo yum install -y python3 python3-virtualenv python3-pip git
     return
   fi
   if [[ "${PM}" == "zypper" ]]; then
-    if ! sudo zypper install -y "$@"; then
-      echo "⚠️  Failed to install prerequisites with zypper." >&2
-    fi
+    sudo zypper install -y python3 python3-virtualenv python3-pip git
     return
   fi
   if [[ "${PM}" == "apk" ]]; then
-    if ! sudo apk add --no-cache "$@"; then
-      echo "⚠️  Failed to install prerequisites with apk." >&2
-    fi
+    sudo apk add --no-cache python3 py3-virtualenv py3-pip git
     return
   fi
   if [[ "${PM}" == "brew" ]]; then
-    if ! brew install "$@"; then
-      echo "⚠️  Failed to install prerequisites with brew." >&2
-    fi
+    brew install python@3 git
     return
   fi
 }
@@ -181,21 +120,7 @@ install_prereq_packages() {
 ensure_python() {
   if ! command -v python3 >/dev/null 2>&1; then
     echo "⚠️  python3 not found; attempting to install." >&2
-    if [[ "${PM}" == "apt" ]]; then
-      install_prereq_packages python3 python3-pip
-    elif [[ "${PM}" == "dnf" || "${PM}" == "yum" ]]; then
-      install_prereq_packages python3 python3-pip
-    elif [[ "${PM}" == "zypper" ]]; then
-      install_prereq_packages python3 python3-pip
-    elif [[ "${PM}" == "apk" ]]; then
-      install_prereq_packages python3 py3-pip
-    elif [[ "${PM}" == "brew" ]]; then
-      install_prereq_packages python
-    fi
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 is required. Install Python 3.10+ and retry." >&2
-    exit 1
+    install_prereqs
   fi
   require_command python3
 }
@@ -206,54 +131,6 @@ import sys
 if sys.version_info < (3, 10):
     raise SystemExit("ERROR: Python 3.10+ is required.")
 PYCODE
-}
-
-ensure_git() {
-  if ! command -v git >/dev/null 2>&1; then
-    echo "⚠️  git not found; attempting to install." >&2
-    if [[ "${PM}" == "apt" ]]; then
-      install_prereq_packages git
-    elif [[ "${PM}" == "dnf" || "${PM}" == "yum" || "${PM}" == "zypper" ]]; then
-      install_prereq_packages git
-    elif [[ "${PM}" == "apk" ]]; then
-      install_prereq_packages git
-    elif [[ "${PM}" == "brew" ]]; then
-      install_prereq_packages git
-    fi
-  fi
-  if ! command -v git >/dev/null 2>&1; then
-    echo "ERROR: git is required. Install git and retry." >&2
-    exit 1
-  fi
-  require_command git
-}
-
-ensure_venv_support() {
-  if python3 - <<'PYCODE'
-import venv
-PYCODE
-  then
-    return
-  fi
-  echo "⚠️  python3 venv support missing; attempting to install." >&2
-  if [[ "${PM}" == "apt" ]]; then
-    install_prereq_packages python3-venv
-  elif [[ "${PM}" == "dnf" || "${PM}" == "yum" ]]; then
-    install_prereq_packages python3-virtualenv
-  elif [[ "${PM}" == "zypper" ]]; then
-    install_prereq_packages python3-virtualenv
-  elif [[ "${PM}" == "apk" ]]; then
-    install_prereq_packages py3-virtualenv
-  elif [[ "${PM}" == "brew" ]]; then
-    install_prereq_packages python
-  fi
-  if ! python3 - <<'PYCODE'
-import venv
-PYCODE
-  then
-    echo "ERROR: python3 venv support is required but still unavailable." >&2
-    exit 1
-  fi
 }
 
 clean_previous_install() {
@@ -377,21 +254,15 @@ install_dev_prereqs() {
     return
   fi
   if [[ "${PM}" == "apt" ]]; then
-    if ! install_prereq_packages gitleaks; then
-      echo "⚠️  gitleaks install failed; continuing." >&2
-    fi
+    sudo apt-get install -y gitleaks
     return
   fi
   if [[ "${PM}" == "dnf" || "${PM}" == "yum" ]]; then
-    if ! install_prereq_packages gitleaks; then
-      echo "⚠️  gitleaks install failed; continuing." >&2
-    fi
+    sudo "${PM}" install -y gitleaks
     return
   fi
   if [[ "${PM}" == "brew" ]]; then
-    if ! install_prereq_packages gitleaks; then
-      echo "⚠️  gitleaks install failed; continuing." >&2
-    fi
+    brew install gitleaks
     return
   fi
   echo "⚠️  gitleaks installation skipped (unsupported package manager)."
@@ -402,17 +273,7 @@ install_standard() {
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
-  if python -m pip install -e "${PROJECT_ROOT}[dev,docs]"; then
-    return
-  fi
-  echo "⚠️  Install with [dev,docs] failed; falling back to [dev]." >&2
-  if python -m pip install -e "${PROJECT_ROOT}[dev]"; then
-    python -m pip install pytest mkdocs mkdocs-material
-    return
-  fi
-  echo "⚠️  Install with [dev] failed; falling back to base install." >&2
-  python -m pip install -e "${PROJECT_ROOT}"
-  python -m pip install pytest mkdocs mkdocs-material
+  python -m pip install -e "${PROJECT_ROOT}[dev,docs]"
 }
 
 install_from_tag() {
@@ -420,7 +281,6 @@ install_from_tag() {
   local label="$2"
   local version_value
   local worktree_dir
-  local cleanup_done
 
   if [[ "${tag_value}" == "" ]]; then
     if [[ "${label}" == "GA" ]]; then
@@ -439,25 +299,13 @@ install_from_tag() {
 
   echo "✅ Updating to ${label} tag ${tag_value}"
   worktree_dir="$(mktemp -d)"
-  cleanup_done="0"
-
-  cleanup_worktree() {
-    if [[ "${cleanup_done}" == "1" ]]; then
-      return
-    fi
-    cleanup_done="1"
-    git -C "${PROJECT_ROOT}" worktree remove --force "${worktree_dir}" >/dev/null 2>&1 || true
-    rm -rf "${worktree_dir}" >/dev/null 2>&1 || true
-  }
-
-  trap cleanup_worktree EXIT
   git -C "${PROJECT_ROOT}" worktree add --detach "${worktree_dir}" "${tag_value}"
 
   ensure_venv
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
-  python -m pip install --upgrade --force-reinstall "${worktree_dir}"
+  python -m pip install "${worktree_dir}"
   python - <<PYCODE
 import pypnm_cmts
 version = pypnm_cmts.__version__
@@ -466,24 +314,20 @@ if version != "${version_value}":
 print(f"Installed PyPNM-CMTS v{version}")
 PYCODE
 
-  cleanup_worktree
-  trap - EXIT
+  git -C "${PROJECT_ROOT}" worktree remove "${worktree_dir}"
+  rm -rf "${worktree_dir}"
 }
 
 verify_mkdocs() {
-  if ! python -m mkdocs --version >/dev/null 2>&1; then
+  if ! command -v mkdocs >/dev/null 2>&1; then
     echo "ERROR: mkdocs is not available; ensure docs extras are installed." >&2
     exit 1
   fi
-  python -m mkdocs --version
+  mkdocs --version
 }
 
 run_tests() {
-  if [[ ! -d "${PROJECT_ROOT}/tests" ]]; then
-    echo "⚠️  tests directory not found; skipping pytest."
-    return
-  fi
-  (cd "${PROJECT_ROOT}" && python -m pytest -v)
+  pytest -v
 }
 
 if [[ $# -eq 0 ]]; then
@@ -562,17 +406,8 @@ if [[ "${UNINSTALL_MODE}" == "1" ]]; then
 fi
 
 detect_package_manager
-if [[ "${PM}" != "none" ]]; then
-  echo "ℹ️  Detected package manager: ${PM}"
-else
-  echo "ℹ️  No package manager detected."
-fi
-
-print_banner
 ensure_python
 check_python_version
-ensure_git
-ensure_venv_support
 
 if [[ "${CLEAN_MODE}" == "1" || "${UNINSTALL_MODE}" == "1" ]]; then
   clean_previous_install
@@ -583,6 +418,7 @@ if [[ "${UNINSTALL_MODE}" == "1" ]]; then
   exit 0
 fi
 
+install_prereqs
 install_dev_prereqs
 
 if [[ "${MODE}" == "standard" || "${MODE}" == "development" ]]; then
@@ -603,3 +439,4 @@ echo "Next steps:"
 echo "  source ${VENV_DIR}/bin/activate"
 echo "  pypnm-cmts serve --help"
 echo "  mkdocs serve"
+

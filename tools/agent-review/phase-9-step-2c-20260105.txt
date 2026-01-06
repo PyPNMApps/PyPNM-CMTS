@@ -1,0 +1,370 @@
+# FILE: src/pypnm_cmts/tools/config_menu.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from enum import Enum
+from pathlib import Path
+
+from pydantic import BaseModel, Field, field_validator
+from pypnm.lib.inet import Inet
+
+from pypnm_cmts.config.config_manager import CmtsConfigManager
+
+JSON_INDENT_WIDTH = 4
+
+
+class RetrievalMethod(str, Enum):
+    """Supported retrieval methods for PNM file retrieval."""
+
+    LOCAL = "local"
+    TFTP = "tftp"
+    HTTP = "http"
+    HTTPS = "https"
+
+
+class CmtsSnmpMenuModel(BaseModel):
+    """Configuration input for CMTS SNMP v2c settings."""
+
+    hostname: str = Field(default="", description="CMTS hostname or IP address.")
+    read_community: str = Field(default="", description="SNMPv2c read community.")
+    write_community: str = Field(default="", description="SNMPv2c write community.")
+
+
+class CmSnmpMenuModel(BaseModel):
+    """Configuration input for CM SNMP v2c settings."""
+
+    read_community: str = Field(default="", description="SNMPv2c read community.")
+    write_community: str = Field(default="", description="SNMPv2c write community.")
+
+
+class CmtsTftpMenuModel(BaseModel):
+    """Configuration input for CMTS TFTP defaults."""
+
+    tftp_ipv4: str = Field(default="", description="TFTP server IPv4 address.")
+
+    @field_validator("tftp_ipv4")
+    @classmethod
+    def _validate_tftp_ipv4(cls, value: str) -> str:
+        if value == "":
+            return value
+        Inet(value)
+        return value
+
+
+class CmtsRetrievalMenuModel(BaseModel):
+    """Configuration input for PNM file retrieval method selection."""
+
+    method: RetrievalMethod | None = Field(default=None, description="PNM file retrieval method.")
+
+
+class CmtsConfigMenu:
+    """Interactive menu for editing PyPNM-CMTS system.json settings."""
+
+    _CMTS_ROOT_KEY = "pypnm-cmts"
+    _CMTS_LIST_KEY = "cmts"
+    _CMTS_DEVICE_KEY = "device"
+    _CMTS_SNMP_KEY = "SNMP"
+    _CMTS_SNMP_VERSION_KEY = "version"
+    _CMTS_SNMP_V2_KEY = "2c"
+
+    _PNM_BULK_KEY = "PnmBulkDataTransfer"
+    _PNM_TFTP_KEY = "tftp"
+    _PNM_TFTP_IPV4_KEY = "ip_v4"
+
+    _PNM_FILE_RETRIEVAL_KEY = "PnmFileRetrieval"
+    _PNM_RETRIEVAL_METHOD_KEY = "retrieval_method"
+    _PNM_RETRIEVAL_METHOD_FIELD = "method"
+
+    def __init__(self, config_path: Path | None = None) -> None:
+        if config_path is None:
+            config_path = Path(CmtsConfigManager().get_config_path())
+        self.config_path = config_path
+        self.data: dict[str, object] = {}
+        self._load()
+
+    def run(self) -> int:
+        """
+        Run the interactive configuration menu.
+        """
+        if not self._interactive_allowed():
+            print("Config menu requires an interactive terminal; skipping.")
+            return 0
+
+        while True:
+            self._print_menu()
+            try:
+                choice = input("Enter selection: ").strip().lower()
+            except KeyboardInterrupt:
+                print("\n(CTRL-C ignored; use 'q' or Ctrl-D to exit)\n")
+                continue
+            except EOFError:
+                choice = ""
+
+            if choice in ("", "q", "quit", "x"):
+                print("Exiting config menu.")
+                return 0
+
+            if choice == "1":
+                self._edit_snmp_menu()
+                continue
+
+            if choice == "2":
+                self._edit_tftp()
+                continue
+
+            if choice == "3":
+                self._edit_retrieval_method()
+                continue
+
+            if choice == "p":
+                self._print_config()
+                continue
+
+            print("Invalid selection, please try again.\n")
+
+    @staticmethod
+    def _interactive_allowed() -> bool:
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            return False
+        return sys.stdin.isatty()
+
+    def _print_menu(self) -> None:
+        print("\nPyPNM-CMTS Config Menu")
+        print("=======================")
+        print("Select an option:")
+        print("  1) Edit SNMP settings")
+        print("  2) Edit PNM TFTP defaults")
+        print("  3) Edit PNM file retrieval method")
+        print("  p) Print current system.json")
+        print("  q) Quit")
+
+    def _edit_snmp_menu(self) -> None:
+        while True:
+            print("\nSNMP Settings")
+            print("=============")
+            print("Select an option:")
+            print("  1) CM SNMP Settings")
+            print("  2) CMTS SNMP Settings")
+            print("  b) Back")
+            try:
+                choice = input("Enter selection: ").strip().lower()
+            except KeyboardInterrupt:
+                print("\n(CTRL-C ignored; use 'b' or Ctrl-D to exit)\n")
+                continue
+            except EOFError:
+                choice = ""
+
+            if choice in ("", "b", "back"):
+                return
+            if choice == "1":
+                self._edit_cm_snmp()
+                continue
+            if choice == "2":
+                self._edit_cmts_snmp()
+                continue
+
+            print("Invalid selection, please try again.\n")
+
+    def _edit_cm_snmp(self) -> None:
+        snmp = self._ensure_nested_dict(self.data, self._CMTS_SNMP_KEY)
+        version = self._ensure_nested_dict(snmp, self._CMTS_SNMP_VERSION_KEY)
+        v2c = self._ensure_nested_dict(version, self._CMTS_SNMP_V2_KEY)
+
+        read_current = str(v2c.get("read_community", ""))
+        write_current = str(v2c.get("write_community", ""))
+
+        read_community = self._prompt_str("SNMPv2c read community", read_current)
+        write_community = self._prompt_str("SNMPv2c write community", write_current)
+
+        update = CmSnmpMenuModel(
+            read_community=read_community,
+            write_community=write_community,
+        )
+
+        if update.read_community != "":
+            v2c["read_community"] = update.read_community
+        if update.write_community != "":
+            v2c["write_community"] = update.write_community
+
+        self._save()
+
+    def _edit_cmts_snmp(self) -> None:
+        cmts_entry = self._ensure_cmts_entry()
+        device = self._ensure_nested_dict(cmts_entry, self._CMTS_DEVICE_KEY)
+        snmp = self._ensure_nested_dict(cmts_entry, self._CMTS_SNMP_KEY)
+        version = self._ensure_nested_dict(snmp, self._CMTS_SNMP_VERSION_KEY)
+        v2c = self._ensure_nested_dict(version, self._CMTS_SNMP_V2_KEY)
+
+        hostname_current = str(device.get("hostname", ""))
+        read_current = str(v2c.get("read_community", ""))
+        write_current = str(v2c.get("write_community", ""))
+
+        hostname = self._prompt_str("CMTS hostname/IP", hostname_current)
+        read_community = self._prompt_str("SNMPv2c read community", read_current)
+        write_community = self._prompt_str("SNMPv2c write community", write_current)
+
+        update = CmtsSnmpMenuModel(
+            hostname=hostname,
+            read_community=read_community,
+            write_community=write_community,
+        )
+
+        if update.hostname != "":
+            device["hostname"] = update.hostname
+        if update.read_community != "":
+            v2c["read_community"] = update.read_community
+        if update.write_community != "":
+            v2c["write_community"] = update.write_community
+
+        self._save()
+
+    def _edit_tftp(self) -> None:
+        pnm_bulk = self._ensure_nested_dict(self.data, self._PNM_BULK_KEY)
+        tftp = self._ensure_nested_dict(pnm_bulk, self._PNM_TFTP_KEY)
+
+        current_ipv4 = str(tftp.get(self._PNM_TFTP_IPV4_KEY, ""))
+        tftp_ipv4 = self._prompt_str("TFTP server IPv4", current_ipv4)
+        update = CmtsTftpMenuModel(tftp_ipv4=tftp_ipv4)
+        if update.tftp_ipv4 != "":
+            tftp[self._PNM_TFTP_IPV4_KEY] = update.tftp_ipv4
+
+        self._save()
+
+    def _edit_retrieval_method(self) -> None:
+        retrieval = self._ensure_nested_dict(self.data, self._PNM_FILE_RETRIEVAL_KEY)
+        method_cfg = self._ensure_nested_dict(retrieval, self._PNM_RETRIEVAL_METHOD_KEY)
+
+        current_value = str(method_cfg.get(self._PNM_RETRIEVAL_METHOD_FIELD, ""))
+        print("Available methods: local, tftp, http, https")
+        method_input = self._prompt_str("Retrieval method", current_value)
+        if method_input == "":
+            return
+        update = CmtsRetrievalMenuModel(method=RetrievalMethod(method_input))
+        if update.method is not None:
+            method_cfg[self._PNM_RETRIEVAL_METHOD_FIELD] = update.method.value
+
+        self._save()
+
+    def _print_config(self) -> None:
+        if not self.config_path.exists():
+            print(f"\nConfig file not found at {self.config_path}\n")
+            return
+        try:
+            content = self.config_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            print(f"\nFailed to read config: {exc}\n")
+            return
+        print("\nCurrent system.json:\n")
+        print(content)
+        print()
+
+    def _load(self) -> None:
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {self.config_path}")
+        text = self.config_path.read_text(encoding="utf-8")
+        self.data = json.loads(text)
+        self._merge_cmts_template()
+
+    def _save(self) -> None:
+        text = json.dumps(self.data, indent=JSON_INDENT_WIDTH)
+        self.config_path.write_text(f"{text}\n", encoding="utf-8")
+
+    def _merge_cmts_template(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "settings" / "cmts_system.json"
+        if not template_path.exists():
+            return
+        try:
+            template_data = json.loads(template_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(template_data, dict) or not isinstance(self.data, dict):
+            return
+        self._merge_missing(self.data, template_data)
+
+    def _ensure_cmts_entry(self) -> dict[str, object]:
+        root = self._ensure_nested_dict(self.data, self._CMTS_ROOT_KEY)
+        cmts_list = root.get(self._CMTS_LIST_KEY)
+        if not isinstance(cmts_list, list):
+            cmts_list = []
+            root[self._CMTS_LIST_KEY] = cmts_list
+        if not cmts_list:
+            cmts_list.append({})
+        entry = cmts_list[0]
+        if not isinstance(entry, dict):
+            entry = {}
+            cmts_list[0] = entry
+        return entry
+
+    @staticmethod
+    def _ensure_nested_dict(data: dict[str, object], key: str) -> dict[str, object]:
+        value = data.get(key)
+        if isinstance(value, dict):
+            return value
+        data[key] = {}
+        return data[key]
+
+    @staticmethod
+    def _merge_missing(target: dict[str, object], template: dict[str, object]) -> None:
+        for key, value in template.items():
+            if key not in target:
+                target[key] = value
+                continue
+            target_value = target[key]
+            if isinstance(target_value, dict) and isinstance(value, dict):
+                CmtsConfigMenu._merge_missing(target_value, value)
+
+    @staticmethod
+    def _prompt_str(label: str, current: str) -> str:
+        if current == "":
+            prompt = f"{label} (currently unset, Enter to keep unset): "
+        else:
+            prompt = f"{label} [current: {current}] (Enter to keep): "
+        value = input(prompt).strip()
+        return value
+
+# FILE: docs/system/index.md
+# System configuration
+
+System configuration references for PyPNM-CMTS.
+
+On startup, PyPNM-CMTS ensures the CMTS template block exists in the installed `pypnm-docsis` `system.json`.
+
+## CmtsOrchestrator settings
+
+`CmtsOrchestrator` defines orchestration boundaries and defaults without executing any orchestration logic.
+This section is read by `CmtsOrchestratorSettings` and supports mode selection, adapter targeting,
+service group descriptors, and default test names.
+
+Key fields:
+
+- `mode` - Execution mode (`standalone`, `controller`, `worker`).
+- `adapter` - CMTS adapter selection (kind, cmts_index, label).
+- `service_groups` - Optional list of service group descriptors.
+- `default_tests` - Optional list of test names. If missing or empty, defaults to `["ds_ofdm_rxmer"]`.
+
+## Service launcher
+
+- [CLI service launcher](cli.md)
+
+## PyPNM-CMTS config menu
+
+Use `pypnm-cmts config-menu` to edit the active `system.json` for CMTS settings,
+including SNMP v2c community, TFTP defaults, and PNM file retrieval mode.
+Menu options:
+
+- Edit SNMP settings.
+  - CM SNMP Settings.
+  - CMTS SNMP Settings.
+- Edit PNM TFTP defaults (applies to both CM and CMTS).
+- Edit PNM file retrieval method (applies to both CM and CMTS).
+- Print current system.json.
+
+## PyPNM configuration menu
+
+- Use `pypnm-config-menu` to edit the installed pypnm-docsis `system.json`.
+

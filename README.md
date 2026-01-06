@@ -66,10 +66,30 @@ Run the installer:
   ./install.sh
   ```
 
-Optional: upgrade `pypnm-docsis` during install:
+Optional: use a custom venv directory:
 
   ```bash
-  ./install.sh --update-pypnm-docsis
+  ./install.sh .env-dev
+  ```
+
+Optional: development install with extra tooling:
+
+  ```bash
+  ./install.sh --development
+  ```
+
+Optional: update from the latest GA or hot-fix tag:
+
+  ```bash
+  ./install.sh --update-ga
+  ./install.sh --update-hot-fix
+  ```
+
+Cleanup and uninstall:
+
+  ```bash
+  ./install.sh --clean
+  ./install.sh --uninstall
   ```
 
 ### 3) Activate the virtual environment
@@ -89,11 +109,13 @@ If you used the installer defaults, activate the `.env` environment:
 ### 5) Run the FastAPI service
 
   ```bash
-  pypnm-cmts serve  --cmts-hostname <hostname>    \
-                    --read-community <community>  \
-                    --write-community <community> \
-                    --reload
+  pypnm-cmts serve
   ```
+
+The service binds to `127.0.0.1:8000` by default and reads CMTS adapter
+settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
+hostname and SNMP communities, or pass `--cmts-hostname`/`--read-community`
+overrides at runtime.
 
 ## Documentation
 
