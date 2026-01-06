@@ -102,16 +102,16 @@ tools/local/local_kubernetes_smoke.sh
 
 ## Release
 
-### tools/release/release.py
+### pypnm-cmts-release
 
-Primary release helper (version bump, tests, tagging).
+Release helper for GA and hot-fix version bumps.
 
 ```bash
-python tools/release/release.py --dry-run
+pypnm-cmts-release --bump-ga --patch --dry-run
 ```
 
 ```bash
-python tools/release/release.py --next build
+pypnm-cmts-release --bump-hot-fix --tag
 ```
 
 ### tools/release/test-runner.py
@@ -120,6 +120,22 @@ Runs the release test sequence locally.
 
 ```bash
 python tools/release/test-runner.py
+```
+
+Local verification (CI parity):
+
+```bash
+python tools/release/test-runner.py --skip-docs
+```
+
+```mermaid
+flowchart TD
+    A[Edit code or docs] --> B[Run tools/release/test-runner.py]
+    B --> C{Checks pass}
+    C -- Yes --> D[Run pypnm-cmts-release]
+    D --> E[Commit and tag]
+    E --> F[Push to CI]
+    C -- No --> A
 ```
 
 ### tools/release/check_version.py

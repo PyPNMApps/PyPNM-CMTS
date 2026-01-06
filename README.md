@@ -13,7 +13,7 @@
 
 # PyPNM-CMTS - CMTS Operations Toolkit for PyPNM (Under Development)
 
-[![PyPI version](https://badge.fury.io/py/pypnm-cmts.svg)](https://badge.fury.io/py/pypnm-cmts)
+[![PyPI version](https://badge.fury.io/py/pypnm-docsis-cmts.svg)](https://badge.fury.io/py/pypnm-docsis-cmts)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 
@@ -38,7 +38,7 @@ capabilities on top.
 
 | Path | Description |
 | --- | --- |
-| [Use PyPNM-CMTS as a library](#install-from-pypi-library-only) | Install `pypnm-cmts` into an existing Python environment. |
+| [Use PyPNM-CMTS as a library](#install-from-pypi-library-only) | Install `pypnm-docsis-cmts` into an existing Python environment. |
 | [Run the full repo](#1-clone) | Clone the repo and use the CLI + tools stack. |
 
 ## Getting started
@@ -48,7 +48,7 @@ capabilities on top.
 If you only need the library, install from PyPI:
 
   ```bash
-  pip install pypnm-cmts
+  pip install pypnm-docsis-cmts
   ```
 
 ### 1) Clone

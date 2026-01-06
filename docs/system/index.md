@@ -26,6 +26,8 @@ Key fields:
 Use `pypnm-cmts config-menu` to edit the active `system.json` for CMTS settings,
 including SNMP v2c community, TFTP defaults, and PNM file retrieval mode.
 CMTS hostname and CMTS SNMP edits also update `CmtsOrchestrator.adapter` values used at startup.
+The menu can also reach into the PyPNM (pypnm-docsis) configuration sections within `system.json`
+so shared SNMP, TFTP, and retrieval settings stay aligned with CMTS operations.
 Menu options:
 
 - CM Config-Menu (launches the PyPNM system config menu).

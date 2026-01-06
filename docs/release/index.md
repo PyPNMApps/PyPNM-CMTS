@@ -8,18 +8,18 @@
 
 [3. Versioning scheme](#3-versioning-scheme)
 
-[4. Release script overview](#4-release-script-overview)
+[4. Release helper overview](#4-release-helper-overview)
 
-[5. Release modes and examples](#5-release-modes-and-examples)
+[5. Release commands](#5-release-commands)
 
-[6. Preflight controls](#6-preflight-controls)
+[6. Release lanes](#6-release-lanes)
 
-[7. Quick reference](#7-quick-reference)
+[7. CI expectations](#7-ci-expectations)
 
 [8. Release workflow](#8-release-workflow)
 
 This guide follows the PyPNM release strategy and uses the same four-part versioning scheme.
-The release entry point is `tools/release/release.py`.
+The release entry point is `pypnm-cmts-release`.
 
 ## 1. Branch model
 
@@ -45,7 +45,7 @@ from __future__ import annotations
 
 __all__ = ["__version__"]
 
-# MAJOR.MINOR.MAINTENANCE.BUILD
+# MAJOR.MINOR.PATCH.BUILD
 __version__: str = "0.1.0.0"
 ```
 
@@ -54,122 +54,103 @@ __version__: str = "0.1.0.0"
 PyPNM-CMTS uses a four-part version:
 
 ```text
-MAJOR.MINOR.MAINTENANCE.BUILD
+MAJOR.MINOR.PATCH.BUILD
 ```
 
 Guidelines:
 
 * `MAJOR` for breaking changes.
 * `MINOR` for backward-compatible features.
-* `MAINTENANCE` for compatible bug fixes.
-* `BUILD` for small hotfixes or rebuilds.
+* `PATCH` for compatible bug fixes.
+* `BUILD` for hot-fix releases or rebuilds.
 
-All four segments must be numeric.
+Release lanes:
 
-## 4. Release script overview
+* GA tag format: `vMAJOR.MINOR.PATCH.0`
+* Hot-fix tag format: `vMAJOR.MINOR.PATCH.BUILD` where `BUILD != 0`
 
-The release script:
+## 4. Release helper overview
+
+The release helper:
 
 * Reads `src/pypnm_cmts/version.py`.
 * Confirms it matches `pyproject.toml`.
-* Computes or accepts a target version.
-* Runs tests (unless skipped).
-* Builds docs.
-* Commits, tags, and optionally pushes.
-* Writes a markdown release report under `release-reports/`.
+* Computes a target version based on GA or hot-fix rules.
+* Optionally creates a git tag when the working tree is clean.
+* Supports dry-run output without modifying files.
 
-Docker and Kubernetes preflight steps are currently skipped by default in PyPNM-CMTS.
-The release script prints a reminder so this can be revisited later.
+The helper does not run tests or build docs; those remain separate release steps.
 
-## 5. Release modes and examples
+## 5. Release commands
 
-### 5.1 Automatic maintenance release (default)
+### 5.1 GA release (build = 0)
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-python "$REPO_ROOT/tools/release/release.py"
+pypnm-cmts-release --bump-ga --patch
 ```
 
-### 5.2 Automatic next version by mode (`--next`)
+### 5.2 Hot-fix release (build > 0)
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-python "$REPO_ROOT/tools/release/release.py" --next minor
-python "$REPO_ROOT/tools/release/release.py" --next maintenance
-python "$REPO_ROOT/tools/release/release.py" --next build
+pypnm-cmts-release --bump-hot-fix
 ```
 
-### 5.3 Explicit version (`--version`)
+### 5.3 GA with explicit bump lane
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-python "$REPO_ROOT/tools/release/release.py" --version 0.2.0.0
+pypnm-cmts-release --bump-ga --minor
 ```
 
-### 5.4 Dry run (`--dry-run`)
+### 5.4 Hot-fix with explicit bump lane
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-python "$REPO_ROOT/tools/release/release.py" --dry-run
+pypnm-cmts-release --bump-hot-fix --patch
 ```
 
-## 6. Preflight controls
+### 5.5 Dry run (`--dry-run`)
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-python "$REPO_ROOT/tools/release/release.py" --skip-tests
+pypnm-cmts-release --bump-ga --patch --dry-run
 ```
 
-## 7. Quick reference
+## 6. Release lanes
 
-* Default release (auto maintenance bump):
+```mermaid
+flowchart TD
+  A[Current version] --> B{Release lane}
+  B -->|GA| C[Bump major/minor/patch]
+  B -->|Hot-fix| D[Increment build or bump base]
+  C --> E[BUILD = 0]
+  D --> F[BUILD > 0]
+  E --> G[Tag vX.Y.Z.0]
+  F --> H[Tag vX.Y.Z.B]
+```
 
-  ```bash
-  REPO_ROOT="/path/to/PyPNM-CMTS"
-  python "$REPO_ROOT/tools/release/release.py"
-  ```
+## 7. CI expectations
 
-* Explicit version:
+CI must validate:
 
-  ```bash
-  REPO_ROOT="/path/to/PyPNM-CMTS"
-  python "$REPO_ROOT/tools/release/release.py" --version 0.2.0.0
-  ```
+* Python 3.10, 3.11, 3.12, 3.13
+* `ruff` checks
+* `pytest`
+* `mkdocs build --strict`
+* `python -m build` (sdist + wheel)
 
-* Dry run:
-
-  ```bash
-  REPO_ROOT="/path/to/PyPNM-CMTS"
-  python "$REPO_ROOT/tools/release/release.py" --dry-run
-  ```
+CI is build-only; publishing is not performed by default.
 
 ## 8. Release workflow
 
 Use this flow for routine releases on `main`:
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-cd "$REPO_ROOT"
-git checkout main
-git pull origin main
-python tools/release/release.py --dry-run
-python tools/release/release.py
+pypnm-cmts-release --bump-ga --patch --dry-run
+pypnm-cmts-release --bump-ga --patch --tag
 ```
 
-Hot-fix releases use the `hot-fix` branch and bump the `BUILD` segment:
+Hot-fix releases use the hot-fix lane and bump the `BUILD` segment:
 
 ```bash
-REPO_ROOT="/path/to/PyPNM-CMTS"
-cd "$REPO_ROOT"
-git fetch origin
-git checkout hot-fix
-git pull origin hot-fix
-python tools/release/release.py --next build --branch hot-fix
+pypnm-cmts-release --bump-hot-fix --tag
 ```
 
-If you installed aliases with `scripts/install_aliases.sh`, you can use:
-
-```bash
-pypnm-cmts-release
-pypnm-cmts-release-hot-fix
-```
+The release helper requires a clean working tree before tagging.

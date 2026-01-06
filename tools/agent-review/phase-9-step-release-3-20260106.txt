@@ -1,0 +1,220 @@
+# FILE: tests/test_release_tool.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import pytest
+
+import pypnm_cmts.tools.release_tool as release_tool
+from pypnm_cmts.tools.release_tool import ReleaseTool
+
+
+@pytest.mark.unit
+def test_parse_version_valid() -> None:
+    assert ReleaseTool.parse_version("1.2.3.4") == (1, 2, 3, 4)
+
+
+@pytest.mark.unit
+def test_parse_version_invalid() -> None:
+    with pytest.raises(ValueError):
+        ReleaseTool.parse_version("1.2.3")
+    with pytest.raises(ValueError):
+        ReleaseTool.parse_version("1.2.x.4")
+
+
+@pytest.mark.unit
+def test_ga_vs_hotfix() -> None:
+    assert ReleaseTool.is_ga((1, 2, 3, 0)) is True
+    assert ReleaseTool.is_ga((1, 2, 3, 1)) is False
+
+
+@pytest.mark.unit
+def test_bump_ga_patch() -> None:
+    assert ReleaseTool.bump_ga((1, 2, 3, 4), "patch") == (1, 2, 4, 0)
+
+
+@pytest.mark.unit
+def test_bump_hotfix_build() -> None:
+    assert ReleaseTool.bump_hotfix_build((1, 2, 3, 0)) == (1, 2, 3, 1)
+    assert ReleaseTool.bump_hotfix_build((1, 2, 3, 2)) == (1, 2, 3, 3)
+
+
+@pytest.mark.unit
+def test_dry_run_does_not_modify_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    version_path = tmp_path / "version.py"
+    pyproject_path = tmp_path / "pyproject.toml"
+    version_path.write_text('__version__: str = "1.2.3.0"\n', encoding="utf-8")
+    pyproject_path.write_text('version = "1.2.3.0"\n', encoding="utf-8")
+
+    monkeypatch.setattr(release_tool, "VERSION_FILE_PATH", version_path)
+    monkeypatch.setattr(release_tool, "PYPROJECT_PATH", pyproject_path)
+
+    options = argparse.Namespace(
+        bump_ga=True,
+        bump_hot_fix=False,
+        major=False,
+        minor=False,
+        patch=True,
+        tag=False,
+        dry_run=True,
+    )
+
+    ReleaseTool.run(options)
+
+    assert version_path.read_text(encoding="utf-8").strip() == '__version__: str = "1.2.3.0"'
+    assert pyproject_path.read_text(encoding="utf-8").strip() == 'version = "1.2.3.0"'
+
+
+@pytest.mark.unit
+def test_version_mismatch_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    version_path = tmp_path / "version.py"
+    pyproject_path = tmp_path / "pyproject.toml"
+    version_path.write_text('__version__: str = "1.2.3.0"\n', encoding="utf-8")
+    pyproject_path.write_text('version = "1.2.3.1"\n', encoding="utf-8")
+
+    monkeypatch.setattr(release_tool, "VERSION_FILE_PATH", version_path)
+    monkeypatch.setattr(release_tool, "PYPROJECT_PATH", pyproject_path)
+
+    options = argparse.Namespace(
+        bump_ga=True,
+        bump_hot_fix=False,
+        major=False,
+        minor=False,
+        patch=True,
+        tag=False,
+        dry_run=True,
+    )
+
+    with pytest.raises(RuntimeError, match="Version mismatch"):
+        ReleaseTool.run(options)
+
+
+@pytest.mark.unit
+def test_tag_release_invokes_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], check: bool) -> None:
+        assert check is True
+        calls.append(list(cmd))
+
+    monkeypatch.setattr(release_tool.subprocess, "run", _fake_run)
+
+    ReleaseTool.tag_release("v1.2.3.0", dry_run=False)
+
+    assert calls == [["git", "tag", "v1.2.3.0"]]
+# FILE: docs/system/index.md
+# System configuration
+
+System configuration references for PyPNM-CMTS.
+
+On startup, PyPNM-CMTS ensures the CMTS template block exists in the installed `pypnm-docsis` `system.json`.
+
+## CmtsOrchestrator settings
+
+`CmtsOrchestrator` defines orchestration boundaries and defaults without executing any orchestration logic.
+This section is read by `CmtsOrchestratorSettings` and supports mode selection, adapter targeting,
+service group descriptors, and default test names.
+
+Key fields:
+
+- `mode` - Execution mode (`standalone`, `controller`, `worker`).
+- `adapter` - CMTS adapter selection (kind, cmts_index, label).
+- `service_groups` - Optional list of service group descriptors.
+- `default_tests` - Optional list of test names. If missing or empty, defaults to `["ds_ofdm_rxmer"]`.
+
+## Service launcher
+
+- [CLI service launcher](cli.md)
+
+## PyPNM-CMTS config menu
+
+Use `pypnm-cmts config-menu` to edit the active `system.json` for CMTS settings,
+including SNMP v2c community, TFTP defaults, and PNM file retrieval mode.
+CMTS hostname and CMTS SNMP edits also update `CmtsOrchestrator.adapter` values used at startup.
+The menu can also reach into the PyPNM (pypnm-docsis) configuration sections within `system.json`
+so shared SNMP, TFTP, and retrieval settings stay aligned with CMTS operations.
+Menu options:
+
+- CM Config-Menu (launches the PyPNM system config menu).
+- CMTS Config-Menu.
+- Print current system.json.
+
+The PNM file retrieval option delegates to the PyPNM configurator when
+available and walks you through method-specific settings (local, tftp,
+or sftp). If the PyPNM tool is not found, the CMTS menu falls back to
+editing the retrieval method and its parameters directly.
+
+## PyPNM configuration menu
+
+- Use `pypnm-config-menu` to edit the installed pypnm-docsis `system.json`.
+# FILE: .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install ".[dev,docs]"
+          python -m pip install build twine
+
+      - name: Smoke - CLI help
+        run: |
+          python -m pypnm_cmts.cli --help || pypnm-cmts --help
+
+      - name: Ruff
+        run: |
+          python -m ruff check .
+
+      - name: Run tests
+        run: |
+          python -m pytest -q -ra --tb=short
+
+      - name: Build docs
+        run: |
+          python -m mkdocs build --strict
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Twine check
+        run: |
+          python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.python-version }}
+          path: dist/*

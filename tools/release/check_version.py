@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ from pathlib import Path
 
 
 class VersionCheckTool:
-    """Verify version consistency between src/pypnm/version.py and pyproject.toml."""
+    """Verify version consistency between src/pypnm_cmts/version.py and pyproject.toml."""
 
     MAX_ROOT_SEARCH_DEPTH: int = 6
-    VERSION_FILE_RELATIVE: str = "src/pypnm/version.py"
+    VERSION_FILE_RELATIVE: str = "src/pypnm_cmts/version.py"
     PYPROJECT_RELATIVE: str = "pyproject.toml"
     VERSION_PATTERN: str = r'__version__\s*(?::\s*[^=]+)?=\s*"([^"]+)"'
     PYPROJECT_PATTERN: str = r'^\s*version\s*=\s*"([^"]+)"\s*$'
@@ -46,7 +46,7 @@ class VersionCheckTool:
 
     @staticmethod
     def _read_version_from_file(path: Path) -> str:
-        """Extract the __version__ value from src/pypnm/version.py."""
+        """Extract the __version__ value from src/pypnm_cmts/version.py."""
         text = VersionCheckTool._read_text(path)
         if not text:
             return ""
@@ -71,7 +71,7 @@ class VersionCheckTool:
         """Build the CLI parser for the version check tool."""
         parser = argparse.ArgumentParser(
             description=(
-                "Verify that src/pypnm/version.py and pyproject.toml carry the same version."
+                "Verify that src/pypnm_cmts/version.py and pyproject.toml carry the same version."
             )
         )
         parser.add_argument(

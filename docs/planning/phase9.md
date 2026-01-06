@@ -60,7 +60,7 @@ Add concise docs and mandatory pytest coverage for new or changed behaviors. Dep
 
 ### G9.1 PyPI Installation
 
-- `pip install pypnm-cmts` installs the distribution cleanly in a fresh venv.
+- `pip install pypnm-docsis-cmts` installs the distribution cleanly in a fresh venv.
 - `pypnm-cmts --help` and `pypnm-cmts serve --help` are available immediately after install.
 - A minimal config workflow is documented and produces a runnable local service (even if adapters are mocked for tests).
 
@@ -189,4 +189,3 @@ Phase 9 includes a minimal CI pipeline so every change is validated across the s
 
 - The CI workflow should be **build-only** (no publishing) until we explicitly add release automation.
 - If the repo uses optional dependency groups, CI should install an appropriate group (e.g., `.[dev]`) that includes test + docs tooling.
-
