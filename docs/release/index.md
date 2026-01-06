@@ -77,42 +77,44 @@ The release helper:
 
 * Reads `src/pypnm_cmts/version.py`.
 * Confirms it matches `pyproject.toml`.
-* Computes a target version based on GA or hot-fix rules.
-* Runs the local CI parity runner (`tools/release/test-runner.py`).
-* Cleans build artifacts produced by the verification runner.
+* Computes a target version based on the four-part scheme.
+* Runs repository hygiene checks (secrets + MAC scans).
+* Runs pytest (unless `--skip-tests` is used).
+* Optionally runs docker + Kubernetes smoke checks.
+* Builds docs with `mkdocs --strict`.
 * Updates versions, commits, tags, and pushes on success.
 * Supports dry-run output without modifying files or running tests.
 
 ## 5. Release commands
 
-### 5.1 GA release (build = 0)
+### 5.1 Default GA maintenance release (build = 0)
 
 ```bash
-pypnm-cmts-release --bump-ga --patch
+pypnm-cmts-release
 ```
 
-### 5.2 Hot-fix release (build > 0)
+### 5.2 GA with explicit bump lane
 
 ```bash
-pypnm-cmts-release --bump-hot-fix
+pypnm-cmts-release --next minor
 ```
 
-### 5.3 GA with explicit bump lane
+### 5.3 Hot-fix release (build bump)
 
 ```bash
-pypnm-cmts-release --bump-ga --minor
+pypnm-cmts-release --next build
 ```
 
-### 5.4 Hot-fix with explicit bump lane
+### 5.4 Release explicit version
 
 ```bash
-pypnm-cmts-release --bump-hot-fix --patch
+pypnm-cmts-release --version 0.2.1.0
 ```
 
 ### 5.5 Dry run (`--dry-run`)
 
 ```bash
-pypnm-cmts-release --bump-ga --patch --dry-run
+pypnm-cmts-release --next maintenance --dry-run
 ```
 
 ## 6. Release lanes
@@ -146,14 +148,14 @@ The CI workflow lives in `.github/workflows/ci.yml` and enforces these steps.
 Use this flow for routine releases on `main`:
 
 ```bash
-pypnm-cmts-release --bump-ga --patch --dry-run
-pypnm-cmts-release --bump-ga --patch
+pypnm-cmts-release --next maintenance --dry-run
+pypnm-cmts-release --next maintenance
 ```
 
-Hot-fix releases use the hot-fix lane and bump the `BUILD` segment:
+Hot-fix releases use the build bump lane:
 
 ```bash
-pypnm-cmts-release --bump-hot-fix
+pypnm-cmts-release --next build
 ```
 
 The release helper requires a clean working tree before running the verification runner.
@@ -168,7 +170,7 @@ Manual publishing with `pypnm-cmts-publish` is a fallback option.
 Set `PYPI_API_TOKEN` or provide it interactively when prompted:
 
 ```bash
-pypnm-cmts-publish --repository pypi
+pypnm-cmts-publish
 ```
 
 Flags:
@@ -199,18 +201,15 @@ If you see `invalid-publisher`, verify the repository, workflow filename, and en
 
 ```mermaid
 flowchart TD
-  A[Release tag vX.Y.Z.0] --> B[GitHub Actions publish.yml]
-  B --> C{Use token?}
-  C -- Yes --> D[twine upload with PYPI_API_TOKEN]
-  C -- No --> E[OIDC trusted publishing]
-  D --> F[PyPI]
-  E --> F
+  A[Release tag vX.Y.Z.B] --> B[GitHub Actions publish.yml]
+  B --> C[OIDC trusted publishing]
+  C --> D[PyPI]
 ```
 
 ### 9.3 PyPI setup checklist
 
 * Create the PyPI project `pypnm-docsis-cmts`.
-* Create a PyPI API token for manual publishing and optional token-based workflow dispatch.
+* Create a PyPI API token for manual publishing (fallback).
 * Configure a trusted publisher:
   * Repository: `PyPNMApps/PyPNM-CMTS`
   * Workflow file: `publish.yml`

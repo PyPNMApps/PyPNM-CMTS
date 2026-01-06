@@ -107,11 +107,11 @@ tools/local/local_kubernetes_smoke.sh
 Release helper for GA and hot-fix version bumps.
 
 ```bash
-pypnm-cmts-release --bump-ga --patch --dry-run
+pypnm-cmts-release --next maintenance --dry-run
 ```
 
 ```bash
-pypnm-cmts-release --bump-hot-fix --tag
+pypnm-cmts-release --next build
 ```
 
 ### pypnm-cmts-publish
@@ -119,13 +119,13 @@ pypnm-cmts-release --bump-hot-fix --tag
 Publish PyPNM-CMTS distributions to PyPI (fallback only).
 
 ```bash
-pypnm-cmts-publish --repository pypi
+pypnm-cmts-publish
 ```
 
 Non-interactive:
 
 ```bash
-pypnm-cmts-publish --repository pypi --yes
+pypnm-cmts-publish --yes
 ```
 
 ### tools/release/test-runner.py

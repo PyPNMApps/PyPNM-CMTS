@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 import argparse
 import atexit
@@ -22,7 +22,7 @@ BUMP_SCRIPT_PATH: Final[Path]            = Path("tools/support") / "bump_version
 PYPROJECT_FILE_PATH: Final[Path]         = Path("pyproject.toml")
 README_FILE_PATH: Final[Path]            = Path("README.md")
 DOCS_ROOT: Final[Path]                   = Path("docs")
-README_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r'TAG="v\d+\.\d+\.\d+\.\d+"')
+README_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r'TAG="v\d+\.\d+\.\d+\.\d+(?:-rc\d+)?"')
 WORKFLOWS_DIR: Final[Path]               = Path(".github") / "workflows"
 
 VERSION_PART_SEPARATOR: Final[str]       = "."
