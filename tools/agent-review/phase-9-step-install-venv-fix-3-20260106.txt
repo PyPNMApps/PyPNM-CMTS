@@ -1,3 +1,4 @@
+# FILE: install.sh
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
@@ -668,16 +669,6 @@ if [[ "${UNINSTALL_MODE}" == "1" ]]; then
     usage
     exit 1
   fi
-fi
-
-if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
-  echo "PYPNM_CMTS_INSTALL_TEST_MODE=${MODE}"
-  echo "PYPNM_CMTS_INSTALL_TEST_VENV_DIR=${VENV_DIR}"
-  if [[ "${PYPNM_CMTS_INSTALL_TEST_CREATE_VENV:-}" == "1" ]]; then
-    python3 -m venv "${VENV_DIR}"
-    rm -rf "${VENV_DIR}"
-  fi
-  exit 0
 fi
 
 detect_package_manager
