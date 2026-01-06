@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import io
-import os
 import subprocess
 import sys
 from pathlib import Path
+from types import TracebackType
 
 import pytest
 
@@ -52,7 +52,12 @@ def _mock_urlopen(payload: str) -> object:
         def __enter__(self) -> io.StringIO:
             return io.StringIO(self._text)
 
-        def __exit__(self, exc_type, exc, traceback) -> None:
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
             _ = exc_type
             _ = exc
             _ = traceback
