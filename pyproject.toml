@@ -65,6 +65,7 @@ Bug-Tracker = "https://github.com/PyPNMApps/PyPNM-CMTS/issues"
 [project.scripts]
 pypnm-cmts = "pypnm_cmts.cli:main"
 pypnm-cmts-release = "pypnm_cmts.tools.release_tool:main"
+pypnm-cmts-release-build = "pypnm_cmts.tools.release_build:main"
 pypnm-cmts-publish = "pypnm_cmts.tools.publish_tool:main"
 
 [tool.setuptools]
@@ -122,7 +123,8 @@ exclude        = ["tools"]
 select = ["F", "E", "W", "I", "B", "UP", "ANN", "SIM", "PERF"]
 ignore = [
   "E501",
-  "B006"
+  "B006",
+  "C0103"
 ]
 
 [tool.pyright]

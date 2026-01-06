@@ -1,3 +1,4 @@
+# FILE: src/pypnm_cmts/api/main.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Maurice Garcia
 
@@ -52,10 +53,17 @@ validate configuration state, and drive PNM workflows across fleets.
 - CMTS-focused reporting and operational checks
 
 | Package | Version |
-|---------|---------|
-| [PyPNM](https://github.com/PyPNMApps/PyPNM)           | {pypnm_version}   |
-| [PyPNM-CMTS](https://github.com/PyPNMApps/PyPNM-CMTS) | {version}         |
-| [PyPNM-PMA](https://github.com/PyPNMApps/PyPNM-PMA)   | Not-Installed     |
+| ------- | ------- |
+| PyPNM         | {pypnm_version}   |
+| PyPNM-CMTS    | {version}         |
+
+[**PyPNMApps Homepage**](https://github.com/PyPNMApps)
+
+[**PyPNM Homepage**](https://github.com/PyPNMApps/PyPNM)
+
+[**PyPNM-CMTS Homepage**](https://github.com/PyPNMApps/PyPNM-CMTS)
+
+[**PyPNM-PMA Homepage**](https://github.com/PyPNMApps/PyPNM-PMA)
 
 """
 
