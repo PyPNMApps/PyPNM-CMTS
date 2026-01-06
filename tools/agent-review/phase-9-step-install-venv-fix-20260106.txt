@@ -1,3 +1,4 @@
+# FILE: install.sh
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
@@ -243,15 +244,6 @@ PYCODE
   fi
   echo "⚠️  python3 venv support missing; attempting to install." >&2
   if [[ "${PM}" == "apt" ]]; then
-    local py_minor
-    py_minor="$(python3 - <<'PYCODE'
-import sys
-print(f\"{sys.version_info[0]}.{sys.version_info[1]}\")
-PYCODE
-)"
-    if [[ "${py_minor}" != "" ]]; then
-      install_prereq_packages "python${py_minor}-venv"
-    fi
     install_prereq_packages python3-venv
   elif [[ "${PM}" == "dnf" || "${PM}" == "yum" ]]; then
     install_prereq_packages python3-virtualenv
