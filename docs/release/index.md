@@ -66,16 +66,11 @@ Guidelines:
 
 Release lanes:
 
-<<<<<<< HEAD
 * GA tag format: `vMAJOR.MINOR.PATCH.0`
 * Hot-fix tag format: `vMAJOR.MINOR.PATCH.BUILD` where `BUILD != 0`
 
 ## 4. Release helper overview
 
-=======
-## 4. Release helper overview
-
->>>>>>> Phase9-pypnm-cmts-release
 The release helper:
 
 * Reads `src/pypnm_cmts/version.py`.
@@ -116,27 +111,10 @@ pypnm-cmts-release --bump-hot-fix --patch
 
 ```bash
 pypnm-cmts-release --bump-ga --patch --dry-run
-<<<<<<< HEAD
-=======
 ```
 
 ## 6. Release lanes
 
-```mermaid
-flowchart TD
-  A[Current version] --> B{Release lane}
-  B -->|GA| C[Bump major/minor/patch]
-  B -->|Hot-fix| D[Increment build or bump base]
-  C --> E[BUILD = 0]
-  D --> F[BUILD > 0]
-  E --> G[Tag vX.Y.Z.0]
-  F --> H[Tag vX.Y.Z.B]
->>>>>>> Phase9-pypnm-cmts-release
-```
-
-## 6. Release lanes
-
-<<<<<<< HEAD
 ```mermaid
 flowchart TD
   A[Current version] --> B{Release lane}
@@ -159,25 +137,6 @@ CI must validate:
 * `python -m build` (sdist + wheel)
 
 CI is build-only; publishing is not performed by default.
-=======
-* GA patch release:
-
-  ```bash
-  pypnm-cmts-release --bump-ga --patch
-  ```
-
-* Hot-fix build increment:
-
-  ```bash
-  pypnm-cmts-release --bump-hot-fix
-  ```
-
-* Dry run:
-
-  ```bash
-  pypnm-cmts-release --bump-ga --patch --dry-run
-  ```
->>>>>>> Phase9-pypnm-cmts-release
 
 ## 8. Release workflow
 

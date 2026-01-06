@@ -55,11 +55,7 @@ class ReleaseTool:
 
     @staticmethod
     def bump_hotfix(parts: tuple[int, int, int, int], bump_kind: str) -> tuple[int, int, int, int]:
-<<<<<<< HEAD
         major, minor, patch, _build = parts
-=======
-        major, minor, patch, build = parts
->>>>>>> Phase9-pypnm-cmts-release
         if bump_kind == "major":
             return (major + 1, 0, 0, 1)
         if bump_kind == "minor":

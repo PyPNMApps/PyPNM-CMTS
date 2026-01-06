@@ -8,11 +8,7 @@ from pathlib import Path
 
 import pytest
 
-<<<<<<< HEAD
 import pypnm_cmts.tools.release_tool as release_tool
-=======
-from pypnm_cmts.tools import release_tool
->>>>>>> Phase9-pypnm-cmts-release
 from pypnm_cmts.tools.release_tool import ReleaseTool
 
 
@@ -70,7 +66,6 @@ def test_dry_run_does_not_modify_files(tmp_path: Path, monkeypatch: pytest.Monke
 
     assert version_path.read_text(encoding="utf-8").strip() == '__version__: str = "1.2.3.0"'
     assert pyproject_path.read_text(encoding="utf-8").strip() == 'version = "1.2.3.0"'
-<<<<<<< HEAD
 
 
 @pytest.mark.unit
@@ -110,5 +105,3 @@ def test_tag_release_invokes_git(monkeypatch: pytest.MonkeyPatch) -> None:
     ReleaseTool.tag_release("v1.2.3.0", dry_run=False)
 
     assert calls == [["git", "tag", "v1.2.3.0"]]
-=======
->>>>>>> Phase9-pypnm-cmts-release
