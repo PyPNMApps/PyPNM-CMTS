@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "pypnm-docsis-cmts"
-version = "0.1.55.0"
+version = "0.1.56.0"
 description     = "DOCSIS CMTS tools built on the PyPNM toolkit"
 readme          = "README.md"
 requires-python = ">=3.10"
@@ -123,8 +123,7 @@ exclude        = ["tools"]
 select = ["F", "E", "W", "I", "B", "UP", "ANN", "SIM", "PERF"]
 ignore = [
   "E501",
-  "B006",
-  "C0103"
+  "B006"
 ]
 
 [tool.pyright]
