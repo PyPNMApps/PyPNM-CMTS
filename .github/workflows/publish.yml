@@ -11,14 +11,6 @@ on:
         options:
           - "false"
           - "true"
-      use_token:
-        description: "Use PYPI_API_TOKEN secret (token-based)"
-        required: true
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
   push:
     tags:
       - "v*.*.*.*"
@@ -42,7 +34,7 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if echo "${{ github.ref }}" | grep -Eq '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+\.0$'; then
+          if echo "${{ github.ref }}" | grep -Eq '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -127,6 +119,26 @@ PY
             exit 0
           fi
           echo "publish=true" >> "$GITHUB_OUTPUT"
+      - name: Release summary
+        run: |
+          ref="${{ github.ref }}"
+          exists="${{ steps.exists.outputs.exists }}"
+          publish="${{ steps.decide.outputs.publish }}"
+          version=$(python - <<'PY'
+import re
+from pathlib import Path
+
+text = Path("pyproject.toml").read_text(encoding="utf-8")
+match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
+if not match:
+    raise SystemExit(1)
+print(match.group(1))
+PY
+          )
+          echo "ref=${ref}"
+          echo "version=${version}"
+          echo "exists=${exists}"
+          echo "publish=${publish}"
 
       - name: Build package
         run: |
@@ -162,15 +174,7 @@ PY
           ls -la dist
           sha256sum dist/*
 
-      - name: Publish with token
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.use_token == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          repository-url: https://upload.pypi.org/legacy/
-
       - name: Publish with trusted publishing
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.use_token != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://upload.pypi.org/legacy/

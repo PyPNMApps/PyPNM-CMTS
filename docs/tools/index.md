@@ -116,7 +116,7 @@ pypnm-cmts-release --bump-hot-fix --tag
 
 ### pypnm-cmts-publish
 
-Publish PyPNM-CMTS distributions to PyPI.
+Publish PyPNM-CMTS distributions to PyPI (fallback only).
 
 ```bash
 pypnm-cmts-publish --repository pypi

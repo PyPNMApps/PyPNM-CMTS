@@ -160,10 +160,8 @@ The release helper requires a clean working tree before running the verification
 
 ## 9. Publishing
 
-PyPNM-CMTS supports two publishing paths to PyPI only:
-
-* Manual token-based uploads with `pypnm-cmts-publish`.
-* GitHub Actions publishing using trusted publishing (OIDC).
+PyPNM-CMTS uses GitHub Actions trusted publishing (OIDC) as the default path to PyPI.
+Manual publishing with `pypnm-cmts-publish` is a fallback option.
 
 ### 9.1 Manual publish (token)
 
@@ -193,8 +191,8 @@ Configure a PyPI trusted publisher with:
 
 The publish workflow supports:
 
-* `workflow_dispatch` with `use_token` and `force_publish` inputs
-* Tag-triggered GA publishes for tags matching `v*.*.*.0`
+* `workflow_dispatch` with `force_publish` input
+* Tag-triggered publishes for tags matching `vMAJOR.MINOR.PATCH.BUILD`
 * Skips publishing if the version already exists on PyPI (unless `force_publish` is true)
 
 If you see `invalid-publisher`, verify the repository, workflow filename, and environment name match the trusted publisher configuration.
