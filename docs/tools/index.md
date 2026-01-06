@@ -114,6 +114,10 @@ pypnm-cmts-release --next maintenance --dry-run
 pypnm-cmts-release --next build
 ```
 
+```bash
+pypnm-cmts-release --next maintenance --skip-pretest
+```
+
 ### pypnm-cmts-publish
 
 Publish PyPNM-CMTS distributions to PyPI (fallback only).

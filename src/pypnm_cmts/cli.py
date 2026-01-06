@@ -334,7 +334,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=["*.pyc", "*__pycache__*", "*.tmp", "*.log"],
         help="Glob pattern(s) to exclude from reload (repeatable).",
     )
-    setattr(parser, "_serve_parser", serve_parser)
+    parser._serve_parser = serve_parser
 
     config_menu_parser = subparsers.add_parser(
         "config-menu",
@@ -638,10 +638,10 @@ def _run_cli() -> int:
     if args.command == "serve":
         from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
         from pypnm_cmts.config.orchestrator_config import (
-            CmtsOrchestratorSettings,
             ENV_ADAPTER_HOSTNAME,
             ENV_ADAPTER_READ_COMMUNITY,
             ENV_ADAPTER_WRITE_COMMUNITY,
+            CmtsOrchestratorSettings,
         )
 
         if args.with_runner and args.reload:

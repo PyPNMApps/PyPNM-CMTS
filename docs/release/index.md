@@ -79,6 +79,7 @@ The release helper:
 * Confirms it matches `pyproject.toml`.
 * Computes a target version based on the four-part scheme.
 * Runs repository hygiene checks (secrets + MAC scans).
+* Prompts to run the pretest runner (`tools/release/test-runner.py`) before pytest.
 * Runs pytest (unless `--skip-tests` is used).
 * Optionally runs docker + Kubernetes smoke checks.
 * Builds docs with `mkdocs --strict`.
@@ -115,6 +116,12 @@ pypnm-cmts-release --version 0.2.1.0
 
 ```bash
 pypnm-cmts-release --next maintenance --dry-run
+```
+
+### 5.6 Skip pretest runner prompt
+
+```bash
+pypnm-cmts-release --next maintenance --skip-pretest
 ```
 
 ## 6. Release lanes

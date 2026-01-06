@@ -7,6 +7,7 @@ import os
 
 import pytest
 from pydantic import BaseModel, ValidationError
+
 from pypnm_cmts import cli as cli_module
 from pypnm_cmts.config import orchestrator_config
 from pypnm_cmts.config.orchestrator_config import (
