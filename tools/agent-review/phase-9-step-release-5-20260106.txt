@@ -1,0 +1,520 @@
+# FILE: tools/release/test-runner.py
+#!/usr/bin/env python3
+from __future__ import annotations
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DIST_DIR = REPO_ROOT / "dist"
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run local CI parity checks.")
+    parser.add_argument("--skip-ruff", action="store_true", help="Skip ruff check.")
+    parser.add_argument("--skip-tests", action="store_true", help="Skip pytest.")
+    parser.add_argument("--skip-docs", action="store_true", help="Skip mkdocs build.")
+    parser.add_argument("--skip-build", action="store_true", help="Skip python -m build.")
+    parser.add_argument("--skip-twine", action="store_true", help="Skip twine check.")
+    parser.add_argument("--no-color", action="store_true", help="Disable color output.")
+    return parser
+
+
+def _build_twine_command(artifacts: list[Path]) -> list[str]:
+    command = [sys.executable, "-m", "twine", "check"]
+    command.extend([str(path) for path in artifacts])
+    return command
+
+
+def _build_commands(options: argparse.Namespace) -> list[tuple[str, list[str]]]:
+    commands: list[tuple[str, list[str]]] = []
+    if not options.skip_ruff:
+        commands.append(("ruff check", [sys.executable, "-m", "ruff", "check", "."]))
+    if not options.skip_tests:
+        commands.append(("pytest", [sys.executable, "-m", "pytest", "-q", "-ra", "--tb=short"]))
+    if not options.skip_docs:
+        commands.append(("mkdocs build", [sys.executable, "-m", "mkdocs", "build", "--strict"]))
+    if not options.skip_build:
+        commands.append(("python -m build", [sys.executable, "-m", "build"]))
+    if not options.skip_twine:
+        commands.append(("twine check", _build_twine_command([])))
+    return commands
+
+
+def _run(cmd: list[str], label: str, env: dict[str, str]) -> None:
+    print(f"[release-test] {label}")
+    result = subprocess.run(cmd, check=False, cwd=REPO_ROOT, env=env)
+    if result.returncode != 0:
+        print(f"[release-test] {label} failed with exit code {result.returncode}", file=sys.stderr)
+        raise SystemExit(result.returncode)
+
+
+def main() -> int:
+    """
+    Run the local release verification sequence.
+
+    Sequence:
+      - ruff check
+      - pytest -q -ra --tb=short
+      - mkdocs build --strict
+      - python -m build
+      - python -m twine check dist/*
+    """
+    parser = _build_parser()
+    options = parser.parse_args()
+    env = dict(os.environ)
+    if options.no_color:
+        env["NO_COLOR"] = "1"
+
+    commands = _build_commands(options)
+    for label, cmd in commands:
+        if label == "twine check":
+            artifacts = sorted(DIST_DIR.glob("*"))
+            if not artifacts:
+                print(f"[release-test] dist directory empty at {DIST_DIR}", file=sys.stderr)
+                return 1
+            cmd = _build_twine_command(artifacts)
+        _run(cmd, label, env)
+    print("[release-test] Release verification completed successfully.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# FILE: tools/release/check_version.py
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+class VersionCheckTool:
+    """Verify version consistency between src/pypnm_cmts/version.py and pyproject.toml."""
+
+    MAX_ROOT_SEARCH_DEPTH: int = 6
+    VERSION_FILE_RELATIVE: str = "src/pypnm_cmts/version.py"
+    PYPROJECT_RELATIVE: str = "pyproject.toml"
+    VERSION_PATTERN: str = r'__version__\s*(?::\s*[^=]+)?=\s*"([^"]+)"'
+    PYPROJECT_PATTERN: str = r'^\s*version\s*=\s*"([^"]+)"\s*$'
+    EXIT_OK: int = 0
+    EXIT_ERROR: int = 1
+    EXIT_MISMATCH: int = 2
+
+    @staticmethod
+    def _read_text(path: Path) -> str:
+        """Read a file as UTF-8 text; return empty string when unavailable."""
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _find_project_root(start_path: Path) -> Path:
+        """Walk upwards to locate pyproject.toml, fallback to start path."""
+        current = start_path
+        for _ in range(VersionCheckTool.MAX_ROOT_SEARCH_DEPTH):
+            if (current / VersionCheckTool.PYPROJECT_RELATIVE).is_file():
+                return current
+            if current.parent == current:
+                break
+            current = current.parent
+        return start_path
+
+    @staticmethod
+    def _read_version_from_file(path: Path) -> str:
+        """Extract the __version__ value from src/pypnm_cmts/version.py."""
+        text = VersionCheckTool._read_text(path)
+        if not text:
+            return ""
+        match = re.search(VersionCheckTool.VERSION_PATTERN, text)
+        if not match:
+            return ""
+        return match.group(1)
+
+    @staticmethod
+    def _read_version_from_pyproject(path: Path) -> str:
+        """Extract the project version value from pyproject.toml."""
+        text = VersionCheckTool._read_text(path)
+        if not text:
+            return ""
+        match = re.search(VersionCheckTool.PYPROJECT_PATTERN, text, re.MULTILINE)
+        if not match:
+            return ""
+        return match.group(1)
+
+    @staticmethod
+    def _build_parser() -> argparse.ArgumentParser:
+        """Build the CLI parser for the version check tool."""
+        parser = argparse.ArgumentParser(
+            description=(
+                "Verify that src/pypnm_cmts/version.py and pyproject.toml carry the same version."
+            )
+        )
+        parser.add_argument(
+            "--json",
+            action="store_true",
+            help="Print results as JSON.",
+        )
+        return parser
+
+    @staticmethod
+    def _emit_text(version_file_version: str, pyproject_version: str, status: str) -> None:
+        """Emit human-readable output."""
+        if status == "error":
+            print("Version check failed: unable to read one or more version values.")
+        print(f"version.py: {version_file_version or 'missing'}")
+        print(f"pyproject.toml: {pyproject_version or 'missing'}")
+        if status == "mismatch":
+            print("Version mismatch detected.")
+        if status == "ok":
+            print("Version match confirmed.")
+
+    @staticmethod
+    def _emit_json(version_file_version: str, pyproject_version: str, status: str) -> None:
+        """Emit JSON output."""
+        payload = {
+            "version_py": version_file_version,
+            "pyproject": pyproject_version,
+            "match": status == "ok",
+            "status": status,
+        }
+        print(json.dumps(payload, ensure_ascii=True))
+
+    @staticmethod
+    def run(options: argparse.Namespace) -> int:
+        """Print versions from tracked files and return a status code."""
+        script_dir = Path(__file__).resolve().parent
+        root_path = VersionCheckTool._find_project_root(script_dir)
+        version_path = root_path / VersionCheckTool.VERSION_FILE_RELATIVE
+        pyproject_path = root_path / VersionCheckTool.PYPROJECT_RELATIVE
+
+        version_file_version = VersionCheckTool._read_version_from_file(version_path)
+        pyproject_version = VersionCheckTool._read_version_from_pyproject(pyproject_path)
+
+        if not version_file_version or not pyproject_version:
+            if options.json:
+                VersionCheckTool._emit_json(version_file_version, pyproject_version, "error")
+            else:
+                VersionCheckTool._emit_text(version_file_version, pyproject_version, "error")
+            return VersionCheckTool.EXIT_ERROR
+
+        if version_file_version != pyproject_version:
+            if options.json:
+                VersionCheckTool._emit_json(version_file_version, pyproject_version, "mismatch")
+            else:
+                VersionCheckTool._emit_text(version_file_version, pyproject_version, "mismatch")
+            return VersionCheckTool.EXIT_MISMATCH
+
+        if options.json:
+            VersionCheckTool._emit_json(version_file_version, pyproject_version, "ok")
+        else:
+            VersionCheckTool._emit_text(version_file_version, pyproject_version, "ok")
+        return VersionCheckTool.EXIT_OK
+
+
+if __name__ == "__main__":
+    parser = VersionCheckTool._build_parser()
+    args = parser.parse_args()
+    sys.exit(VersionCheckTool.run(args))
+# FILE: docs/tools/index.md
+# Tools
+
+Operational tools and helpers for PyPNM-CMTS.
+
+## Maintenance
+
+### tools/maintenance/clean.sh
+
+Cleanup utility for logs, caches, build artifacts, and runtime data directories.
+
+```bash
+tools/maintenance/clean.sh --all
+```
+
+```bash
+tools/maintenance/clean.sh --logs --python
+```
+
+Key options:
+- `--all` full cleanup
+- `--logs` truncate `logs/*.log`
+- `--python` remove `__pycache__`, `.pytest_cache`, `.ruff_cache`, etc.
+- `--build` remove `build/`, `dist/`, `*.egg-info`
+- `--pnm`, `--archive`, `--excel`, `--json`, `--plot-data`, `--msg-rsp` clean specific `.data` paths
+- `--issues`, `--remove-issues` clean or remove `issues/`
+- `--settings-backup` remove `src/pypnm_cmts/settings/system.bak.*.json`
+
+### tools/maintenance/add-required-python-headers.py
+
+Ensures SPDX header, copyright line, and optional `from __future__ import annotations`.
+
+```bash
+tools/maintenance/add-required-python-headers.py .
+```
+
+```bash
+tools/maintenance/add-required-python-headers.py . --future auto --author "Maurice Garcia" --year 2026
+```
+
+Options:
+- `--exclude` comma-separated directory list
+- `--future` `auto|yes|no`
+- `--author`, `--year`
+- `--verbose`
+
+## Security
+
+### tools/security/scan-mac-addresses.py
+
+Scans the repo for non-approved MAC addresses. Respects `.gitignore` directories by default.
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
+```
+
+Options:
+- `--root <path>` root directory (default current)
+- `--fail-on-found` exit with status 2 if any non-approved MACs are found
+- `--skip-gitignore` ignore `.gitignore` directory entries when scanning
+
+### tools/security/scan-secrets.sh
+
+Runs gitleaks (if installed) or a heuristic scan for secret-like strings.
+
+```bash
+tools/security/scan-secrets.sh
+```
+
+```bash
+tools/security/scan-secrets.sh --all-history
+```
+
+Options:
+- `--all-history` scan full git history (gitleaks only)
+- `--path <dir>` override repo root
+
+## Local
+
+### tools/local/local_container_build.sh
+
+Builds the local container and optionally runs a short docker-compose smoke test.
+
+```bash
+tools/local/local_container_build.sh
+```
+
+```bash
+tools/local/local_container_build.sh --smoke
+```
+
+### tools/local/local_kubernetes_smoke.sh
+
+Builds a local image and runs a Kubernetes smoke test against a local kind cluster.
+
+```bash
+tools/local/local_kubernetes_smoke.sh
+```
+
+## Release
+
+### pypnm-cmts-release
+
+Release helper for GA and hot-fix version bumps.
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+```
+
+```bash
+pypnm-cmts-release --bump-hot-fix --tag
+```
+
+### tools/release/test-runner.py
+
+Runs the release test sequence locally.
+
+```bash
+python tools/release/test-runner.py
+```
+
+Fast local verification (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --skip-docs
+```
+
+```mermaid
+flowchart TD
+    A[Edit code or docs] --> B[Run tools/release/test-runner.py]
+    B --> C{Checks pass}
+    C -- Yes --> D[Run pypnm-cmts-release]
+    D --> E[Commit and tag]
+    E --> F[Push to CI]
+    C -- No --> A
+```
+
+### tools/release/check_version.py
+
+Checks version consistency across project files.
+
+```bash
+python tools/release/check_version.py
+```
+
+## PNM
+
+### tools/pnm/print_pypnm_cmts_system_json.py
+
+Prints the PyPNM-CMTS system.json template.
+
+```bash
+python tools/pnm/print_pypnm_cmts_system_json.py
+```
+
+### tools/pnm/print_pypnm_docsis_system_json.py
+
+Prints the PyPNM (pypnm-docsis) system.json template.
+
+```bash
+python tools/pnm/print_pypnm_docsis_system_json.py
+```
+
+## Support
+
+### tools/support/bump_version.py
+
+Updates version identifiers to a new release.
+
+```bash
+python tools/support/bump_version.py --version 0.2.0.0
+```
+
+## System Test
+
+### tools/system-test/p4-coordination-harness.sh
+
+Runs the Phase 4 coordination harness to validate controller/worker behavior.
+
+```bash
+tools/system-test/p4-coordination-harness.sh start --cmts-hostname 192.168.0.100 --read-community public --write-community public --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh verify --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh stop --state-dir ./.state/p4-demo
+```
+
+### tools/system-test/ops-smoke.sh
+
+Checks that the FastAPI service is reachable by calling /ops/health.
+
+```bash
+tools/system-test/ops-smoke.sh --base-url http://127.0.0.1:8000
+```
+
+## Assets
+
+### tools/banner.txt
+
+ASCII banner used by local tooling (e.g., container build scripts).
+# FILE: tests/test_release_tools.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import types
+from pathlib import Path
+
+import pytest
+
+CHECK_VERSION_PATH = Path("tools/release/check_version.py")
+TEST_RUNNER_PATH = Path("tools/release/test-runner.py")
+
+
+def _load_tool_module(path: Path, module_name: str) -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load module from {path}.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.unit
+def test_check_version_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    check_version = _load_tool_module(CHECK_VERSION_PATH, "check_version")
+    version_path = tmp_path / "src/pypnm_cmts/version.py"
+    pyproject_path = tmp_path / "pyproject.toml"
+    version_path.parent.mkdir(parents=True, exist_ok=True)
+    version_path.write_text('__version__: str = "1.2.3.0"\n', encoding="utf-8")
+    pyproject_path.write_text('version = "1.2.3.1"\n', encoding="utf-8")
+
+    monkeypatch.setattr(check_version.VersionCheckTool, "_find_project_root", staticmethod(lambda _: tmp_path))
+
+    options = argparse.Namespace(json=False)
+    result = check_version.VersionCheckTool.run(options)
+
+    assert result == check_version.VersionCheckTool.EXIT_MISMATCH
+
+
+@pytest.mark.unit
+def test_release_test_runner_builds_default_commands() -> None:
+    test_runner = _load_tool_module(TEST_RUNNER_PATH, "test_runner")
+    parser = test_runner._build_parser()
+    options = parser.parse_args([])
+    commands = test_runner._build_commands(options)
+    labels = [label for label, _cmd in commands]
+    twine_commands = [cmd for label, cmd in commands if label == "twine check"]
+
+    assert labels == [
+        "ruff check",
+        "pytest",
+        "mkdocs build",
+        "python -m build",
+        "twine check",
+    ]
+    assert len(twine_commands) == 1
+    assert "dist/*" not in " ".join(twine_commands[0])
+
+
+@pytest.mark.unit
+def test_release_test_runner_skip_all() -> None:
+    test_runner = _load_tool_module(TEST_RUNNER_PATH, "test_runner")
+    parser = test_runner._build_parser()
+    options = parser.parse_args(
+        [
+            "--skip-ruff",
+            "--skip-tests",
+            "--skip-docs",
+            "--skip-build",
+            "--skip-twine",
+        ]
+    )
+    commands = test_runner._build_commands(options)
+
+    assert commands == []

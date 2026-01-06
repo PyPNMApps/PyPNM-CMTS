@@ -34,7 +34,7 @@ tools/maintenance/add-required-python-headers.py .
 ```
 
 ```bash
-tools/maintenance/add-required-python-headers.py . --future auto --author "Maurice Garcia" --year 2025
+tools/maintenance/add-required-python-headers.py . --future auto --author "Maurice Garcia" --year 2026
 ```
 
 Options:
@@ -122,10 +122,16 @@ Runs the release test sequence locally.
 python tools/release/test-runner.py
 ```
 
-Local verification (CI parity):
+Fast local verification (not full CI parity):
 
 ```bash
 python tools/release/test-runner.py --skip-docs
+```
+
+Local lint autofix (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --ruff-fix --skip-tests --skip-docs --skip-build --skip-twine
 ```
 
 ```mermaid

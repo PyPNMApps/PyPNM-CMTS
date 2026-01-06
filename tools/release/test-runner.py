@@ -18,6 +18,7 @@ DIST_DIR = REPO_ROOT / "dist"
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run local CI parity checks.")
     parser.add_argument("--skip-ruff", action="store_true", help="Skip ruff check.")
+    parser.add_argument("--ruff-fix", action="store_true", help="Run ruff check with --fix.")
     parser.add_argument("--skip-tests", action="store_true", help="Skip pytest.")
     parser.add_argument("--skip-docs", action="store_true", help="Skip mkdocs build.")
     parser.add_argument("--skip-build", action="store_true", help="Skip python -m build.")
@@ -26,10 +27,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_twine_command(artifacts: list[Path]) -> list[str]:
+    command = [sys.executable, "-m", "twine", "check"]
+    command.extend([str(path) for path in artifacts])
+    return command
+
+
 def _build_commands(options: argparse.Namespace) -> list[tuple[str, list[str]]]:
     commands: list[tuple[str, list[str]]] = []
     if not options.skip_ruff:
-        commands.append(("ruff check", [sys.executable, "-m", "ruff", "check", "."]))
+        ruff_command = [sys.executable, "-m", "ruff", "check", "."]
+        ruff_label = "ruff check"
+        if options.ruff_fix:
+            ruff_command.append("--fix")
+            ruff_label = "ruff check --fix"
+        commands.append((ruff_label, ruff_command))
     if not options.skip_tests:
         commands.append(("pytest", [sys.executable, "-m", "pytest", "-q", "-ra", "--tb=short"]))
     if not options.skip_docs:
@@ -37,7 +49,7 @@ def _build_commands(options: argparse.Namespace) -> list[tuple[str, list[str]]]:
     if not options.skip_build:
         commands.append(("python -m build", [sys.executable, "-m", "build"]))
     if not options.skip_twine:
-        commands.append(("twine check", [sys.executable, "-m", "twine", "check", "dist/*"]))
+        commands.append(("twine check", _build_twine_command([])))
     return commands
 
 
@@ -68,9 +80,12 @@ def main() -> int:
 
     commands = _build_commands(options)
     for label, cmd in commands:
-        if label == "twine check" and not DIST_DIR.exists():
-            print(f"[release-test] dist directory not found at {DIST_DIR}", file=sys.stderr)
-            return 1
+        if label == "twine check":
+            artifacts = sorted(DIST_DIR.glob("*"))
+            if not artifacts:
+                print(f"[release-test] dist directory empty at {DIST_DIR}", file=sys.stderr)
+                return 1
+            cmd = _build_twine_command(artifacts)
         _run(cmd, label, env)
     print("[release-test] Release verification completed successfully.")
     return 0

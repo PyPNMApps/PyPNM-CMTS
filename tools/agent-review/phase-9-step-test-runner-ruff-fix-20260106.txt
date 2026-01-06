@@ -1,0 +1,342 @@
+# FILE: tools/release/test-runner.py
+#!/usr/bin/env python3
+from __future__ import annotations
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DIST_DIR = REPO_ROOT / "dist"
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run local CI parity checks.")
+    parser.add_argument("--skip-ruff", action="store_true", help="Skip ruff check.")
+    parser.add_argument("--ruff-fix", action="store_true", help="Run ruff check with --fix.")
+    parser.add_argument("--skip-tests", action="store_true", help="Skip pytest.")
+    parser.add_argument("--skip-docs", action="store_true", help="Skip mkdocs build.")
+    parser.add_argument("--skip-build", action="store_true", help="Skip python -m build.")
+    parser.add_argument("--skip-twine", action="store_true", help="Skip twine check.")
+    parser.add_argument("--no-color", action="store_true", help="Disable color output.")
+    return parser
+
+
+def _build_twine_command(artifacts: list[Path]) -> list[str]:
+    command = [sys.executable, "-m", "twine", "check"]
+    command.extend([str(path) for path in artifacts])
+    return command
+
+
+def _build_commands(options: argparse.Namespace) -> list[tuple[str, list[str]]]:
+    commands: list[tuple[str, list[str]]] = []
+    if not options.skip_ruff:
+        ruff_command = [sys.executable, "-m", "ruff", "check", "."]
+        ruff_label = "ruff check"
+        if options.ruff_fix:
+            ruff_command.append("--fix")
+            ruff_label = "ruff check --fix"
+        commands.append((ruff_label, ruff_command))
+    if not options.skip_tests:
+        commands.append(("pytest", [sys.executable, "-m", "pytest", "-q", "-ra", "--tb=short"]))
+    if not options.skip_docs:
+        commands.append(("mkdocs build", [sys.executable, "-m", "mkdocs", "build", "--strict"]))
+    if not options.skip_build:
+        commands.append(("python -m build", [sys.executable, "-m", "build"]))
+    if not options.skip_twine:
+        commands.append(("twine check", _build_twine_command([])))
+    return commands
+
+
+def _run(cmd: list[str], label: str, env: dict[str, str]) -> None:
+    print(f"[release-test] {label}")
+    result = subprocess.run(cmd, check=False, cwd=REPO_ROOT, env=env)
+    if result.returncode != 0:
+        print(f"[release-test] {label} failed with exit code {result.returncode}", file=sys.stderr)
+        raise SystemExit(result.returncode)
+
+
+def main() -> int:
+    """
+    Run the local release verification sequence.
+
+    Sequence:
+      - ruff check
+      - pytest -q -ra --tb=short
+      - mkdocs build --strict
+      - python -m build
+      - python -m twine check dist/*
+    """
+    parser = _build_parser()
+    options = parser.parse_args()
+    env = dict(os.environ)
+    if options.no_color:
+        env["NO_COLOR"] = "1"
+
+    commands = _build_commands(options)
+    for label, cmd in commands:
+        if label == "twine check":
+            artifacts = sorted(DIST_DIR.glob("*"))
+            if not artifacts:
+                print(f"[release-test] dist directory empty at {DIST_DIR}", file=sys.stderr)
+                return 1
+            cmd = _build_twine_command(artifacts)
+        _run(cmd, label, env)
+    print("[release-test] Release verification completed successfully.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# FILE: docs/tools/index.md
+# Tools
+
+Operational tools and helpers for PyPNM-CMTS.
+
+## Maintenance
+
+### tools/maintenance/clean.sh
+
+Cleanup utility for logs, caches, build artifacts, and runtime data directories.
+
+```bash
+tools/maintenance/clean.sh --all
+```
+
+```bash
+tools/maintenance/clean.sh --logs --python
+```
+
+Key options:
+- `--all` full cleanup
+- `--logs` truncate `logs/*.log`
+- `--python` remove `__pycache__`, `.pytest_cache`, `.ruff_cache`, etc.
+- `--build` remove `build/`, `dist/`, `*.egg-info`
+- `--pnm`, `--archive`, `--excel`, `--json`, `--plot-data`, `--msg-rsp` clean specific `.data` paths
+- `--issues`, `--remove-issues` clean or remove `issues/`
+- `--settings-backup` remove `src/pypnm_cmts/settings/system.bak.*.json`
+
+### tools/maintenance/add-required-python-headers.py
+
+Ensures SPDX header, copyright line, and optional `from __future__ import annotations`.
+
+```bash
+tools/maintenance/add-required-python-headers.py .
+```
+
+```bash
+tools/maintenance/add-required-python-headers.py . --future auto --author "Maurice Garcia" --year 2026
+```
+
+Options:
+- `--exclude` comma-separated directory list
+- `--future` `auto|yes|no`
+- `--author`, `--year`
+- `--verbose`
+
+## Security
+
+### tools/security/scan-mac-addresses.py
+
+Scans the repo for non-approved MAC addresses. Respects `.gitignore` directories by default.
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
+```
+
+Options:
+- `--root <path>` root directory (default current)
+- `--fail-on-found` exit with status 2 if any non-approved MACs are found
+- `--skip-gitignore` ignore `.gitignore` directory entries when scanning
+
+### tools/security/scan-secrets.sh
+
+Runs gitleaks (if installed) or a heuristic scan for secret-like strings.
+
+```bash
+tools/security/scan-secrets.sh
+```
+
+```bash
+tools/security/scan-secrets.sh --all-history
+```
+
+Options:
+- `--all-history` scan full git history (gitleaks only)
+- `--path <dir>` override repo root
+
+## Local
+
+### tools/local/local_container_build.sh
+
+Builds the local container and optionally runs a short docker-compose smoke test.
+
+```bash
+tools/local/local_container_build.sh
+```
+
+```bash
+tools/local/local_container_build.sh --smoke
+```
+
+### tools/local/local_kubernetes_smoke.sh
+
+Builds a local image and runs a Kubernetes smoke test against a local kind cluster.
+
+```bash
+tools/local/local_kubernetes_smoke.sh
+```
+
+## Release
+
+### pypnm-cmts-release
+
+Release helper for GA and hot-fix version bumps.
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+```
+
+```bash
+pypnm-cmts-release --bump-hot-fix --tag
+```
+
+### tools/release/test-runner.py
+
+Runs the release test sequence locally.
+
+```bash
+python tools/release/test-runner.py
+```
+
+Fast local verification (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --skip-docs
+```
+
+Local lint autofix (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --ruff-fix --skip-tests --skip-docs --skip-build --skip-twine
+```
+
+```mermaid
+flowchart TD
+    A[Edit code or docs] --> B[Run tools/release/test-runner.py]
+    B --> C{Checks pass}
+    C -- Yes --> D[Run pypnm-cmts-release]
+    D --> E[Commit and tag]
+    E --> F[Push to CI]
+    C -- No --> A
+```
+
+### tools/release/check_version.py
+
+Checks version consistency across project files.
+
+```bash
+python tools/release/check_version.py
+```
+
+## PNM
+
+### tools/pnm/print_pypnm_cmts_system_json.py
+
+Prints the PyPNM-CMTS system.json template.
+
+```bash
+python tools/pnm/print_pypnm_cmts_system_json.py
+```
+
+### tools/pnm/print_pypnm_docsis_system_json.py
+
+Prints the PyPNM (pypnm-docsis) system.json template.
+
+```bash
+python tools/pnm/print_pypnm_docsis_system_json.py
+```
+
+## Support
+
+### tools/support/bump_version.py
+
+Updates version identifiers to a new release.
+
+```bash
+python tools/support/bump_version.py --version 0.2.0.0
+```
+
+## System Test
+
+### tools/system-test/p4-coordination-harness.sh
+
+Runs the Phase 4 coordination harness to validate controller/worker behavior.
+
+```bash
+tools/system-test/p4-coordination-harness.sh start --cmts-hostname 192.168.0.100 --read-community public --write-community public --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh verify --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh stop --state-dir ./.state/p4-demo
+```
+
+### tools/system-test/ops-smoke.sh
+
+Checks that the FastAPI service is reachable by calling /ops/health.
+
+```bash
+tools/system-test/ops-smoke.sh --base-url http://127.0.0.1:8000
+```
+
+## Assets
+
+### tools/banner.txt
+
+ASCII banner used by local tooling (e.g., container build scripts).
+# FILE: tests/test_release_test_runner.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+def test_release_test_runner_accepts_ruff_fix() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "tools" / "release" / "test-runner.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--ruff-fix",
+            "--skip-ruff",
+            "--skip-tests",
+            "--skip-docs",
+            "--skip-build",
+            "--skip-twine",
+        ],
+        check=False,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "Release verification completed successfully." in result.stdout

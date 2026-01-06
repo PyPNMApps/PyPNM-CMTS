@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```
-pypnm-cmts [-h] [-v] {run,run-forever,discover,serve} ...
+pypnm-cmts [-h] [-v] {run,run-forever,discover,serve,config,config-menu} ...
 ```
 
 ## Description
@@ -47,6 +47,22 @@ Start the FastAPI service via Uvicorn.
 
 ```
 pypnm-cmts serve [options]
+```
+
+### config
+
+Non-interactive system.json helpers (init, validate, show).
+
+```
+pypnm-cmts config <init|validate|show> [options]
+```
+
+### config-menu
+
+Launch the interactive system.json configuration menu.
+
+```
+pypnm-cmts config-menu [options]
 ```
 
 ## Common Orchestrator Options (run, run-forever)
@@ -101,6 +117,29 @@ pypnm-cmts serve [options]
 - `--reload-include`: Glob pattern(s) to include for reload (repeatable).
 - `--reload-exclude`: Glob pattern(s) to exclude from reload (repeatable).
 
+## config init Options
+
+- `--path`: Optional target `system.json` path.
+- `--force`: Overwrite existing file.
+- `--print`: Print the resulting JSON payload.
+- `--dry-run`: Do not write; only print when `--print` is set.
+
+## config validate Options
+
+- `--path`: Optional `system.json` path override.
+- `--json`: Emit JSON output.
+
+Exit codes:
+
+- `0`: Valid configuration.
+- `2`: Invalid configuration (missing or malformed fields).
+- `1`: Tool/runtime error.
+
+## config show Options
+
+- `--path`: Optional `system.json` path override.
+- `--pretty`: Pretty-print JSON output.
+
 ## Examples
 
 ```
@@ -110,6 +149,9 @@ pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
 pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public
 pypnm-cmts serve --host 0.0.0.0 --port 8080
 pypnm-cmts serve --reload
+pypnm-cmts config init --print
+pypnm-cmts config validate
+pypnm-cmts config show --pretty
 ```
 
 ## Configuration Notes

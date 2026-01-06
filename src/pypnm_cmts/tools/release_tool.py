@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,8 @@ VERSION_FILE_PATH = Path("src/pypnm_cmts/version.py")
 PYPROJECT_PATH = Path("pyproject.toml")
 VERSION_PATTERN = re.compile(r'^__version__\s*:\s*str\s*=\s*"([^"]+)"', re.MULTILINE)
 PYPROJECT_VERSION_PATTERN = re.compile(r'^\s*version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
+RELEASE_TEST_RUNNER = Path("tools/release/test-runner.py")
+RELEASE_COMMIT_TEMPLATE = "Release v{version}"
 
 VERSION_PARTS = 4
 BUILD_INDEX = 3
@@ -106,6 +109,7 @@ class ReleaseTool:
             text=True,
             capture_output=True,
             check=False,
+            cwd=Path.cwd(),
         )
         if result.returncode != 0:
             raise RuntimeError("Git status failed; ensure this is a git repository.")
@@ -113,11 +117,70 @@ class ReleaseTool:
             raise RuntimeError("Working tree is not clean; commit or stash changes first.")
 
     @staticmethod
-    def tag_release(tag: str, dry_run: bool) -> None:
-        if dry_run:
-            print(f"[dry-run] Would create tag {tag}")
-            return
-        subprocess.run(["git", "tag", tag], check=True)
+    def _resolve_current_branch() -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=Path.cwd(),
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Unable to resolve current git branch.")
+        branch = (result.stdout or "").strip()
+        if branch == "" or branch == "HEAD":
+            raise RuntimeError("Detached HEAD; checkout a branch before releasing.")
+        return branch
+
+    @staticmethod
+    def _run_release_tests() -> None:
+        if not RELEASE_TEST_RUNNER.exists():
+            raise RuntimeError(f"Release test runner not found: {RELEASE_TEST_RUNNER}")
+        subprocess.run(
+            [sys.executable, str(RELEASE_TEST_RUNNER)],
+            check=True,
+            cwd=Path.cwd(),
+        )
+
+    @staticmethod
+    def _cleanup_release_artifacts() -> None:
+        targets = [
+            Path("dist"),
+            Path("build"),
+            Path(".pytest_cache"),
+            Path(".ruff_cache"),
+            Path(".mypy_cache"),
+            Path(".pyright"),
+            Path(".coverage"),
+        ]
+        for target in targets:
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            elif target.exists():
+                target.unlink(missing_ok=True)
+        for path in Path.cwd().glob("*.egg-info"):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+
+    @staticmethod
+    def _commit_release(version: str) -> None:
+        message = RELEASE_COMMIT_TEMPLATE.format(version=version)
+        subprocess.run(
+            ["git", "add", str(VERSION_FILE_PATH), str(PYPROJECT_PATH)],
+            check=True,
+            cwd=Path.cwd(),
+        )
+        subprocess.run(["git", "commit", "-m", message], check=True, cwd=Path.cwd())
+
+    @staticmethod
+    def _tag_release(tag: str) -> None:
+        subprocess.run(["git", "tag", tag], check=True, cwd=Path.cwd())
+
+    @classmethod
+    def _push_release(cls, tag: str) -> None:
+        branch = cls._resolve_current_branch()
+        subprocess.run(["git", "push", "origin", branch], check=True, cwd=Path.cwd())
+        subprocess.run(["git", "push", "origin", tag], check=True, cwd=Path.cwd())
 
     @staticmethod
     def _build_parser() -> argparse.ArgumentParser:
@@ -140,7 +203,6 @@ class ReleaseTool:
             action="store_true",
             help="Bump patch version (default when no bump flag specified).",
         )
-        parser.add_argument("--tag", action="store_true", help="Create a git tag after bumping.")
         parser.add_argument("--dry-run", action="store_true", help="Print actions without writing files.")
         return parser
 
@@ -175,14 +237,23 @@ class ReleaseTool:
         if options.dry_run:
             print(f"[dry-run] Current version: {current_version}")
             print(f"[dry-run] New version: {new_version}")
-        else:
-            cls.write_version_file(VERSION_FILE_PATH, new_version)
-            cls.write_pyproject_version(PYPROJECT_PATH, new_version)
-            print(f"Updated version to {new_version}")
+            print(f"[dry-run] Would run: {RELEASE_TEST_RUNNER}")
+            print(f"[dry-run] Would commit and tag v{new_version}")
+            print("[dry-run] Would push to origin.")
+            return 0
 
-        if options.tag:
-            cls.ensure_git_clean()
-            cls.tag_release(f"v{new_version}", options.dry_run)
+        cls.ensure_git_clean()
+        cls._run_release_tests()
+        cls._cleanup_release_artifacts()
+        cls.ensure_git_clean()
+
+        cls.write_version_file(VERSION_FILE_PATH, new_version)
+        cls.write_pyproject_version(PYPROJECT_PATH, new_version)
+        print(f"Updated version to {new_version}")
+
+        cls._commit_release(new_version)
+        cls._tag_release(f"v{new_version}")
+        cls._push_release(f"v{new_version}")
 
         return 0
 

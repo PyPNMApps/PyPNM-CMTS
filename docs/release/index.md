@@ -76,10 +76,10 @@ The release helper:
 * Reads `src/pypnm_cmts/version.py`.
 * Confirms it matches `pyproject.toml`.
 * Computes a target version based on GA or hot-fix rules.
-* Optionally creates a git tag when the working tree is clean.
-* Supports dry-run output without modifying files.
-
-The helper does not run tests or build docs; those remain separate release steps.
+* Runs the local CI parity runner (`tools/release/test-runner.py`).
+* Cleans build artifacts produced by the verification runner.
+* Updates versions, commits, tags, and pushes on success.
+* Supports dry-run output without modifying files or running tests.
 
 ## 5. Release commands
 
@@ -144,13 +144,13 @@ Use this flow for routine releases on `main`:
 
 ```bash
 pypnm-cmts-release --bump-ga --patch --dry-run
-pypnm-cmts-release --bump-ga --patch --tag
+pypnm-cmts-release --bump-ga --patch
 ```
 
 Hot-fix releases use the hot-fix lane and bump the `BUILD` segment:
 
 ```bash
-pypnm-cmts-release --bump-hot-fix --tag
+pypnm-cmts-release --bump-hot-fix
 ```
 
-The release helper requires a clean working tree before tagging.
+The release helper requires a clean working tree before running the verification runner.

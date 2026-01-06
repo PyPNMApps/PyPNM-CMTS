@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
-"""PyPNM-CMTS settings package."""
-from __future__ import annotations
-
+"""Package marker for bundled PyPNM-CMTS settings templates."""

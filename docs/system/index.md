@@ -39,6 +39,10 @@ available and walks you through method-specific settings (local, tftp,
 or sftp). If the PyPNM tool is not found, the CMTS menu falls back to
 editing the retrieval method and its parameters directly.
 
+## Non-interactive config commands
+
+- [Config workflow](config.md)
+
 ## PyPNM configuration menu
 
 - Use `pypnm-config-menu` to edit the installed pypnm-docsis `system.json`.

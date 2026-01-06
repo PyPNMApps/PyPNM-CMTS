@@ -345,6 +345,68 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional path to system.json configuration file.",
     )
 
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Non-interactive system.json configuration helpers.",
+    )
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+
+    config_init_parser = config_subparsers.add_parser(
+        "init",
+        help="Initialize system.json with CMTS defaults.",
+    )
+    config_init_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional target system.json path.",
+    )
+    config_init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing system.json.",
+    )
+    config_init_parser.add_argument(
+        "--print",
+        dest="print_output",
+        action="store_true",
+        help="Print the resulting JSON payload.",
+    )
+    config_init_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not write; only print when --print is set.",
+    )
+
+    config_validate_parser = config_subparsers.add_parser(
+        "validate",
+        help="Validate system.json for CMTS readiness.",
+    )
+    config_validate_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional system.json path override.",
+    )
+    config_validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit validation output as JSON.",
+    )
+
+    config_show_parser = config_subparsers.add_parser(
+        "show",
+        help="Print the effective system.json payload.",
+    )
+    config_show_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional system.json path override.",
+    )
+    config_show_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print the JSON output.",
+    )
+
     return parser
 
 
@@ -663,6 +725,32 @@ def _run_cli() -> int:
 
         menu = CmtsConfigMenu(config_path=config_path)
         return menu.run()
+
+    if args.command == "config":
+        from pypnm_cmts.tools.config_commands import CmtsConfigCommands
+
+        if args.config_command == "init":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.init_config(
+                path=config_path,
+                force=bool(args.force),
+                print_output=bool(args.print_output),
+                dry_run=bool(args.dry_run),
+            )
+        if args.config_command == "validate":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.validate_config(
+                path=config_path,
+                json_output=bool(args.json),
+            )
+        if args.config_command == "show":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.show_config(
+                path=config_path,
+                pretty=bool(args.pretty),
+            )
+        print("ERROR: config subcommand is required.", file=sys.stderr)
+        return EXIT_CODE_USAGE
 
     parser.print_help()
     return EXIT_CODE_USAGE

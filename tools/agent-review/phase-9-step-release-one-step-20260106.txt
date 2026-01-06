@@ -1,0 +1,525 @@
+# FILE: src/pypnm_cmts/tools/release_tool.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+VERSION_FILE_PATH = Path("src/pypnm_cmts/version.py")
+PYPROJECT_PATH = Path("pyproject.toml")
+VERSION_PATTERN = re.compile(r'^__version__\s*:\s*str\s*=\s*"([^"]+)"', re.MULTILINE)
+PYPROJECT_VERSION_PATTERN = re.compile(r'^\s*version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
+RELEASE_TEST_RUNNER = Path("tools/release/test-runner.py")
+RELEASE_COMMIT_TEMPLATE = "Release v{version}"
+
+VERSION_PARTS = 4
+BUILD_INDEX = 3
+
+
+class ReleaseTool:
+    """Release helper for PyPNM-CMTS versioning and tagging."""
+
+    @staticmethod
+    def parse_version(version: str) -> tuple[int, int, int, int]:
+        parts = version.strip().split(".")
+        if len(parts) != VERSION_PARTS:
+            raise ValueError("Version must use MAJOR.MINOR.PATCH.BUILD format.")
+        numbers: list[int] = []
+        for part in parts:
+            if not part.isdigit():
+                raise ValueError("Version parts must be numeric.")
+            numbers.append(int(part))
+        return (numbers[0], numbers[1], numbers[2], numbers[3])
+
+    @staticmethod
+    def format_version(parts: tuple[int, int, int, int]) -> str:
+        return ".".join(str(part) for part in parts)
+
+    @staticmethod
+    def is_ga(parts: tuple[int, int, int, int]) -> bool:
+        return int(parts[BUILD_INDEX]) == 0
+
+    @staticmethod
+    def bump_ga(parts: tuple[int, int, int, int], bump_kind: str) -> tuple[int, int, int, int]:
+        major, minor, patch, _build = parts
+        if bump_kind == "major":
+            return (major + 1, 0, 0, 0)
+        if bump_kind == "minor":
+            return (major, minor + 1, 0, 0)
+        if bump_kind == "patch":
+            return (major, minor, patch + 1, 0)
+        raise ValueError("bump_kind must be major, minor, or patch.")
+
+    @staticmethod
+    def bump_hotfix(parts: tuple[int, int, int, int], bump_kind: str) -> tuple[int, int, int, int]:
+        major, minor, patch, _build = parts
+        if bump_kind == "major":
+            return (major + 1, 0, 0, 1)
+        if bump_kind == "minor":
+            return (major, minor + 1, 0, 1)
+        if bump_kind == "patch":
+            return (major, minor, patch + 1, 1)
+        raise ValueError("bump_kind must be major, minor, or patch.")
+
+    @staticmethod
+    def bump_hotfix_build(parts: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        major, minor, patch, build = parts
+        if int(build) <= 0:
+            return (major, minor, patch, 1)
+        return (major, minor, patch, build + 1)
+
+    @staticmethod
+    def read_version_file(path: Path) -> str:
+        text = path.read_text(encoding="utf-8")
+        match = VERSION_PATTERN.search(text)
+        if not match:
+            raise ValueError(f"Unable to locate __version__ in {path}.")
+        return match.group(1)
+
+    @staticmethod
+    def read_pyproject_version(path: Path) -> str:
+        text = path.read_text(encoding="utf-8")
+        match = PYPROJECT_VERSION_PATTERN.search(text)
+        if not match:
+            raise ValueError(f"Unable to locate version in {path}.")
+        return match.group(1)
+
+    @staticmethod
+    def write_version_file(path: Path, version: str) -> None:
+        text = path.read_text(encoding="utf-8")
+        updated = VERSION_PATTERN.sub(f'__version__: str = "{version}"', text)
+        path.write_text(updated, encoding="utf-8")
+
+    @staticmethod
+    def write_pyproject_version(path: Path, version: str) -> None:
+        text = path.read_text(encoding="utf-8")
+        updated = PYPROJECT_VERSION_PATTERN.sub(f'version = "{version}"', text)
+        path.write_text(updated, encoding="utf-8")
+
+    @staticmethod
+    def ensure_git_clean() -> None:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=Path.cwd(),
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Git status failed; ensure this is a git repository.")
+        if (result.stdout or "").strip():
+            raise RuntimeError("Working tree is not clean; commit or stash changes first.")
+
+    @staticmethod
+    def _resolve_current_branch() -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=Path.cwd(),
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Unable to resolve current git branch.")
+        branch = (result.stdout or "").strip()
+        if branch == "" or branch == "HEAD":
+            raise RuntimeError("Detached HEAD; checkout a branch before releasing.")
+        return branch
+
+    @staticmethod
+    def _run_release_tests() -> None:
+        if not RELEASE_TEST_RUNNER.exists():
+            raise RuntimeError(f"Release test runner not found: {RELEASE_TEST_RUNNER}")
+        subprocess.run(
+            [sys.executable, str(RELEASE_TEST_RUNNER)],
+            check=True,
+            cwd=Path.cwd(),
+        )
+
+    @staticmethod
+    def _cleanup_release_artifacts() -> None:
+        targets = [
+            Path("dist"),
+            Path("build"),
+            Path(".pytest_cache"),
+            Path(".ruff_cache"),
+            Path(".mypy_cache"),
+            Path(".pyright"),
+            Path(".coverage"),
+        ]
+        for target in targets:
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            elif target.exists():
+                target.unlink(missing_ok=True)
+        for path in Path.cwd().glob("*.egg-info"):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+
+    @staticmethod
+    def _commit_release(version: str) -> None:
+        message = RELEASE_COMMIT_TEMPLATE.format(version=version)
+        subprocess.run(
+            ["git", "add", str(VERSION_FILE_PATH), str(PYPROJECT_PATH)],
+            check=True,
+            cwd=Path.cwd(),
+        )
+        subprocess.run(["git", "commit", "-m", message], check=True, cwd=Path.cwd())
+
+    @staticmethod
+    def _tag_release(tag: str) -> None:
+        subprocess.run(["git", "tag", tag], check=True, cwd=Path.cwd())
+
+    @classmethod
+    def _push_release(cls, tag: str) -> None:
+        branch = cls._resolve_current_branch()
+        subprocess.run(["git", "push", "origin", branch], check=True, cwd=Path.cwd())
+        subprocess.run(["git", "push", "origin", tag], check=True, cwd=Path.cwd())
+
+    @staticmethod
+    def _build_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(description="PyPNM-CMTS release helper.")
+        bump_group = parser.add_mutually_exclusive_group(required=True)
+        bump_group.add_argument("--bump-ga", action="store_true", help="Create a GA release (BUILD=0).")
+        bump_group.add_argument("--bump-hot-fix", action="store_true", help="Create a hot-fix release (BUILD>0).")
+        parser.add_argument(
+            "--major",
+            action="store_true",
+            help="Bump major version (resets minor/patch).",
+        )
+        parser.add_argument(
+            "--minor",
+            action="store_true",
+            help="Bump minor version (resets patch).",
+        )
+        parser.add_argument(
+            "--patch",
+            action="store_true",
+            help="Bump patch version (default when no bump flag specified).",
+        )
+        parser.add_argument("--dry-run", action="store_true", help="Print actions without writing files.")
+        return parser
+
+    @staticmethod
+    def _resolve_bump_kind(options: argparse.Namespace) -> str:
+        if options.major:
+            return "major"
+        if options.minor:
+            return "minor"
+        return "patch"
+
+    @classmethod
+    def run(cls, options: argparse.Namespace) -> int:
+        current_version = cls.read_version_file(VERSION_FILE_PATH)
+        pyproject_version = cls.read_pyproject_version(PYPROJECT_PATH)
+        if current_version != pyproject_version:
+            raise RuntimeError("Version mismatch between version.py and pyproject.toml.")
+
+        current_parts = cls.parse_version(current_version)
+        bump_kind = cls._resolve_bump_kind(options)
+
+        if options.bump_ga:
+            new_parts = cls.bump_ga(current_parts, bump_kind)
+        else:
+            if options.major or options.minor or options.patch:
+                new_parts = cls.bump_hotfix(current_parts, bump_kind)
+            else:
+                new_parts = cls.bump_hotfix_build(current_parts)
+
+        new_version = cls.format_version(new_parts)
+
+        if options.dry_run:
+            print(f"[dry-run] Current version: {current_version}")
+            print(f"[dry-run] New version: {new_version}")
+            print(f"[dry-run] Would run: {RELEASE_TEST_RUNNER}")
+            print(f"[dry-run] Would commit and tag v{new_version}")
+            print("[dry-run] Would push to origin.")
+            return 0
+
+        cls.ensure_git_clean()
+        cls._run_release_tests()
+        cls._cleanup_release_artifacts()
+        cls.ensure_git_clean()
+
+        cls.write_version_file(VERSION_FILE_PATH, new_version)
+        cls.write_pyproject_version(PYPROJECT_PATH, new_version)
+        print(f"Updated version to {new_version}")
+
+        cls._commit_release(new_version)
+        cls._tag_release(f"v{new_version}")
+        cls._push_release(f"v{new_version}")
+
+        return 0
+
+
+def main() -> int:
+    parser = ReleaseTool._build_parser()
+    options = parser.parse_args()
+    try:
+        return ReleaseTool.run(options)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# FILE: docs/release/index.md
+# PyPNM-CMTS Release Guide
+
+## Table of contents
+
+[1. Branch model](#1-branch-model)
+
+[2. Version source of truth](#2-version-source-of-truth)
+
+[3. Versioning scheme](#3-versioning-scheme)
+
+[4. Release helper overview](#4-release-helper-overview)
+
+[5. Release commands](#5-release-commands)
+
+[6. Release lanes](#6-release-lanes)
+
+[7. CI expectations](#7-ci-expectations)
+
+[8. Release workflow](#8-release-workflow)
+
+This guide follows the PyPNM release strategy and uses the same four-part versioning scheme.
+The release entry point is `pypnm-cmts-release`.
+
+## 1. Branch model
+
+PyPNM-CMTS currently follows a single-branch release model:
+
+* `main` is the release branch.
+* Feature branches are optional and short-lived.
+
+## 2. Version source of truth
+
+The canonical version lives in:
+
+```text
+src/pypnm_cmts/version.py
+```
+
+The `pyproject.toml` version mirrors it and must match at all times.
+
+Example:
+
+```python
+from __future__ import annotations
+
+__all__ = ["__version__"]
+
+# MAJOR.MINOR.PATCH.BUILD
+__version__: str = "0.1.0.0"
+```
+
+## 3. Versioning scheme
+
+PyPNM-CMTS uses a four-part version:
+
+```text
+MAJOR.MINOR.PATCH.BUILD
+```
+
+Guidelines:
+
+* `MAJOR` for breaking changes.
+* `MINOR` for backward-compatible features.
+* `PATCH` for compatible bug fixes.
+* `BUILD` for hot-fix releases or rebuilds.
+
+Release lanes:
+
+* GA tag format: `vMAJOR.MINOR.PATCH.0`
+* Hot-fix tag format: `vMAJOR.MINOR.PATCH.BUILD` where `BUILD != 0`
+
+## 4. Release helper overview
+
+The release helper:
+
+* Reads `src/pypnm_cmts/version.py`.
+* Confirms it matches `pyproject.toml`.
+* Computes a target version based on GA or hot-fix rules.
+* Runs the local CI parity runner (`tools/release/test-runner.py`).
+* Cleans build artifacts produced by the verification runner.
+* Updates versions, commits, tags, and pushes on success.
+* Supports dry-run output without modifying files or running tests.
+
+## 5. Release commands
+
+### 5.1 GA release (build = 0)
+
+```bash
+pypnm-cmts-release --bump-ga --patch
+```
+
+### 5.2 Hot-fix release (build > 0)
+
+```bash
+pypnm-cmts-release --bump-hot-fix
+```
+
+### 5.3 GA with explicit bump lane
+
+```bash
+pypnm-cmts-release --bump-ga --minor
+```
+
+### 5.4 Hot-fix with explicit bump lane
+
+```bash
+pypnm-cmts-release --bump-hot-fix --patch
+```
+
+### 5.5 Dry run (`--dry-run`)
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+```
+
+## 6. Release lanes
+
+```mermaid
+flowchart TD
+  A[Current version] --> B{Release lane}
+  B -->|GA| C[Bump major/minor/patch]
+  B -->|Hot-fix| D[Increment build or bump base]
+  C --> E[BUILD = 0]
+  D --> F[BUILD > 0]
+  E --> G[Tag vX.Y.Z.0]
+  F --> H[Tag vX.Y.Z.B]
+```
+
+## 7. CI expectations
+
+CI must validate:
+
+* Python 3.10, 3.11, 3.12, 3.13
+* `ruff` checks
+* `pytest`
+* `mkdocs build --strict`
+* `python -m build` (sdist + wheel)
+
+CI is build-only; publishing is not performed by default.
+
+## 8. Release workflow
+
+Use this flow for routine releases on `main`:
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+pypnm-cmts-release --bump-ga --patch
+```
+
+Hot-fix releases use the hot-fix lane and bump the `BUILD` segment:
+
+```bash
+pypnm-cmts-release --bump-hot-fix
+```
+
+The release helper requires a clean working tree before running the verification runner.
+# FILE: tests/test_release_tool.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from pypnm_cmts.tools import release_tool
+
+
+def _write_version_files(root: Path, version: str) -> None:
+    version_path = root / "src" / "pypnm_cmts" / "version.py"
+    pyproject_path = root / "pyproject.toml"
+    version_path.parent.mkdir(parents=True, exist_ok=True)
+    version_path.write_text(
+        "from __future__ import annotations\n\n__all__ = [\"__version__\"]\n\n__version__: str = \""
+        + version
+        + "\"\n",
+        encoding="utf-8",
+    )
+    pyproject_path.write_text(
+        "[project]\nname = \"pypnm-docsis-cmts\"\nversion = \""
+        + version
+        + "\"\n",
+        encoding="utf-8",
+    )
+
+
+def test_release_tool_dry_run_skips_subprocess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_version_files(tmp_path, "0.1.2.3")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(release_tool, "VERSION_FILE_PATH", Path("src/pypnm_cmts/version.py"))
+    monkeypatch.setattr(release_tool, "PYPROJECT_PATH", Path("pyproject.toml"))
+
+    def _reject_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("subprocess.run should not be invoked during dry-run")
+
+    monkeypatch.setattr(subprocess, "run", _reject_run)
+
+    options = release_tool.ReleaseTool._build_parser().parse_args(["--bump-ga", "--dry-run"])
+    assert release_tool.ReleaseTool.run(options) == 0
+
+
+def test_release_tool_executes_release_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_version_files(tmp_path, "0.1.2.3")
+    runner_path = tmp_path / "tools" / "release" / "test-runner.py"
+    runner_path.parent.mkdir(parents=True, exist_ok=True)
+    runner_path.write_text("# stub", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(release_tool, "VERSION_FILE_PATH", Path("src/pypnm_cmts/version.py"))
+    monkeypatch.setattr(release_tool, "PYPROJECT_PATH", Path("pyproject.toml"))
+    monkeypatch.setattr(release_tool, "RELEASE_TEST_RUNNER", Path("tools/release/test-runner.py"))
+
+    calls: list[list[str]] = []
+
+    def _fake_run(
+        cmd: list[str],
+        check: bool = False,
+        text: bool | None = None,
+        capture_output: bool = False,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = check
+        _ = text
+        _ = capture_output
+        _ = cwd
+        _ = env
+        calls.append(cmd)
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="main\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    options = release_tool.ReleaseTool._build_parser().parse_args(["--bump-ga"])
+    assert release_tool.ReleaseTool.run(options) == 0
+
+    version_path = tmp_path / "src" / "pypnm_cmts" / "version.py"
+    assert "0.1.3.0" in version_path.read_text(encoding="utf-8")
+
+    joined = [" ".join(cmd) for cmd in calls]
+    assert any("tools/release/test-runner.py" in cmd for cmd in joined)
+    assert any(cmd.startswith("git add") for cmd in joined)
+    assert any(cmd.startswith("git commit") for cmd in joined)
+    assert any(cmd.startswith("git tag v0.1.3.0") for cmd in joined)
+    assert any(cmd.startswith("git push origin main") for cmd in joined)
+    assert any(cmd.startswith("git push origin v0.1.3.0") for cmd in joined)
