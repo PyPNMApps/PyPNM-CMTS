@@ -114,6 +114,20 @@ pypnm-cmts-release --bump-ga --patch --dry-run
 pypnm-cmts-release --bump-hot-fix --tag
 ```
 
+### pypnm-cmts-publish
+
+Publish PyPNM-CMTS distributions to PyPI.
+
+```bash
+pypnm-cmts-publish --repository pypi
+```
+
+Non-interactive:
+
+```bash
+pypnm-cmts-publish --repository pypi --yes
+```
+
 ### tools/release/test-runner.py
 
 Runs the release test sequence locally.
@@ -150,6 +164,18 @@ Checks version consistency across project files.
 
 ```bash
 python tools/release/check_version.py
+```
+
+### tools/release/publish-smoke.sh
+
+Runs a local build and twine check, with optional upload.
+
+```bash
+tools/release/publish-smoke.sh
+```
+
+```bash
+tools/release/publish-smoke.sh --upload
 ```
 
 ## PNM

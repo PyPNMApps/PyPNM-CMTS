@@ -47,10 +47,6 @@ jobs:
         run: |
           python -m pytest -q -ra --tb=short
 
-      - name: Build docs
-        run: |
-          python -m mkdocs build --strict
-
       - name: Build package
         run: |
           python -m build
@@ -58,6 +54,10 @@ jobs:
       - name: Twine check
         run: |
           python -m twine check dist/*
+
+      - name: Build docs
+        run: |
+          python -m mkdocs build --strict
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

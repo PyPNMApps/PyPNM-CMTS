@@ -1,0 +1,1017 @@
+# FILE: src/pypnm_cmts/tools/publish_tool.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from getpass import getpass
+from pathlib import Path
+
+
+DIST_DIR = Path("dist")
+PYPI_TOKEN_ENV = "PYPI_API_TOKEN"
+
+
+class PublishTool:
+    """Publish helper for PyPNM-CMTS package uploads."""
+
+    @staticmethod
+    def _build_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(description="Publish PyPNM-CMTS distributions to PyPI.")
+        parser.add_argument(
+            "--repository",
+            choices=["pypi", "testpypi"],
+            default="pypi",
+            help="Target repository name for twine.",
+        )
+        parser.add_argument("--skip-build", action="store_true", help="Skip building distributions.")
+        parser.add_argument("--skip-check", action="store_true", help="Skip twine check.")
+        parser.add_argument("--dry-run", action="store_true", help="Skip twine upload.")
+        parser.add_argument("--clean", action="store_true", help="Remove dist/ before building.")
+        return parser
+
+    @staticmethod
+    def _collect_artifacts() -> list[Path]:
+        artifacts = sorted(path for path in DIST_DIR.glob("*") if path.is_file())
+        if not artifacts:
+            raise RuntimeError(f"No artifacts found in {DIST_DIR}.")
+        return artifacts
+
+    @staticmethod
+    def _resolve_token() -> str:
+        token = os.environ.get(PYPI_TOKEN_ENV, "").strip()
+        if token != "":
+            return token
+        return getpass("PyPI token: ")
+
+    @staticmethod
+    def _run(cmd: list[str], env: dict[str, str] | None = None) -> None:
+        subprocess.run(cmd, check=True, cwd=Path.cwd(), env=env)
+
+    @classmethod
+    def run(cls, options: argparse.Namespace) -> int:
+        if options.clean and DIST_DIR.exists():
+            shutil.rmtree(DIST_DIR, ignore_errors=True)
+
+        if not options.skip_build:
+            cls._run([sys.executable, "-m", "build"])
+
+        artifacts = cls._collect_artifacts()
+
+        if not options.skip_check:
+            check_cmd = [sys.executable, "-m", "twine", "check"]
+            check_cmd.extend([str(path) for path in artifacts])
+            cls._run(check_cmd)
+
+        if options.dry_run:
+            print("Dry-run enabled; skipping twine upload.")
+            return 0
+
+        token = cls._resolve_token().strip()
+        if token == "":
+            raise RuntimeError("PyPI token is required for upload.")
+
+        env = dict(os.environ)
+        env["TWINE_USERNAME"] = "__token__"
+        env["TWINE_PASSWORD"] = token
+
+        upload_cmd = [sys.executable, "-m", "twine", "upload", "--repository", options.repository]
+        upload_cmd.extend([str(path) for path in artifacts])
+        cls._run(upload_cmd, env=env)
+        return 0
+
+
+def main() -> int:
+    parser = PublishTool._build_parser()
+    options = parser.parse_args()
+    try:
+        return PublishTool.run(options)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+# FILE: tests/test_publish_tool.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from pypnm_cmts.tools.publish_tool import PublishTool
+
+
+class _RunCapture:
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+        self.envs: list[dict[str, str] | None] = []
+
+    def __call__(
+        self,
+        cmd: list[str],
+        check: bool = False,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = check
+        _ = cwd
+        self.commands.append(cmd)
+        self.envs.append(env)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+
+def _make_artifact(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "pypnm_docsis_cmts-0.1.0.0.tar.gz").write_text("stub", encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_publish_tool_uses_env_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _make_artifact(tmp_path)
+    monkeypatch.setenv("PYPI_API_TOKEN", "token-value")
+
+    capture = _RunCapture()
+    monkeypatch.setattr(subprocess, "run", capture)
+
+    parser = PublishTool._build_parser()
+    options = parser.parse_args(["--skip-build", "--skip-check"])
+    assert PublishTool.run(options) == 0
+
+    assert any("twine" in cmd for cmd in capture.commands)
+    assert capture.envs
+    upload_env = capture.envs[-1]
+    assert upload_env is not None
+    assert upload_env.get("TWINE_USERNAME") == "__token__"
+    assert upload_env.get("TWINE_PASSWORD") == "token-value"
+
+
+@pytest.mark.unit
+def test_publish_tool_dry_run_skips_upload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _make_artifact(tmp_path)
+
+    capture = _RunCapture()
+    monkeypatch.setattr(subprocess, "run", capture)
+
+    parser = PublishTool._build_parser()
+    options = parser.parse_args(["--skip-build", "--skip-check", "--dry-run"])
+    assert PublishTool.run(options) == 0
+
+    assert all("upload" not in cmd for cmd in capture.commands)
+
+
+@pytest.mark.unit
+def test_publish_tool_prompts_for_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _make_artifact(tmp_path)
+    monkeypatch.delenv("PYPI_API_TOKEN", raising=False)
+
+    capture = _RunCapture()
+    monkeypatch.setattr(subprocess, "run", capture)
+    monkeypatch.setattr("pypnm_cmts.tools.publish_tool.getpass", lambda _prompt: "prompt-token")
+
+    parser = PublishTool._build_parser()
+    options = parser.parse_args(["--skip-build", "--skip-check"])
+    assert PublishTool.run(options) == 0
+
+    assert capture.envs
+    upload_env = capture.envs[-1]
+    assert upload_env is not None
+    assert upload_env.get("TWINE_PASSWORD") == "prompt-token"
+
+
+@pytest.mark.unit
+def test_publish_tool_build_and_check_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _make_artifact(tmp_path)
+
+    capture = _RunCapture()
+    monkeypatch.setattr(subprocess, "run", capture)
+
+    parser = PublishTool._build_parser()
+    options = parser.parse_args(["--dry-run"])
+    assert PublishTool.run(options) == 0
+
+    joined = [" ".join(cmd) for cmd in capture.commands]
+    assert any("-m build" in cmd for cmd in joined)
+    assert any("-m twine check" in cmd for cmd in joined)
+    assert all("-m twine upload" not in cmd for cmd in joined)
+
+# FILE: pyproject.toml
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "pypnm-docsis-cmts"
+version = "0.1.44.0"
+description     = "DOCSIS CMTS tools built on the PyPNM toolkit"
+readme          = "README.md"
+requires-python = ">=3.10"
+license         = "Apache-2.0"
+
+authors = [
+  { name = "Maurice Garcia", email = "mgarcia01752@outlook.com" }
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: System :: Networking",
+  "Typing :: Typed",
+]
+
+license-files = ["LICENSE", "NOTICE"]
+
+dependencies = [
+  "pypnm-docsis>=1.0.13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6.9",
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.5",
+  "httpx>=0.27.0,<0.28.0",
+  "build>=1.2.0",
+  "twine>=5.0.0",
+]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.5",
+  "httpx>=0.27.0,<0.28.0",
+  "build>=1.2.0",
+  "twine>=5.0.0",
+]
+docs = [
+  "mkdocs>=1.5.0",
+  "mkdocs-material>=9.0.0",
+  "mkdocs-mermaid2-plugin>=1.1.1",
+  "pymdown-extensions>=10.0.0",
+]
+
+[project.urls]
+Homepage    = "https://www.pypnm.io"
+Repository  = "https://github.com/PyPNMApps/PyPNM-CMTS"
+Bug-Tracker = "https://github.com/PyPNMApps/PyPNM-CMTS/issues"
+
+[project.scripts]
+pypnm-cmts = "pypnm_cmts.cli:main"
+pypnm-cmts-release = "pypnm_cmts.tools.release_tool:main"
+pypnm-cmts-publish = "pypnm_cmts.tools.publish_tool:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.package-data]
+pypnm_cmts = ["settings/*.json"]
+"pypnm_cmts.settings" = ["*.json"]
+
+[tool.setuptools.packages.find]
+where   = ["src"]
+include = ["pypnm_cmts*"]
+
+[tool.pytest.ini_options]
+minversion   = "8.0"
+pythonpath   = ["src"]
+testpaths    = ["tests"]
+addopts      = "-ra -q --strict-markers --tb=short"
+asyncio_mode = "auto"
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(levelname)s %(name)s:%(lineno)d | %(message)s"
+log_cli_date_format = "%H:%M:%S"
+markers = [
+  "asyncio: mark test as asyncio-based (requires pytest-asyncio)",
+  "cm_it: cable modem integration tests (enable with -m cm_it)",
+  "integration: live CMTS integration tests (enable with -m integration)",
+  "live: live CMTS tests (enable with --run-live or PYPNM_CMTS_RUN_LIVE=1)",
+  "live_cmts: live CMTS tests (enable with --run-live or PYPNM_CMTS_RUN_LIVE=1)",
+  "slow: slow tests",
+  "net: network-required tests",
+  "pnm: PNM file parsing tests",
+  "unit: unit tests (fast, hermetic)",
+]
+filterwarnings = [
+  "ignore:getReadersFromUrls is deprecated:DeprecationWarning:pysnmp",
+  "ignore:smiV1Relaxed is deprecated:DeprecationWarning:pysnmp",
+  "ignore:.*getReadersFromUrls.*:DeprecationWarning:pysmi.reader.url",
+  "ignore:.*addSources.*:DeprecationWarning:pysnmp.smi.compiler",
+  "ignore:.*addSearchers.*:DeprecationWarning:pysnmp.smi.compiler",
+  "ignore:.*addBorrowers.*:DeprecationWarning:pysnmp.smi.compiler",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+src            = ["src"]
+target-version = "py310"
+exclude        = ["tools"]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "UP", "ANN", "SIM", "PERF"]
+ignore = [
+  "E501",
+  "B006"
+]
+
+[tool.pyright]
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
+
+include = ["src"]
+exclude = [
+  "tools",
+  "**/__pycache__",
+]
+
+# VSCode + .env venv
+venvPath = "."
+venv = ".env"
+
+# FILE: .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install ".[dev,docs]"
+          python -m pip install build twine
+
+      - name: Smoke - CLI help
+        run: |
+          python -m pypnm_cmts.cli --help || pypnm-cmts --help
+
+      - name: Ruff
+        run: |
+          python -m ruff check .
+
+      - name: Run tests
+        run: |
+          python -m pytest -q -ra --tb=short
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Twine check
+        run: |
+          python -m twine check dist/*
+
+      - name: Build docs
+        run: |
+          python -m mkdocs build --strict
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.python-version }}
+          path: dist/*
+
+# FILE: .github/workflows/publish.yml
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Target repository (pypi or testpypi)"
+        required: true
+        default: "pypi"
+        type: choice
+        options:
+          - pypi
+          - testpypi
+      use_token:
+        description: "Use PYPI_API_TOKEN secret (token-based)"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    tags:
+      - "v*.*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+      repository: ${{ steps.repo.outputs.repository }}
+      repository_url: ${{ steps.repo.outputs.repository_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Gate publish
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "${{ github.ref }}" | grep -Eq '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+\.0$'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve repository
+        id: repo
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            repo="${{ github.event.inputs.repository }}"
+          else
+            repo="pypi"
+          fi
+          if [ "$repo" = "testpypi" ]; then
+            url="https://test.pypi.org/legacy/"
+          else
+            url="https://upload.pypi.org/legacy/"
+          fi
+          echo "repository=$repo" >> "$GITHUB_OUTPUT"
+          echo "repository_url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build tools
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install build twine
+
+      - name: Verify tag matches version
+        if: github.event_name != 'workflow_dispatch' && steps.gate.outputs.publish == 'true'
+        run: |
+          tag_version="${GITHUB_REF#refs/tags/v}"
+          file_version=$(python - <<'PY'
+import re
+from pathlib import Path
+
+text = Path("pyproject.toml").read_text(encoding="utf-8")
+match = re.search(r'^\\s*version\\s*=\\s*\"([^\"]+)\"\\s*$', text, re.MULTILINE)
+if not match:
+    raise SystemExit(1)
+print(match.group(1))
+PY
+          )
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "Tag version $tag_version does not match pyproject.toml $file_version" >&2
+            exit 1
+          fi
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Twine check
+        run: |
+          python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ needs.build.outputs.repository }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish with token
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.use_token == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          repository-url: ${{ needs.build.outputs.repository_url }}
+
+      - name: Publish with trusted publishing
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.use_token != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ needs.build.outputs.repository_url }}
+
+# FILE: docs/release/index.md
+# PyPNM-CMTS Release Guide
+
+## Table of contents
+
+[1. Branch model](#1-branch-model)
+
+[2. Version source of truth](#2-version-source-of-truth)
+
+[3. Versioning scheme](#3-versioning-scheme)
+
+[4. Release helper overview](#4-release-helper-overview)
+
+[5. Release commands](#5-release-commands)
+
+[6. Release lanes](#6-release-lanes)
+
+[7. CI expectations](#7-ci-expectations)
+
+[8. Release workflow](#8-release-workflow)
+
+[9. Publishing](#9-publishing)
+
+This guide follows the PyPNM release strategy and uses the same four-part versioning scheme.
+The release entry point is `pypnm-cmts-release`.
+
+## 1. Branch model
+
+PyPNM-CMTS currently follows a single-branch release model:
+
+* `main` is the release branch.
+* Feature branches are optional and short-lived.
+
+## 2. Version source of truth
+
+The canonical version lives in:
+
+```text
+src/pypnm_cmts/version.py
+```
+
+The `pyproject.toml` version mirrors it and must match at all times.
+
+Example:
+
+```python
+from __future__ import annotations
+
+__all__ = ["__version__"]
+
+# MAJOR.MINOR.PATCH.BUILD
+__version__: str = "0.1.0.0"
+```
+
+## 3. Versioning scheme
+
+PyPNM-CMTS uses a four-part version:
+
+```text
+MAJOR.MINOR.PATCH.BUILD
+```
+
+Guidelines:
+
+* `MAJOR` for breaking changes.
+* `MINOR` for backward-compatible features.
+* `PATCH` for compatible bug fixes.
+* `BUILD` for hot-fix releases or rebuilds.
+
+Release lanes:
+
+* GA tag format: `vMAJOR.MINOR.PATCH.0`
+* Hot-fix tag format: `vMAJOR.MINOR.PATCH.BUILD` where `BUILD != 0`
+
+## 4. Release helper overview
+
+The release helper:
+
+* Reads `src/pypnm_cmts/version.py`.
+* Confirms it matches `pyproject.toml`.
+* Computes a target version based on GA or hot-fix rules.
+* Runs the local CI parity runner (`tools/release/test-runner.py`).
+* Cleans build artifacts produced by the verification runner.
+* Updates versions, commits, tags, and pushes on success.
+* Supports dry-run output without modifying files or running tests.
+
+## 5. Release commands
+
+### 5.1 GA release (build = 0)
+
+```bash
+pypnm-cmts-release --bump-ga --patch
+```
+
+### 5.2 Hot-fix release (build > 0)
+
+```bash
+pypnm-cmts-release --bump-hot-fix
+```
+
+### 5.3 GA with explicit bump lane
+
+```bash
+pypnm-cmts-release --bump-ga --minor
+```
+
+### 5.4 Hot-fix with explicit bump lane
+
+```bash
+pypnm-cmts-release --bump-hot-fix --patch
+```
+
+### 5.5 Dry run (`--dry-run`)
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+```
+
+## 6. Release lanes
+
+```mermaid
+flowchart TD
+  A[Current version] --> B{Release lane}
+  B -->|GA| C[Bump major/minor/patch]
+  B -->|Hot-fix| D[Increment build or bump base]
+  C --> E[BUILD = 0]
+  D --> F[BUILD > 0]
+  E --> G[Tag vX.Y.Z.0]
+  F --> H[Tag vX.Y.Z.B]
+```
+
+## 7. CI expectations
+
+CI must validate:
+
+* Python 3.10, 3.11, 3.12, 3.13
+* `ruff` checks
+* `pytest`
+* `mkdocs build --strict`
+* `python -m build` (sdist + wheel)
+
+CI is build-only; publishing is not performed by default.
+The CI workflow lives in `.github/workflows/ci.yml` and enforces these steps.
+
+## 8. Release workflow
+
+Use this flow for routine releases on `main`:
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+pypnm-cmts-release --bump-ga --patch
+```
+
+Hot-fix releases use the hot-fix lane and bump the `BUILD` segment:
+
+```bash
+pypnm-cmts-release --bump-hot-fix
+```
+
+The release helper requires a clean working tree before running the verification runner.
+
+## 9. Publishing
+
+PyPNM-CMTS supports two publishing paths:
+
+* Manual token-based uploads with `pypnm-cmts-publish`.
+* GitHub Actions publishing using trusted publishing (OIDC).
+
+### 9.1 Manual publish (token)
+
+Set `PYPI_API_TOKEN` or provide it interactively when prompted:
+
+```bash
+pypnm-cmts-publish --repository pypi
+```
+
+TestPyPI:
+
+```bash
+pypnm-cmts-publish --repository testpypi
+```
+
+Flags:
+
+* `--clean` removes `dist/` before build
+* `--skip-build` reuses existing artifacts
+* `--skip-check` skips `twine check`
+* `--dry-run` runs build/check without upload
+
+### 9.2 GitHub Actions trusted publishing
+
+Configure a PyPI trusted publisher with:
+
+* Repository: `PyPNMApps/PyPNM-CMTS`
+* Workflow file: `publish.yml`
+* Environment: `pypi` (and optionally `testpypi`)
+
+The publish workflow supports:
+
+* `workflow_dispatch` with `repository` and `use_token` inputs
+* Tag-triggered GA publishes for tags matching `v*.*.*.0`
+
+If you see `invalid-publisher`, verify the repository, workflow filename, and environment name match the trusted publisher configuration.
+
+```mermaid
+flowchart TD
+  A[Release tag vX.Y.Z.0] --> B[GitHub Actions publish.yml]
+  B --> C{Use token?}
+  C -- Yes --> D[twine upload with PYPI_API_TOKEN]
+  C -- No --> E[OIDC trusted publishing]
+  D --> F[PyPI]
+  E --> F
+```
+
+# FILE: docs/tools/index.md
+# Tools
+
+Operational tools and helpers for PyPNM-CMTS.
+
+## Maintenance
+
+### tools/maintenance/clean.sh
+
+Cleanup utility for logs, caches, build artifacts, and runtime data directories.
+
+```bash
+tools/maintenance/clean.sh --all
+```
+
+```bash
+tools/maintenance/clean.sh --logs --python
+```
+
+Key options:
+- `--all` full cleanup
+- `--logs` truncate `logs/*.log`
+- `--python` remove `__pycache__`, `.pytest_cache`, `.ruff_cache`, etc.
+- `--build` remove `build/`, `dist/`, `*.egg-info`
+- `--pnm`, `--archive`, `--excel`, `--json`, `--plot-data`, `--msg-rsp` clean specific `.data` paths
+- `--issues`, `--remove-issues` clean or remove `issues/`
+- `--settings-backup` remove `src/pypnm_cmts/settings/system.bak.*.json`
+
+### tools/maintenance/add-required-python-headers.py
+
+Ensures SPDX header, copyright line, and optional `from __future__ import annotations`.
+
+```bash
+tools/maintenance/add-required-python-headers.py .
+```
+
+```bash
+tools/maintenance/add-required-python-headers.py . --future auto --author "Maurice Garcia" --year 2026
+```
+
+Options:
+- `--exclude` comma-separated directory list
+- `--future` `auto|yes|no`
+- `--author`, `--year`
+- `--verbose`
+
+## Security
+
+### tools/security/scan-mac-addresses.py
+
+Scans the repo for non-approved MAC addresses. Respects `.gitignore` directories by default.
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
+```
+
+Options:
+- `--root <path>` root directory (default current)
+- `--fail-on-found` exit with status 2 if any non-approved MACs are found
+- `--skip-gitignore` ignore `.gitignore` directory entries when scanning
+
+### tools/security/scan-secrets.sh
+
+Runs gitleaks (if installed) or a heuristic scan for secret-like strings.
+
+```bash
+tools/security/scan-secrets.sh
+```
+
+```bash
+tools/security/scan-secrets.sh --all-history
+```
+
+Options:
+- `--all-history` scan full git history (gitleaks only)
+- `--path <dir>` override repo root
+
+## Local
+
+### tools/local/local_container_build.sh
+
+Builds the local container and optionally runs a short docker-compose smoke test.
+
+```bash
+tools/local/local_container_build.sh
+```
+
+```bash
+tools/local/local_container_build.sh --smoke
+```
+
+### tools/local/local_kubernetes_smoke.sh
+
+Builds a local image and runs a Kubernetes smoke test against a local kind cluster.
+
+```bash
+tools/local/local_kubernetes_smoke.sh
+```
+
+## Release
+
+### pypnm-cmts-release
+
+Release helper for GA and hot-fix version bumps.
+
+```bash
+pypnm-cmts-release --bump-ga --patch --dry-run
+```
+
+```bash
+pypnm-cmts-release --bump-hot-fix --tag
+```
+
+### pypnm-cmts-publish
+
+Publish PyPNM-CMTS distributions to PyPI or TestPyPI.
+
+```bash
+pypnm-cmts-publish --repository pypi
+```
+
+```bash
+pypnm-cmts-publish --repository testpypi --dry-run
+```
+
+### tools/release/test-runner.py
+
+Runs the release test sequence locally.
+
+```bash
+python tools/release/test-runner.py
+```
+
+Fast local verification (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --skip-docs
+```
+
+Local lint autofix (not full CI parity):
+
+```bash
+python tools/release/test-runner.py --ruff-fix --skip-tests --skip-docs --skip-build --skip-twine
+```
+
+```mermaid
+flowchart TD
+    A[Edit code or docs] --> B[Run tools/release/test-runner.py]
+    B --> C{Checks pass}
+    C -- Yes --> D[Run pypnm-cmts-release]
+    D --> E[Commit and tag]
+    E --> F[Push to CI]
+    C -- No --> A
+```
+
+### tools/release/check_version.py
+
+Checks version consistency across project files.
+
+```bash
+python tools/release/check_version.py
+```
+
+## PNM
+
+### tools/pnm/print_pypnm_cmts_system_json.py
+
+Prints the PyPNM-CMTS system.json template.
+
+```bash
+python tools/pnm/print_pypnm_cmts_system_json.py
+```
+
+### tools/pnm/print_pypnm_docsis_system_json.py
+
+Prints the PyPNM (pypnm-docsis) system.json template.
+
+```bash
+python tools/pnm/print_pypnm_docsis_system_json.py
+```
+
+## Support
+
+### tools/support/bump_version.py
+
+Updates version identifiers to a new release.
+
+```bash
+python tools/support/bump_version.py --version 0.2.0.0
+```
+
+## System Test
+
+### tools/system-test/p4-coordination-harness.sh
+
+Runs the Phase 4 coordination harness to validate controller/worker behavior.
+
+```bash
+tools/system-test/p4-coordination-harness.sh start --cmts-hostname 192.168.0.100 --read-community public --write-community public --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh verify --state-dir ./.state/p4-demo --election-name p4-demo
+```
+
+```bash
+tools/system-test/p4-coordination-harness.sh stop --state-dir ./.state/p4-demo
+```
+
+### tools/system-test/ops-smoke.sh
+
+Checks that the FastAPI service is reachable by calling /ops/health.
+
+```bash
+tools/system-test/ops-smoke.sh --base-url http://127.0.0.1:8000
+```
+
+## Assets
+
+### tools/banner.txt
+
+ASCII banner used by local tooling (e.g., container build scripts).
+
+# FILE: src/pypnm_cmts/version.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025-2026 Maurice Garcia
+
+from __future__ import annotations
+
+__all__ = ["__version__"]
+
+# MAJOR.MINOR.MAINTENANCE.BUILD
+__version__: str = "0.1.44.0"

@@ -18,6 +18,8 @@
 
 [8. Release workflow](#8-release-workflow)
 
+[9. Publishing](#9-publishing)
+
 This guide follows the PyPNM release strategy and uses the same four-part versioning scheme.
 The release entry point is `pypnm-cmts-release`.
 
@@ -137,6 +139,7 @@ CI must validate:
 * `python -m build` (sdist + wheel)
 
 CI is build-only; publishing is not performed by default.
+The CI workflow lives in `.github/workflows/ci.yml` and enforces these steps.
 
 ## 8. Release workflow
 
@@ -154,3 +157,68 @@ pypnm-cmts-release --bump-hot-fix
 ```
 
 The release helper requires a clean working tree before running the verification runner.
+
+## 9. Publishing
+
+PyPNM-CMTS supports two publishing paths to PyPI only:
+
+* Manual token-based uploads with `pypnm-cmts-publish`.
+* GitHub Actions publishing using trusted publishing (OIDC).
+
+### 9.1 Manual publish (token)
+
+Set `PYPI_API_TOKEN` or provide it interactively when prompted:
+
+```bash
+pypnm-cmts-publish --repository pypi
+```
+
+Flags:
+
+* `--clean` removes `dist/` before build
+* `--skip-build` reuses existing artifacts
+* `--skip-check` skips `twine check`
+* `--dry-run` runs build/check without upload
+* `--yes` skips the confirmation prompt
+* `--force` uploads even if the version exists on PyPI
+* `--skip-existing` (default) skips upload if the version already exists on PyPI
+
+### 9.2 GitHub Actions trusted publishing
+
+Configure a PyPI trusted publisher with:
+
+* Repository: `PyPNMApps/PyPNM-CMTS`
+* Workflow file: `publish.yml`
+* Environment: `pypi`
+
+The publish workflow supports:
+
+* `workflow_dispatch` with `use_token` and `force_publish` inputs
+* Tag-triggered GA publishes for tags matching `v*.*.*.0`
+* Skips publishing if the version already exists on PyPI (unless `force_publish` is true)
+
+If you see `invalid-publisher`, verify the repository, workflow filename, and environment name match the trusted publisher configuration.
+
+```mermaid
+flowchart TD
+  A[Release tag vX.Y.Z.0] --> B[GitHub Actions publish.yml]
+  B --> C{Use token?}
+  C -- Yes --> D[twine upload with PYPI_API_TOKEN]
+  C -- No --> E[OIDC trusted publishing]
+  D --> F[PyPI]
+  E --> F
+```
+
+### 9.3 PyPI setup checklist
+
+* Create the PyPI project `pypnm-docsis-cmts`.
+* Create a PyPI API token for manual publishing and optional token-based workflow dispatch.
+* Configure a trusted publisher:
+  * Repository: `PyPNMApps/PyPNM-CMTS`
+  * Workflow file: `publish.yml`
+  * Environment: `pypi`
+* Create GitHub Environment `pypi` (optional approval gates).
+
+### 9.4 Publish skipping behavior
+
+The publish workflow checks PyPI before uploading. If the release version already exists, publishing is skipped unless `force_publish` is set to true on `workflow_dispatch`.
