@@ -82,6 +82,9 @@ Development mode:
 ./install.sh --development
 ```
 
+Development mode attempts to install gitleaks via the system package manager and
+falls back to a GitHub release download when the package is unavailable.
+
 Update to the latest GA or hot-fix tag (or pass a tag explicitly):
 
 ```bash

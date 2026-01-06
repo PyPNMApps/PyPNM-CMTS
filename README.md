@@ -78,6 +78,9 @@ Optional: development install with extra tooling:
   ./install.sh --development
   ```
 
+The development install attempts to install gitleaks using the system package manager,
+and falls back to a GitHub release download if the package is unavailable.
+
 Optional: update from the latest GA or hot-fix tag:
 
   ```bash
