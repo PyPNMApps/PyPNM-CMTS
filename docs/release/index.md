@@ -30,6 +30,9 @@ PyPNM-CMTS currently follows a single-branch release model:
 * `main` is the release branch.
 * Feature branches are optional and short-lived.
 
+The release helper enforces that the working tree is checked out on `main` or `hot-fix`
+before it will proceed.
+
 ## 2. Version source of truth
 
 The canonical version lives in:

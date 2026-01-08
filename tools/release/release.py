@@ -51,6 +51,7 @@ REPORT_HEADERS: Final[list[str]]         = ["Section", "Files Changed"]
 INSTALL_PREFIXES: Final[list[str]]       = ["install.sh", "scripts/install", "deploy/"]
 DOCKER_PREFIXES: Final[list[str]]        = ["docker/", "docker-compose", "docs/docker/"]
 K8S_PREFIX: Final[str]                   = "docs/kubernetes/"
+ALLOWED_RELEASE_BRANCHES: Final[set[str]] = {"main", "hot-fix"}
 
 
 SUMMARY: dict[str, str] = {}
@@ -123,6 +124,22 @@ def _run(
                 stderr=proc.stderr,
             )
     return proc
+
+
+def _get_current_branch() -> str:
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], label="git-current-branch")
+    return (result.stdout or "").strip()
+
+
+def _ensure_release_branch() -> None:
+    branch = _get_current_branch()
+    if branch not in ALLOWED_RELEASE_BRANCHES:
+        allowed = "', '".join(sorted(ALLOWED_RELEASE_BRANCHES))
+        print(
+            f"ERROR: release must run on '{allowed}' (current: '{branch}'). Switch branches and retry.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # Simple status printer with color for TTY output
@@ -719,6 +736,8 @@ def main() -> None:
     skip_k8s: bool               = True
     dry_run: bool                = args.dry_run
     test_release: bool           = args.test_release
+
+    _ensure_release_branch()
 
     current_version   = _read_current_version()
     pyproject_version = _read_pyproject_version()
