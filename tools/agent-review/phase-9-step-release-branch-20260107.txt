@@ -14,7 +14,8 @@
 
 # PyPNM-CMTS - CMTS Operations Toolkit for PyPNM (Under Development)
 
-[![PyPI version](https://badge.fury.io/py/pypnm-docsis-cmts.svg)](https://badge.fury.io/py/pypnm-docsis-cmts)
+[![PyPI version](https://img.shields.io/pypi/v/pypnm-docsis-cmts)](https://pypi.org/project/pypnm-docsis-cmts/)
+[![CI](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml/badge.svg)](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 
@@ -4515,11 +4516,24 @@ if __name__ == "__main__":
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from tools.release import release as release_script
+
+def _load_release_script() -> object:
+    script_path = Path(__file__).resolve().parents[1] / "tools" / "release" / "release.py"
+    spec = importlib.util.spec_from_file_location("release_script", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load release script from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+release_script = _load_release_script()
 
 
 def test_release_branch_check_allows_main(monkeypatch: pytest.MonkeyPatch) -> None:

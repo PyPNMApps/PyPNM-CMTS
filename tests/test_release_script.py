@@ -3,11 +3,24 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from tools.release import release as release_script
+
+def _load_release_script() -> object:
+    script_path = Path(__file__).resolve().parents[1] / "tools" / "release" / "release.py"
+    spec = importlib.util.spec_from_file_location("release_script", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load release script from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+release_script = _load_release_script()
 
 
 def test_release_branch_check_allows_main(monkeypatch: pytest.MonkeyPatch) -> None:
