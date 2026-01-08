@@ -1,6 +1,6 @@
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,15 +20,22 @@ from pypnm_cmts.api.routes.operational.schemas import (
     OperationalProcessInfoModel,
     OperationalStatusResponseModel,
     ReadyResponseModel,
+    SgwPollIntervalResponseModel,
+    SgwProcessResponseModel,
+    SgwResetRequestModel,
+    SgwResetResponseModel,
+    SgwRestartRequestModel,
+    SgwRestartResponseModel,
     VersionResponseModel,
 )
 from pypnm_cmts.combined_mode import combined_mode_enabled
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
-from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.lib.constants import CacheRefreshMode, OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import CoordinationElectionName, ServiceGroupId
 from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
 from pypnm_cmts.sgw.runtime_state import (
     compute_sgw_cache_ready,
+    get_sgw_manager,
     get_sgw_startup_status,
     get_sgw_store,
 )
@@ -246,6 +254,155 @@ class OperationalService:
             meta=meta,
         )
 
+    def sgw_process(self) -> SgwProcessResponseModel:
+        """
+        Build an SGW worker process debug response.
+
+        Returns:
+            SgwProcessResponseModel: Worker identifiers with uptime details, or an error response.
+        """
+        meta = self.build_identity()
+        manager = get_sgw_manager()
+        if manager is None:
+            return SgwProcessResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                workers=[],
+                message="sgw runtime manager is not initialized",
+            )
+        now_epoch = self._now_epoch()
+        return SgwProcessResponseModel(
+            status=OperationalStatus.OK,
+            timestamp=self._utc_now(),
+            meta=meta,
+            workers=manager.get_worker_process_snapshot(now_epoch),
+            message="",
+        )
+
+    def sgw_poll_intervals(self) -> SgwPollIntervalResponseModel:
+        """
+        Build an SGW poll interval debug response.
+
+        Returns:
+            SgwPollIntervalResponseModel: Poll interval and refresh counts, or an error response.
+        """
+        meta = self.build_identity()
+        manager = get_sgw_manager()
+        if manager is None:
+            return SgwPollIntervalResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                workers=[],
+                message="sgw runtime manager is not initialized",
+            )
+        return SgwPollIntervalResponseModel(
+            status=OperationalStatus.OK,
+            timestamp=self._utc_now(),
+            meta=meta,
+            workers=manager.get_worker_poll_interval_snapshot(),
+            message="",
+        )
+
+    def sgw_restart(self, payload: SgwRestartRequestModel) -> SgwRestartResponseModel:
+        """
+        Queue a heavy refresh for a serving group worker.
+
+        Args:
+            payload (SgwRestartRequestModel): Worker identifier payload.
+
+        Returns:
+            SgwRestartResponseModel: Result of the refresh request.
+        """
+        meta = self.build_identity()
+        manager = get_sgw_manager()
+        if manager is None:
+            return SgwRestartResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=None,
+                message="sgw runtime manager is not initialized",
+            )
+        try:
+            sg_id = self._parse_worker_id(payload.worker_id)
+        except ValueError as exc:
+            return SgwRestartResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=None,
+                message=str(exc),
+            )
+        accepted, message = manager.request_refresh(
+            sg_id=sg_id,
+            mode=CacheRefreshMode.HEAVY,
+            now_epoch=self._now_epoch(),
+        )
+        if accepted:
+            return SgwRestartResponseModel(
+                status=OperationalStatus.OK,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=sg_id,
+                message=f"queued heavy refresh for sgw-{int(sg_id)}",
+            )
+        return SgwRestartResponseModel(
+            status=OperationalStatus.ERROR,
+            timestamp=self._utc_now(),
+            meta=meta,
+            sg_id=sg_id,
+            message=message,
+        )
+
+    def sgw_reset(self, payload: SgwResetRequestModel) -> SgwResetResponseModel:
+        """
+        Reset refresh counters for a serving group worker.
+
+        Args:
+            payload (SgwResetRequestModel): Worker identifier payload.
+
+        Returns:
+            SgwResetResponseModel: Result of the reset request.
+        """
+        meta = self.build_identity()
+        manager = get_sgw_manager()
+        if manager is None:
+            return SgwResetResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=None,
+                message="sgw runtime manager is not initialized",
+            )
+        try:
+            sg_id = self._parse_worker_id(payload.worker_id)
+        except ValueError as exc:
+            return SgwResetResponseModel(
+                status=OperationalStatus.ERROR,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=None,
+                message=str(exc),
+            )
+        success, message = manager.reset_refresh_counts(sg_id)
+        if success:
+            return SgwResetResponseModel(
+                status=OperationalStatus.OK,
+                timestamp=self._utc_now(),
+                meta=meta,
+                sg_id=sg_id,
+                message=f"reset refresh counts for sgw-{int(sg_id)}",
+            )
+        return SgwResetResponseModel(
+            status=OperationalStatus.ERROR,
+            timestamp=self._utc_now(),
+            meta=meta,
+            sg_id=sg_id,
+            message=message,
+        )
+
     def status(self) -> OperationalStatusResponseModel:
         """
         Build the operational status response.
@@ -353,6 +510,17 @@ class OperationalService:
 
     def _utc_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _now_epoch(self) -> float:
+        return float(time.time())
+
+    def _parse_worker_id(self, worker_id: str) -> ServiceGroupId:
+        trimmed = str(worker_id).strip()
+        if trimmed.startswith("sgw-"):
+            trimmed = trimmed[4:]
+        if trimmed == "":
+            raise ValueError("worker_id is required")
+        return ServiceGroupId(int(trimmed))
 
     def _collect_pidfile_status(
         self, state_dir: Path

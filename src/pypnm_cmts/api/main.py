@@ -51,11 +51,11 @@ validate configuration state, and drive PNM workflows across fleets.
 - Telemetry orchestration for DOCSIS PNM capture workflows
 - CMTS-focused reporting and operational checks
 
-| Package | Version |
-|---------|---------|
-| [PyPNM](https://github.com/PyPNMApps/PyPNM)           | {pypnm_version}   |
-| [PyPNM-CMTS](https://github.com/PyPNMApps/PyPNM-CMTS) | {version}         |
-| [PyPNM-PMA](https://github.com/PyPNMApps/PyPNM-PMA)   | Not-Installed     |
+| HomePage | PyPi Package | Version |
+|----------|--------------|---------|
+| [PyPNM](https://github.com/PyPNMApps/PyPNM)           | [pypnm-docsis](https://pypi.org/project/pypnm-docsis)             | {pypnm_version}   |
+| [PyPNM-CMTS](https://github.com/PyPNMApps/PyPNM-CMTS) | [pypnm-docsis-cmts](https://pypi.org/project/pypnm-docsis-cmts)   | {version}         |
+| [PyPNM-PMA](https://github.com/PyPNMApps/PyPNM-PMA)   | [pypnm-docsis-pma](https://pypi.org/project/pypnm-docsis-pma)     | Not-Installed     |
 
 """
 
@@ -69,6 +69,7 @@ def _pytest_running() -> bool:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> object:
+
     global _combined_runner
     if _combined_runner is None and combined_mode_enabled():
         _combined_runner = CombinedModeRunner()
@@ -88,7 +89,6 @@ async def _lifespan(_app: FastAPI) -> object:
         if _combined_runner is not None:
             _combined_runner.stop()
 
-
 app = FastAPI(
     title="PyPNM-CMTS REST API",
     version=__version__,
@@ -99,10 +99,10 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-app.include_router(pypnm_app.router, prefix="/pypnm")
+app.include_router(pypnm_app.router, prefix="/cm")
 
 
-@app.get("/health", tags=["health"])
+@app.get("/health", tags=["Health"])
 def health() -> dict[str, str]:
     """Lightweight health endpoint for probes."""
     return {"status": "ok", "version": __version__}

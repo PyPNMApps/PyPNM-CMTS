@@ -1,0 +1,2451 @@
+# FILE: src/pypnm_cmts/cli.py
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025-2026 Maurice Garcia
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import uvicorn
+from pydantic import ValidationError
+from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+
+from pypnm_cmts.config.request_defaults import (
+    ENV_CM_SNMPV2C_WRITE_COMMUNITY,
+    ENV_CM_TFTP_IPV4,
+    ENV_CM_TFTP_IPV6,
+)
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import (
+    CoordinationElectionName,
+    OwnerId,
+    ServiceGroupId,
+)
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.version import __version__
+
+if TYPE_CHECKING:
+    from pypnm_cmts.cmts.discovery_models import InventoryDiscoveryResultModel
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+    from pypnm_cmts.orchestrator.models import OrchestratorRunResultModel
+
+SUCCESS_EXIT_CODE = 0
+EXIT_CODE_USAGE = 2
+EXIT_CODE_FAILURE = 1
+HOST_DEFAULT = "127.0.0.1"
+PORT_DEFAULT = 8000
+LOG_LEVEL_DEFAULT = "info"
+DEFAULT_WORKERS = 1
+TIMEOUT_KEEP_ALIVE_SECONDS = 120
+DEFAULT_SNMP_PORT = 161
+_DEPRECATED_CMTS_PORT_FLAG = "--cmts-port"
+_SNMP_PORT_FLAG = "--snmp-port"
+_cmts_port_warned = False
+
+
+def main() -> int:
+    """
+    Launch the PyPNM-CMTS FastAPI service with optional HTTPS support.
+
+    Returns:
+        int: Process exit code.
+    """
+    return _run_cli()
+
+
+def _add_run_mode_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in OrchestratorMode],
+        required=True,
+        help="Execution mode: standalone (coordination only), controller (leader only), worker (lease + tests), combined (controller + worker).",
+    )
+    parser.add_argument(
+        "--config",
+        default="",
+        help="Optional path to system.json configuration file (defaults to built-in config).",
+    )
+    parser.add_argument(
+        "--cmts-hostname",
+        default="",
+        help="Override adapter.hostname for discovery/runtime (IP or hostname).",
+    )
+    parser.add_argument(
+        "--read-community",
+        default="",
+        help="Override adapter.community (SNMPv2c read community).",
+    )
+    parser.add_argument(
+        "--write-community",
+        default="",
+        help="Override adapter.write_community (SNMPv2c write community).",
+    )
+    parser.add_argument(
+        "--snmp-port",
+        "--cmts-port",
+        dest="snmp_port",
+        type=int,
+        default=None,
+        help="Override adapter.port (SNMP port). --cmts-port is deprecated.",
+    )
+    parser.add_argument(
+        "--sg-id",
+        default="",
+        help="Service group id for worker mode (required for bound workers).",
+    )
+    parser.add_argument(
+        "--owner-id",
+        default="",
+        help="Override coordination owner id (affects leader/lease identity).",
+    )
+    parser.add_argument(
+        "--target-service-groups",
+        type=int,
+        default=None,
+        help="Override target service groups per replica (0 means all).",
+    )
+    parser.add_argument(
+        "--shard-mode",
+        default=None,
+        choices=["sequential", "score"],
+        help="Shard mode override: sequential (default) or score.",
+    )
+    parser.add_argument(
+        "--tick-interval-seconds",
+        type=float,
+        default=None,
+        help="Override tick interval in seconds (must be less than TTLs).",
+    )
+    parser.add_argument(
+        "--leader-ttl-seconds",
+        type=int,
+        default=None,
+        help="Override leader TTL in seconds.",
+    )
+    parser.add_argument(
+        "--lease-ttl-seconds",
+        type=int,
+        default=None,
+        help="Override service group lease TTL in seconds.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default="",
+        help="Override coordination state directory.",
+    )
+    parser.add_argument(
+        "--election-name",
+        default="",
+        help="Override leader election namespace.",
+    )
+    parser.add_argument(
+        "--cm-snmpv2c-write-community",
+        default="",
+        help="Override CM SNMPv2c write community for request defaults.",
+    )
+    parser.add_argument(
+        "--cm-tftp-ipv4",
+        default="",
+        help="Override CM TFTP IPv4 for request defaults.",
+    )
+    parser.add_argument(
+        "--cm-tftp-ipv6",
+        default="",
+        help="Override CM TFTP IPv6 for request defaults.",
+    )
+
+
+def _add_discover_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cmts-hostname",
+        default="",
+        help="CMTS hostname or IP address (required if not in config).",
+    )
+    parser.add_argument(
+        "--read-community",
+        default="",
+        help="SNMPv2c read community string (default: public).",
+    )
+    parser.add_argument(
+        "--write-community",
+        default="",
+        help="Optional SNMPv2c write community (defaults to read community when empty).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_SNMP_PORT,
+        help="SNMP port for discovery (default: 161).",
+    )
+    parser.add_argument(
+        "--config",
+        default="",
+        help="Optional path to system.json configuration file (defaults to built-in config).",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default="",
+        help="Override coordination state directory for snapshot persistence.",
+    )
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="Output in text format instead of JSON.",
+    )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """
+    Build the CLI argument parser.
+    """
+    parser = argparse.ArgumentParser(
+        description="PyPNM-CMTS CLI for orchestration, discovery, and service operations.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  pypnm-cmts run --mode standalone\n"
+            "  pypnm-cmts run --mode worker --sg-id 1\n"
+            "  pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public\n"
+            "  pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5\n"
+            "  pypnm-cmts serve --host 0.0.0.0 --port 8080\n"
+            "  pypnm-cmts serve --reload\n"
+            "\n"
+            "Use \"pypnm-cmts <command> --help\" for command-specific options.\n"
+            "Man page: docs/system/pypnm-cmts-manpage.md"
+        ),
+    )
+
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"{__version__}",
+        help="Show PyPNM-CMTS version and exit.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Run a single orchestrator tick and print JSON output.")
+    _add_run_mode_args(run_parser)
+
+    run_forever_parser = subparsers.add_parser("run-forever", help="Run orchestrator ticks continuously and print JSON output.")
+    _add_run_mode_args(run_forever_parser)
+    run_forever_parser.add_argument(
+        "--max-ticks",
+        type=int,
+        default=None,
+        help="Stop after N ticks (optional; for tests or bounded runs).",
+    )
+
+    discover_parser = subparsers.add_parser("discover", help="Discover CMTS service groups and registered cable modems.")
+    _add_discover_args(discover_parser)
+
+    serve_parser = subparsers.add_parser("serve", help="Start the FastAPI service (Uvicorn).")
+    serve_parser.add_argument("--host", default=HOST_DEFAULT, help=f"Host to bind (default: {HOST_DEFAULT})")
+    serve_parser.add_argument("--port", default=PORT_DEFAULT, type=int, help=f"Port to bind (default: {PORT_DEFAULT})")
+    serve_parser.add_argument("--ssl", action="store_true", help="Enable HTTPS (requires cert and key).")
+    serve_parser.add_argument("--cert", default="./certs/cert.pem", help="Path to SSL certificate (PEM).")
+    serve_parser.add_argument("--key", default="./certs/key.pem", help="Path to SSL private key (PEM).")
+    serve_parser.add_argument(
+        "--cmts-hostname",
+        default="",
+        help="Override adapter.hostname for SGW startup discovery.",
+    )
+    serve_parser.add_argument(
+        "--read-community",
+        default="",
+        help="Override adapter.community for SGW startup discovery.",
+    )
+    serve_parser.add_argument(
+        "--write-community",
+        default="",
+        help="Override adapter.write_community for SGW startup discovery.",
+    )
+    serve_parser.add_argument(
+        "--cm-snmpv2c-write-community",
+        default="",
+        help="Override CM SNMPv2c write community for request defaults.",
+    )
+    serve_parser.add_argument(
+        "--cm-tftp-ipv4",
+        default="",
+        help="Override CM TFTP IPv4 for request defaults.",
+    )
+    serve_parser.add_argument(
+        "--cm-tftp-ipv6",
+        default="",
+        help="Override CM TFTP IPv6 for request defaults.",
+    )
+    serve_parser.add_argument(
+        "--with-runner",
+        action="store_true",
+        help="Start the orchestrator runner in-process (combined mode).",
+    )
+
+    serve_parser.add_argument(
+        "--log-level",
+        default=LOG_LEVEL_DEFAULT,
+        choices=["critical", "error", "warning", "info", "debug", "trace"],
+        help="Uvicorn log level (default: info).",
+    )
+
+    serve_parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="Number of worker processes (default: 1).",
+    )
+
+    serve_parser.add_argument(
+        "--no-access-log",
+        action="store_true",
+        help="Disable Uvicorn access log.",
+    )
+
+    serve_parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload on file changes (dev only).",
+    )
+
+    serve_parser.add_argument(
+        "--reload-dir",
+        dest="reload_dirs",
+        action="append",
+        default=[],
+        help="Directory to watch for changes (repeatable). Default: src (when --reload).",
+    )
+
+    serve_parser.add_argument(
+        "--reload-include",
+        dest="reload_includes",
+        action="append",
+        default=["*.py"],
+        help="Glob pattern(s) to include for reload (repeatable). Default: *.py.",
+    )
+
+    serve_parser.add_argument(
+        "--reload-exclude",
+        dest="reload_excludes",
+        action="append",
+        default=["*.pyc", "*__pycache__*", "*.tmp", "*.log"],
+        help="Glob pattern(s) to exclude from reload (repeatable).",
+    )
+    parser._serve_parser = serve_parser
+
+    config_menu_parser = subparsers.add_parser(
+        "config-menu",
+        help="Launch the interactive system.json configuration menu.",
+    )
+    config_menu_parser.add_argument(
+        "--config",
+        default="",
+        help="Optional path to system.json configuration file.",
+    )
+
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Non-interactive system.json configuration helpers.",
+    )
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+
+    config_init_parser = config_subparsers.add_parser(
+        "init",
+        help="Initialize system.json with CMTS defaults.",
+    )
+    config_init_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional target system.json path.",
+    )
+    config_init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing system.json.",
+    )
+    config_init_parser.add_argument(
+        "--print",
+        dest="print_output",
+        action="store_true",
+        help="Print the resulting JSON payload.",
+    )
+    config_init_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not write; only print when --print is set.",
+    )
+
+    config_validate_parser = config_subparsers.add_parser(
+        "validate",
+        help="Validate system.json for CMTS readiness.",
+    )
+    config_validate_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional system.json path override.",
+    )
+    config_validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit validation output as JSON.",
+    )
+
+    config_show_parser = config_subparsers.add_parser(
+        "show",
+        help="Print the effective system.json payload.",
+    )
+    config_show_parser.add_argument(
+        "--path",
+        default="",
+        help="Optional system.json path override.",
+    )
+    config_show_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print the JSON output.",
+    )
+
+    debug_parser = subparsers.add_parser(
+        "debug",
+        help="Debug SGW runtime state and refresh scheduling.",
+    )
+    debug_parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Show SGW process and poll interval summaries.",
+    )
+    debug_parser.add_argument(
+        "--sgw-show-process",
+        action="store_true",
+        help="Show SGW worker uptime table.",
+    )
+    debug_parser.add_argument(
+        "--sgw-show-poll-interval",
+        action="store_true",
+        help="Show SGW poll intervals with refresh counts.",
+    )
+    debug_parser.add_argument(
+        "--sgw-restart",
+        default="",
+        help="Queue a heavy refresh for a serving group worker (sgw-<id> or numeric).",
+    )
+
+    return parser
+
+
+def _build_launcher(args: argparse.Namespace) -> CmtsOrchestratorLauncher:
+    from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
+
+    config_value = args.config
+    sg_id_value = args.sg_id
+    owner_id_value = args.owner_id
+    state_dir_value = args.state_dir
+    election_name_value = args.election_name
+    cmts_hostname_value = str(getattr(args, "cmts_hostname", "")).strip()
+    read_community_value = str(getattr(args, "read_community", "")).strip()
+    write_community_value = str(getattr(args, "write_community", "")).strip()
+
+    mode_value = OrchestratorMode(args.mode)
+
+    config_path: Path | None = Path(config_value) if config_value != "" else None
+    state_dir: Path | None = Path(state_dir_value) if state_dir_value != "" else None
+    sg_id: ServiceGroupId | None = None
+    if sg_id_value != "":
+        sg_id = CmtsOrchestratorLauncher._parse_sg_id(sg_id_value)
+    owner_id: OwnerId | None = OwnerId(owner_id_value) if owner_id_value != "" else None
+    election_name: CoordinationElectionName | None = None
+    if election_name_value != "":
+        election_name = CoordinationElectionName(election_name_value)
+
+    snmp_port_value = _resolve_snmp_port_value(args, sys.argv[1:])
+    if snmp_port_value is not None and int(snmp_port_value) <= 0:
+        raise ValueError(f"snmp-port must be greater than zero (got {snmp_port_value}).")
+    _validate_non_negative(args.target_service_groups, "target-service-groups")
+    _validate_positive(args.tick_interval_seconds, "tick-interval-seconds")
+    _validate_positive(args.leader_ttl_seconds, "leader-ttl-seconds")
+    _validate_positive(args.lease_ttl_seconds, "lease-ttl-seconds")
+
+    return CmtsOrchestratorLauncher(
+        config_path=config_path,
+        mode=mode_value,
+        sg_id=sg_id,
+        owner_id=owner_id,
+        target_service_groups=args.target_service_groups,
+        shard_mode=args.shard_mode,
+        tick_interval_seconds=args.tick_interval_seconds,
+        leader_ttl_seconds=args.leader_ttl_seconds,
+        lease_ttl_seconds=args.lease_ttl_seconds,
+        state_dir=state_dir,
+        election_name=election_name,
+        adapter_hostname=HostNameStr(cmts_hostname_value) if cmts_hostname_value != "" else None,
+        adapter_read_community=SnmpReadCommunity(read_community_value) if read_community_value != "" else None,
+        adapter_write_community=SnmpWriteCommunity(write_community_value) if write_community_value != "" else None,
+        adapter_port=int(snmp_port_value) if snmp_port_value is not None else None,
+    )
+
+
+def _resolve_discovery_inputs(
+    args: argparse.Namespace,
+) -> tuple[HostNameStr, SnmpReadCommunity, SnmpWriteCommunity, int, Path]:
+    from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+
+    settings = CmtsOrchestratorSettings.from_system_config(
+        config_path=Path(args.config) if args.config != "" else None
+    )
+
+    hostname = str(args.cmts_hostname).strip()
+    if hostname == "":
+        hostname = str(settings.adapter.hostname).strip()
+    if hostname == "":
+        raise ValueError("cmts-hostname is required for discovery.")
+
+    read_community = str(args.read_community).strip()
+    if read_community == "":
+        read_community = str(settings.adapter.community).strip()
+    if read_community == "":
+        read_community = str(SnmpReadCommunity("public"))
+
+    write_community = str(args.write_community).strip()
+    if write_community == "":
+        write_community = str(settings.adapter.write_community).strip()
+    if write_community == "":
+        write_community = read_community
+
+    state_dir_value = str(args.state_dir).strip()
+    if state_dir_value == "":
+        state_dir = Path(settings.state_dir)
+    else:
+        state_dir = Path(state_dir_value)
+
+    return (
+        HostNameStr(hostname),
+        SnmpReadCommunity(read_community),
+        SnmpWriteCommunity(write_community),
+        int(args.port),
+        state_dir,
+    )
+
+
+def _render_discovery_text(result: InventoryDiscoveryResultModel) -> str:
+    lines: list[str] = []
+    lines.append(f"cmts_host={result.cmts_host}")
+    for entry in result.per_sg:
+        lines.append(f"sg_id={int(entry.sg_id)} cm_count={int(entry.cm_count)}")
+        lines.extend(
+            [f"  mac={cm.mac} ipv4={cm.ipv4} ipv6={cm.ipv6}" for cm in entry.cms]
+        )
+    return "\n".join(lines)
+
+
+def _format_duration_hms(total_seconds: float) -> str:
+    if float(total_seconds) < 0:
+        total_seconds = 0.0
+    seconds = int(total_seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _render_table(headers: list[str], rows: list[list[str]]) -> str:
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for idx, value in enumerate(row):
+            widths[idx] = max(widths[idx], len(value))
+    header_line = "| " + " | ".join(f"{header:<{widths[idx]}}" for idx, header in enumerate(headers)) + " |"
+    divider_line = "| " + " | ".join("-" * width for width in widths) + " |"
+    data_lines = [
+        "| " + " | ".join(f"{value:<{widths[idx]}}" for idx, value in enumerate(row)) + " |"
+        for row in rows
+    ]
+    return "\n".join([header_line, divider_line, *data_lines])
+
+
+def _parse_sgw_worker_id(worker_id: str) -> ServiceGroupId:
+    trimmed = worker_id.strip()
+    if trimmed.startswith("sgw-"):
+        trimmed = trimmed[4:]
+    if trimmed == "":
+        raise ValueError("sgw-restart requires a worker id.")
+    return ServiceGroupId(int(trimmed))
+
+
+def _debug_now_epoch() -> float:
+    return float(time.time())
+
+
+def _extract_flag_value(argv: list[str], flag: str) -> str | None:
+    for idx, token in enumerate(argv):
+        if token == flag:
+            if idx + 1 < len(argv):
+                return argv[idx + 1]
+            return ""
+        if token.startswith(f"{flag}="):
+            return token[len(flag) + 1 :]
+    return None
+
+
+def _warn_deprecated_cmts_port() -> None:
+    global _cmts_port_warned
+    if _cmts_port_warned:
+        return
+    _cmts_port_warned = True
+    print("DEPRECATED: --cmts-port is deprecated; use --snmp-port.", file=sys.stderr)
+
+
+def _resolve_snmp_port_value(
+    args: argparse.Namespace,
+    argv: list[str],
+) -> int | None:
+    snmp_port_value = getattr(args, "snmp_port", None)
+    cmts_value = _extract_flag_value(argv, _DEPRECATED_CMTS_PORT_FLAG)
+    snmp_value = _extract_flag_value(argv, _SNMP_PORT_FLAG)
+    if cmts_value is not None:
+        _warn_deprecated_cmts_port()
+    if snmp_value is not None:
+        snmp_port_value = int(snmp_value)
+    return snmp_port_value
+
+
+def _validate_non_negative(value: int | None, name: str) -> None:
+    if value is None:
+        return
+    if int(value) < 0:
+        raise ValueError(f"{name} must be non-negative (got {value}).")
+
+
+def _validate_positive(value: int | float | None, name: str) -> None:
+    if value is None:
+        return
+    if float(value) <= 0:
+        raise ValueError(f"{name} must be greater than zero (got {value}).")
+
+
+def _run_cli() -> int:
+    """
+    Execute the CLI.
+    """
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.command in {"run", "run-forever"}:
+        try:
+            launcher = _build_launcher(args)
+        except ValidationError as exc:
+            _print_validation_errors(exc)
+            return EXIT_CODE_USAGE
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_USAGE
+
+        if args.command == "run":
+            try:
+                result = launcher.run_once()
+            except ValidationError as exc:
+                _print_validation_errors(exc)
+                return EXIT_CODE_USAGE
+            except ValueError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return EXIT_CODE_USAGE
+            print(result.model_dump_json(indent=2))
+            return SUCCESS_EXIT_CODE
+
+        def _print_tick(result: OrchestratorRunResultModel) -> None:
+            print(result.model_dump_json())
+
+        try:
+            if args.max_ticks is not None and int(args.max_ticks) < 0:
+                print("ERROR: --max-ticks must be non-negative.", file=sys.stderr)
+                return EXIT_CODE_USAGE
+            launcher.run_forever(on_tick=_print_tick, max_ticks=args.max_ticks)
+        except ValidationError as exc:
+            _print_validation_errors(exc)
+            return EXIT_CODE_USAGE
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_USAGE
+        return SUCCESS_EXIT_CODE
+
+    if args.command == "discover":
+        from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
+
+        try:
+            cmts_hostname, read_community, write_community, port, state_dir = _resolve_discovery_inputs(args)
+            result = CmtsInventoryDiscoveryService.run_discovery(
+                cmts_hostname=cmts_hostname,
+                read_community=read_community,
+                write_community=write_community,
+                port=port,
+                state_dir=state_dir,
+            )
+        except ValidationError as exc:
+            _print_validation_errors(exc)
+            return EXIT_CODE_USAGE
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_USAGE
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_CODE_FAILURE
+
+        if args.text:
+            print(_render_discovery_text(result))
+        else:
+            print(result.model_dump_json(indent=2))
+        return SUCCESS_EXIT_CODE
+
+    if args.command == "serve":
+        from pypnm_cmts.combined_mode import COMBINED_MODE_ENV
+        from pypnm_cmts.config.orchestrator_config import (
+            ENV_ADAPTER_HOSTNAME,
+            ENV_ADAPTER_READ_COMMUNITY,
+            ENV_ADAPTER_WRITE_COMMUNITY,
+            CmtsOrchestratorSettings,
+        )
+
+        if args.with_runner and args.reload:
+            print(
+                "ERROR: --with-runner cannot be used with --reload.",
+                file=sys.stderr,
+            )
+            return EXIT_CODE_USAGE
+        if args.ssl:
+            print(f"🔒 Launching FastAPI with HTTPS on https://{args.host}:{args.port}")
+        else:
+            print(f"🌐 Launching FastAPI with HTTP on http://{args.host}:{args.port}")
+
+        os.environ["PYTHONPATH"] = os.getcwd() + "/src:" + os.environ.get("PYTHONPATH", "")
+        if str(args.cmts_hostname).strip() != "":
+            os.environ[ENV_ADAPTER_HOSTNAME] = str(args.cmts_hostname).strip()
+        if str(args.read_community).strip() != "":
+            os.environ[ENV_ADAPTER_READ_COMMUNITY] = str(args.read_community).strip()
+        if str(args.write_community).strip() != "":
+            os.environ[ENV_ADAPTER_WRITE_COMMUNITY] = str(args.write_community).strip()
+        if str(args.cm_snmpv2c_write_community).strip() != "":
+            os.environ[ENV_CM_SNMPV2C_WRITE_COMMUNITY] = str(args.cm_snmpv2c_write_community).strip()
+        if str(args.cm_tftp_ipv4).strip() != "":
+            os.environ[ENV_CM_TFTP_IPV4] = str(args.cm_tftp_ipv4).strip()
+        if str(args.cm_tftp_ipv6).strip() != "":
+            os.environ[ENV_CM_TFTP_IPV6] = str(args.cm_tftp_ipv6).strip()
+
+        try:
+            CmtsOrchestratorSettings.from_system_config()
+        except ValidationError as exc:
+            _print_validation_errors(exc)
+            print(
+                "See docs/faq/index.md for troubleshooting steps.",
+                file=sys.stderr,
+            )
+            _print_serve_usage(parser)
+            return EXIT_CODE_USAGE
+
+        uvicorn_args = {
+            "app": "pypnm_cmts.api.main:app",
+            "host": args.host,
+            "port": args.port,
+            "timeout_keep_alive": TIMEOUT_KEEP_ALIVE_SECONDS,
+            "log_level": args.log_level,
+            "workers": args.workers,
+            "access_log": not args.no_access_log,
+        }
+
+        if args.reload:
+            if args.workers != DEFAULT_WORKERS:
+                print("[WARN] --workers is ignored when --reload is enabled; using workers=1 for dev reload.")
+                uvicorn_args["workers"] = DEFAULT_WORKERS
+
+            reload_dirs = args.reload_dirs or ["src"]
+            uvicorn_args.update(
+                {
+                    "reload": True,
+                    "reload_dirs": reload_dirs,
+                    "reload_includes": args.reload_includes,
+                    "reload_excludes": args.reload_excludes,
+                }
+            )
+            print(f"🔁 Auto-reload enabled. Watching: {', '.join(reload_dirs)}")
+
+        if args.with_runner:
+            os.environ[COMBINED_MODE_ENV] = "1"
+            print("🔁 Combined mode runner enabled (controller + worker).")
+            uvicorn_args["lifespan"] = "on"
+            if args.workers != DEFAULT_WORKERS:
+                print(
+                    "[WARN] --workers is ignored when --with-runner is enabled; using workers=1 for combined mode."
+                )
+                uvicorn_args["workers"] = DEFAULT_WORKERS
+
+        if args.ssl:
+            uvicorn_args.update(
+                {
+                    "ssl_certfile": args.cert,
+                    "ssl_keyfile": args.key,
+                }
+            )
+
+        uvicorn.run(**uvicorn_args)
+
+        return SUCCESS_EXIT_CODE
+
+    if args.command == "config-menu":
+        from pypnm_cmts.tools.config_menu import CmtsConfigMenu
+
+        config_path_value = str(args.config).strip()
+        config_path: Path | None = None
+        if config_path_value != "":
+            config_path = Path(config_path_value)
+
+        menu = CmtsConfigMenu(config_path=config_path)
+        return menu.run()
+
+    if args.command == "config":
+        from pypnm_cmts.tools.config_commands import CmtsConfigCommands
+
+        if args.config_command == "init":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.init_config(
+                path=config_path,
+                force=bool(args.force),
+                print_output=bool(args.print_output),
+                dry_run=bool(args.dry_run),
+            )
+        if args.config_command == "validate":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.validate_config(
+                path=config_path,
+                json_output=bool(args.json),
+            )
+        if args.config_command == "show":
+            config_path = CmtsConfigCommands.resolve_config_path(args.path)
+            return CmtsConfigCommands.show_config(
+                path=config_path,
+                pretty=bool(args.pretty),
+            )
+        print("ERROR: config subcommand is required.", file=sys.stderr)
+        return EXIT_CODE_USAGE
+
+    if args.command == "debug":
+        from pypnm_cmts.sgw.runtime_state import get_sgw_manager
+
+        manager = get_sgw_manager()
+        if manager is None:
+            print("ERROR: SGW runtime manager is not initialized.", file=sys.stderr)
+            return EXIT_CODE_FAILURE
+
+        show_process = bool(args.show or args.sgw_show_process)
+        show_poll = bool(args.show or args.sgw_show_poll_interval)
+        did_work = False
+
+        if str(args.sgw_restart).strip() != "":
+            try:
+                sg_id = _parse_sgw_worker_id(str(args.sgw_restart))
+            except ValueError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return EXIT_CODE_USAGE
+            accepted, message = manager.request_refresh(
+                sg_id=sg_id,
+                mode=CacheRefreshMode.HEAVY,
+                now_epoch=_debug_now_epoch(),
+            )
+            if accepted:
+                print(f"queued heavy refresh for sgw-{int(sg_id)}")
+            else:
+                print(f"unable to queue refresh for sgw-{int(sg_id)}: {message}")
+            did_work = True
+
+        if show_process:
+            processes = manager.get_worker_process_snapshot(_debug_now_epoch())
+            rows = [
+                [item.worker_id, _format_duration_hms(item.uptime_seconds)]
+                for item in processes
+            ]
+            print(_render_table(["id", "uptime"], rows))
+            did_work = True
+
+        if show_poll:
+            intervals = manager.get_worker_poll_interval_snapshot()
+            rows = [
+                [
+                    item.worker_id,
+                    f"{int(item.heavy_interval_seconds)}:{int(item.heavy_count)}",
+                    f"{int(item.light_interval_seconds)}:{int(item.light_count)}",
+                ]
+                for item in intervals
+            ]
+            print(
+                _render_table(
+                    [
+                        "id",
+                        "heavy-poll-interval-seconds:count",
+                        "light-poll-interval-seconds:count",
+                    ],
+                    rows,
+                )
+            )
+            did_work = True
+
+        if not did_work:
+            print(
+                "ERROR: debug requires --show or a specific debug flag.",
+                file=sys.stderr,
+            )
+            return EXIT_CODE_USAGE
+
+        return SUCCESS_EXIT_CODE
+
+    parser.print_help()
+    return EXIT_CODE_USAGE
+
+
+def _print_serve_usage(parser: argparse.ArgumentParser) -> None:
+    serve_parser = getattr(parser, "_serve_parser", None)
+    if serve_parser is not None:
+        serve_parser.print_help()
+    else:
+        parser.print_help()
+
+
+def _print_validation_errors(exc: ValidationError) -> None:
+    """
+    Print concise validation errors to stderr.
+    """
+    errors = exc.errors()
+    if not errors:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return
+    for item in errors:
+        loc = item.get("loc", ())
+        msg = item.get("msg", "validation error")
+        field_path = ".".join(str(part) for part in loc) if loc else "value"
+        print(f"ERROR: {field_path}: {msg}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+# FILE: src/pypnm_cmts/sgw/manager.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025-2026 Maurice Garcia
+
+from __future__ import annotations
+
+import logging
+import random
+import threading
+import time
+from collections.abc import Callable
+
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.orchestrator.models import (
+    SGW_LAST_ERROR_MAX_LENGTH,
+    SgwCacheMetadataModel,
+    SgwRefreshState,
+)
+from pypnm_cmts.sgw.metrics import NoOpSgwMetrics, SgwMetrics
+from pypnm_cmts.sgw.models import (
+    DEFAULT_AGE_SECONDS,
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwRefreshErrorModel,
+    SgwRefreshResultModel,
+    SgwSnapshotModel,
+    SgwSnapshotPayloadModel,
+    SgwWorkerPollIntervalDebugModel,
+    SgwWorkerProcessDebugModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
+
+JITTER_MIN_SECONDS = 0
+REFRESH_MODE_NONE = "none"
+REFRESH_MODE_HEAVY = "heavy"
+REFRESH_MODE_LIGHT = "light"
+REFRESH_RESULT_OK = "ok"
+REFRESH_RESULT_ERROR = "error"
+REFRESH_RESULT_STALE = "stale"
+REFRESH_COUNT_HEAVY = "heavy"
+REFRESH_COUNT_LIGHT = "light"
+
+HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
+LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
+Clock = Callable[[], float]
+
+
+class SgwManager:
+    """Serving group worker cache manager."""
+
+    def __init__(
+        self,
+        settings: CmtsOrchestratorSettings,
+        store: SgwCacheStore | None = None,
+        service_groups: list[ServiceGroupId] | None = None,
+        jitter_provider: Callable[[ServiceGroupId, int], int] | None = None,
+        heavy_poller: HeavyPoller | None = None,
+        light_poller: LightPoller | None = None,
+        metrics: SgwMetrics | None = None,
+    ) -> None:
+        """
+        Initialize the SGW manager.
+
+        Args:
+            settings (CmtsOrchestratorSettings): Orchestrator settings instance.
+            store (SgwCacheStore | None): Optional cache store.
+            service_groups (list[ServiceGroupId] | None): Initial service group identifiers.
+            jitter_provider (Callable[[ServiceGroupId, int], int] | None): Optional jitter provider.
+            heavy_poller (HeavyPoller | None): Optional heavy refresh poller.
+            light_poller (LightPoller | None): Optional light refresh poller.
+            metrics (SgwMetrics | None): Optional metrics sink.
+        """
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._settings = settings
+        self._store = store if store is not None else SgwCacheStore()
+        self._service_groups = list(service_groups) if service_groups is not None else []
+        self._jitter_provider = jitter_provider if jitter_provider is not None else self._default_jitter
+        self._heavy_poller = heavy_poller if heavy_poller is not None else self._default_heavy_poller
+        self._light_poller = light_poller if light_poller is not None else self._default_light_poller
+        self._metrics = metrics if metrics is not None else NoOpSgwMetrics()
+        self._jitter_by_sg: dict[ServiceGroupId, int] = {}
+        self._refresh_requests: dict[ServiceGroupId, CacheRefreshMode] = {}
+        self._worker_started_epoch: dict[ServiceGroupId, float] = {}
+        self._refresh_counts: dict[ServiceGroupId, dict[str, int]] = {}
+        self._stop_requested = False
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
+        if self._service_groups:
+            self._initialize_jitter(self._service_groups)
+            self._initialize_worker_state(self._service_groups)
+
+    def set_service_groups(self, service_groups: list[ServiceGroupId]) -> None:
+        """Update the service groups managed by this instance."""
+        with self._lock:
+            self._service_groups = list(service_groups)
+            self._initialize_jitter(self._service_groups)
+            self._initialize_worker_state(self._service_groups)
+
+    def get_service_groups(self) -> list[ServiceGroupId]:
+        """Return the current list of service groups managed by this manager."""
+        with self._lock:
+            return list(self._service_groups)
+
+    def get_store(self) -> SgwCacheStore:
+        """
+        Return the cache store associated with this manager.
+        """
+        return self._store
+
+    def get_worker_process_snapshot(self, now_epoch: float) -> list[SgwWorkerProcessDebugModel]:
+        """
+        Return a debug snapshot of SGW worker uptime and start timestamps.
+
+        Args:
+            now_epoch (float): Current time in epoch seconds.
+
+        Returns:
+            list[SgwWorkerProcessDebugModel]: Worker identifiers with uptime and start metadata.
+        """
+        if float(now_epoch) < 0:
+            raise ValueError("now_epoch must be non-negative.")
+        with self._lock:
+            service_groups = sorted(self._service_groups, key=int)
+            started_epochs = dict(self._worker_started_epoch)
+        snapshots: list[SgwWorkerProcessDebugModel] = []
+        for sg_id in service_groups:
+            started_epoch = float(started_epochs.get(sg_id, float(now_epoch)))
+            uptime = max(0.0, float(now_epoch) - started_epoch)
+            snapshots.append(
+                SgwWorkerProcessDebugModel(
+                    worker_id=self._format_worker_id(sg_id),
+                    sg_id=sg_id,
+                    started_epoch=started_epoch,
+                    uptime_seconds=uptime,
+                )
+            )
+        return snapshots
+
+    def get_worker_poll_interval_snapshot(self) -> list[SgwWorkerPollIntervalDebugModel]:
+        """
+        Return a debug snapshot of poll intervals and refresh counts per SGW.
+
+        Returns:
+            list[SgwWorkerPollIntervalDebugModel]: Poll intervals with refresh counters per worker.
+        """
+        with self._lock:
+            service_groups = sorted(self._service_groups, key=int)
+            refresh_counts = {
+                sg_id: dict(counts) for sg_id, counts in self._refresh_counts.items()
+            }
+        heavy_interval = int(self._settings.sgw.poll_heavy_seconds)
+        light_interval = int(self._settings.sgw.poll_light_seconds)
+        snapshots: list[SgwWorkerPollIntervalDebugModel] = []
+        for sg_id in service_groups:
+            counts = refresh_counts.get(sg_id, self._default_refresh_counts())
+            snapshots.append(
+                SgwWorkerPollIntervalDebugModel(
+                    worker_id=self._format_worker_id(sg_id),
+                    sg_id=sg_id,
+                    heavy_interval_seconds=heavy_interval,
+                    heavy_count=int(counts.get(REFRESH_COUNT_HEAVY, 0)),
+                    light_interval_seconds=light_interval,
+                    light_count=int(counts.get(REFRESH_COUNT_LIGHT, 0)),
+                )
+            )
+        return snapshots
+
+    def stop(self) -> None:
+        """Request that the refresh loop stop."""
+        with self._lock:
+            self._stop_requested = True
+            self._stop_event.set()
+
+    def reset_stop(self) -> None:
+        """
+        Clear stop flags to allow the refresh loop to restart.
+        """
+        with self._lock:
+            self._stop_requested = False
+            self._stop_event.clear()
+
+    def request_refresh(
+        self,
+        sg_id: ServiceGroupId,
+        mode: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        """
+        Request an on-demand refresh for a service group.
+
+        Returns:
+            tuple[bool, str]: (accepted, message)
+        """
+        if mode == CacheRefreshMode.NONE:
+            return (False, "")
+        with self._lock:
+            if sg_id not in self._service_groups:
+                return (False, "sg_id not managed by sgw")
+            if mode == CacheRefreshMode.HEAVY and self._heavy_refresh_rate_limited(sg_id, now_epoch):
+                return (False, "heavy refresh rate limited")
+            current = self._refresh_requests.get(sg_id)
+            if current == CacheRefreshMode.HEAVY:
+                return (True, "")
+            if mode == CacheRefreshMode.HEAVY or current is None:
+                self._refresh_requests[sg_id] = mode
+                return (True, "")
+        return (True, "")
+
+    def refresh_forever(
+        self,
+        clock: Clock | None = None,
+        max_cycles: int | None = None,
+    ) -> list[SgwRefreshResultModel]:
+        """
+        Execute refresh cycles until stopped or max_cycles is reached.
+
+        Args:
+            clock (Clock | None): Optional clock function for tests.
+            max_cycles (int | None): Optional maximum number of cycles to execute.
+
+        Returns:
+            list[SgwRefreshResultModel]: Collected refresh results when max_cycles is provided.
+        """
+        if max_cycles is not None and int(max_cycles) < 0:
+            raise ValueError("max_cycles must be non-negative.")
+        clock_fn = clock if clock is not None else self._default_clock
+        interval_seconds = float(self._settings.sgw.poll_light_seconds)
+        results: list[SgwRefreshResultModel] = []
+        cycles = 0
+
+        # Hardening: preserve any pre-existing stop signal by checking and
+        # clearing state under the same lock to avoid races with `stop()`.
+        with self._lock:
+            pre_stop = bool(self._stop_event.is_set()) or bool(self._stop_requested)
+            if pre_stop:
+                return results
+            # Normal startup: ensure flags are cleared for a fresh run.
+            self._stop_requested = False
+            self._stop_event.clear()
+
+        while not self._stop_requested:
+            now_epoch = float(clock_fn())
+            result = self.refresh_once(now_epoch)
+            if max_cycles is not None:
+                results.append(result)
+            cycles += 1
+            if max_cycles is not None and cycles >= int(max_cycles):
+                break
+            if self._stop_requested:
+                break
+            if self._stop_event.wait(timeout=interval_seconds):
+                break
+        return results
+
+    def refresh_once(self, now_epoch: float) -> SgwRefreshResultModel:
+        """
+        Execute a single refresh cycle.
+
+        Args:
+            now_epoch (float): Current time in epoch seconds.
+
+        Returns:
+            SgwRefreshResultModel: Summary of refresh operations performed.
+        """
+        if float(now_epoch) < 0:
+            raise ValueError("now_epoch must be non-negative.")
+        if not bool(self._settings.sgw.enabled):
+            return SgwRefreshResultModel(snapshot_time_epoch=float(now_epoch))
+
+        heavy_refreshed: list[ServiceGroupId] = []
+        light_refreshed: list[ServiceGroupId] = []
+        errors: list[SgwRefreshErrorModel] = []
+        with self._lock:
+            service_groups = list(self._service_groups)
+
+        for sg_id in service_groups:
+            entry = self._ensure_entry(sg_id, now_epoch)
+            metadata = entry.snapshot.metadata
+            jitter_seconds = self._resolve_jitter_seconds(sg_id)
+            refresh_mode = REFRESH_MODE_NONE
+            refresh_applied = False
+            error_message = ""
+            start_time = self._monotonic()
+
+            try:
+                with self._lock:
+                    requested = self._refresh_requests.pop(sg_id, None)
+                heavy_due = False
+                light_due = False
+                if requested == CacheRefreshMode.HEAVY:
+                    heavy_due = True
+                elif requested == CacheRefreshMode.LIGHT:
+                    light_due = True
+                else:
+                    heavy_due = self._is_refresh_due(
+                        metadata.last_heavy_refresh_epoch,
+                        int(self._settings.sgw.poll_heavy_seconds),
+                        jitter_seconds,
+                        now_epoch,
+                    )
+                    if not heavy_due:
+                        light_due = self._is_refresh_due(
+                            metadata.last_light_refresh_epoch,
+                            int(self._settings.sgw.poll_light_seconds),
+                            jitter_seconds,
+                            now_epoch,
+                    )
+                if heavy_due:
+                    refresh_mode = REFRESH_MODE_HEAVY
+                    payload = self._heavy_poller(sg_id, self._settings)
+                    self._refresh_heavy(sg_id, now_epoch, payload)
+                    heavy_refreshed.append(sg_id)
+                    light_refreshed.append(sg_id)
+                    refresh_applied = True
+                elif light_due:
+                    refresh_mode = REFRESH_MODE_LIGHT
+                    updated_modems = self._light_poller(
+                        sg_id,
+                        self._settings,
+                        list(entry.snapshot.cable_modems),
+                    )
+                    merged_modems = self._merge_light_updates(
+                        list(entry.snapshot.cable_modems),
+                        list(updated_modems),
+                    )
+                    self._refresh_light(sg_id, now_epoch, merged_modems)
+                    light_refreshed.append(sg_id)
+                    refresh_applied = True
+            except Exception as exc:
+                error_message = self._normalize_error_message(str(exc))
+                metadata = self._store.mark_error(sg_id, error_message, now_epoch)
+                errors.append(SgwRefreshErrorModel(sg_id=sg_id, message=metadata.last_error or ""))
+
+            entry = self._store.get_entry(sg_id) or entry
+            metadata = entry.snapshot.metadata
+            age_seconds = max(DEFAULT_AGE_SECONDS, float(now_epoch) - float(metadata.snapshot_time_epoch))
+            metadata = metadata.model_copy(update={"age_seconds": age_seconds})
+
+            stale = False
+            if metadata.refresh_state != SgwRefreshState.ERROR:
+                if self._store.compute_staleness(age_seconds, int(self._settings.sgw.cache_max_age_seconds)):
+                    stale = True
+                    metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.STALE})
+                else:
+                    metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.OK})
+
+            entry.snapshot = entry.snapshot.model_copy(update={"metadata": metadata})
+            self._store.upsert_entry(entry)
+
+            duration_ms = max(0.0, (self._monotonic() - start_time) * 1000.0)
+            if refresh_mode != REFRESH_MODE_NONE and (refresh_applied or error_message != "" or stale):
+                self._metrics.record_refresh_duration(refresh_mode, duration_ms)
+            if error_message != "" and refresh_mode != REFRESH_MODE_NONE:
+                self._metrics.increment_refresh_error(refresh_mode)
+            if stale:
+                self._metrics.increment_staleness()
+            if refresh_mode != REFRESH_MODE_NONE and (refresh_applied or error_message != ""):
+                self._increment_refresh_counts(sg_id, refresh_mode)
+            if refresh_applied or error_message != "" or stale:
+                result = REFRESH_RESULT_OK
+                if error_message != "":
+                    result = REFRESH_RESULT_ERROR
+                elif stale:
+                    result = REFRESH_RESULT_STALE
+                interval_seconds = 0.0
+                if refresh_mode == REFRESH_MODE_HEAVY:
+                    interval_seconds = float(self._settings.sgw.poll_heavy_seconds)
+                elif refresh_mode == REFRESH_MODE_LIGHT:
+                    interval_seconds = float(self._settings.sgw.poll_light_seconds)
+                self._log_refresh_event(
+                    sg_id=sg_id,
+                    refresh_mode=refresh_mode,
+                    duration_ms=duration_ms,
+                    result=result,
+                    snapshot_time_epoch=float(metadata.snapshot_time_epoch),
+                    age_seconds=float(metadata.age_seconds),
+                    interval_seconds=interval_seconds,
+                    error_message=error_message,
+                )
+
+        return SgwRefreshResultModel(
+            snapshot_time_epoch=float(now_epoch),
+            heavy_refreshed_sg_ids=heavy_refreshed,
+            light_refreshed_sg_ids=light_refreshed,
+            errors=errors,
+        )
+
+    def _ensure_entry(self, sg_id: ServiceGroupId, now_epoch: float) -> SgwCacheEntryModel:
+        entry = self._store.get_entry(sg_id)
+        if entry is not None:
+            return entry
+        metadata = SgwCacheMetadataModel(
+            snapshot_time_epoch=float(now_epoch),
+            age_seconds=DEFAULT_AGE_SECONDS,
+        )
+        snapshot = SgwSnapshotModel(sg_id=sg_id, metadata=metadata)
+        entry = SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot)
+        self._store.upsert_entry(entry)
+        return entry
+
+    def _refresh_heavy(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        payload: SgwSnapshotPayloadModel,
+    ) -> None:
+        entry = self._ensure_entry(sg_id, now_epoch)
+        metadata = entry.snapshot.metadata.model_copy(
+            update={
+                "snapshot_time_epoch": float(now_epoch),
+                "age_seconds": DEFAULT_AGE_SECONDS,
+                "last_heavy_refresh_epoch": float(now_epoch),
+                "last_light_refresh_epoch": float(now_epoch),
+                "refresh_state": SgwRefreshState.OK,
+                "last_error": None,
+            }
+        )
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "ds_ch_set_id": payload.ds_ch_set_id,
+                "us_ch_set_id": payload.us_ch_set_id,
+                "ds_channels": payload.ds_channels,
+                "us_channels": payload.us_channels,
+                "ds_rf_channels": list(payload.ds_rf_channels),
+                "us_rf_channels": list(payload.us_rf_channels),
+                "cable_modems": list(payload.cable_modems),
+                "metadata": metadata,
+            }
+        )
+        self._store.upsert_entry(entry)
+
+    def _refresh_light(
+        self,
+        sg_id: ServiceGroupId,
+        now_epoch: float,
+        cable_modems: list[SgwCableModemModel],
+    ) -> None:
+        entry = self._ensure_entry(sg_id, now_epoch)
+        metadata = entry.snapshot.metadata.model_copy(
+            update={
+                "snapshot_time_epoch": float(now_epoch),
+                "age_seconds": DEFAULT_AGE_SECONDS,
+                "last_light_refresh_epoch": float(now_epoch),
+                "refresh_state": SgwRefreshState.OK,
+                "last_error": None,
+            }
+        )
+        entry.snapshot = entry.snapshot.model_copy(
+            update={
+                "cable_modems": list(cable_modems),
+                "metadata": metadata,
+            }
+        )
+        self._store.upsert_entry(entry)
+
+    def _log_refresh_event(
+        self,
+        sg_id: ServiceGroupId,
+        refresh_mode: str,
+        duration_ms: float,
+        result: str,
+        snapshot_time_epoch: float,
+        age_seconds: float,
+        interval_seconds: float,
+        error_message: str,
+    ) -> None:
+        worker_id = self._format_worker_id(sg_id)
+        if error_message != "":
+            self.logger.warning(
+                "sgw refresh error SGWorkerID: %s",
+                worker_id,
+                extra={
+                    "sg_id": int(sg_id),
+                    "worker_id": worker_id,
+                    "refresh_mode": refresh_mode,
+                    "duration_ms": duration_ms,
+                    "result": result,
+                    "snapshot_time_epoch": snapshot_time_epoch,
+                    "age_seconds": age_seconds,
+                    "interval_seconds": interval_seconds,
+                    "error_message": error_message,
+                },
+            )
+            return
+        self.logger.info(
+            "sgw refresh SGWorkerID: %s",
+            worker_id,
+            extra={
+                "sg_id": int(sg_id),
+                "worker_id": worker_id,
+                "refresh_mode": refresh_mode,
+                "duration_ms": duration_ms,
+                "result": result,
+                "snapshot_time_epoch": snapshot_time_epoch,
+                "age_seconds": age_seconds,
+                "interval_seconds": interval_seconds,
+            },
+        )
+
+    @staticmethod
+    def _format_worker_id(sg_id: ServiceGroupId) -> str:
+        return f"sgw-{int(sg_id)}"
+
+    @staticmethod
+    def _normalize_error_message(message: str) -> str:
+        trimmed = message.strip()
+        if trimmed == "":
+            return ""
+        return trimmed[:SGW_LAST_ERROR_MAX_LENGTH]
+
+    @staticmethod
+    def _monotonic() -> float:
+        return float(time.monotonic())
+
+    @staticmethod
+    def _merge_light_updates(
+        existing_modems: list[SgwCableModemModel],
+        updated_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        if not updated_modems:
+            return [modem.model_copy(deep=True) for modem in existing_modems]
+        updated_by_mac = {str(modem.mac): modem for modem in updated_modems}
+        merged: list[SgwCableModemModel] = []
+        for modem in existing_modems:
+            key = str(modem.mac)
+            replacement = updated_by_mac.get(key)
+            if replacement is None:
+                merged.append(modem.model_copy(deep=True))
+            else:
+                merged.append(replacement.model_copy(deep=True))
+        return merged
+
+    def _is_refresh_due(
+        self,
+        last_refresh_epoch: float | None,
+        interval_seconds: int,
+        jitter_seconds: int,
+        now_epoch: float,
+    ) -> bool:
+        if last_refresh_epoch is None:
+            return True
+        elapsed = float(now_epoch) - float(last_refresh_epoch)
+        return elapsed >= float(interval_seconds + jitter_seconds)
+
+    def _heavy_refresh_rate_limited(self, sg_id: ServiceGroupId, now_epoch: float) -> bool:
+        entry = self._store.get_entry(sg_id)
+        if entry is None:
+            return False
+        last_heavy = entry.snapshot.metadata.last_heavy_refresh_epoch
+        if last_heavy is None:
+            return False
+        elapsed = float(now_epoch) - float(last_heavy)
+        return elapsed < float(self._settings.sgw.poll_heavy_seconds)
+
+    def _resolve_jitter_seconds(self, sg_id: ServiceGroupId) -> int:
+        cached = self._jitter_by_sg.get(sg_id)
+        if cached is not None:
+            return cached
+        max_jitter = int(self._settings.sgw.refresh_jitter_seconds)
+        if max_jitter <= 0:
+            self._jitter_by_sg[sg_id] = JITTER_MIN_SECONDS
+            return JITTER_MIN_SECONDS
+        jitter_value = int(self._jitter_provider(sg_id, max_jitter))
+        jitter_value = self._clamp_jitter(jitter_value, max_jitter)
+        self._jitter_by_sg[sg_id] = jitter_value
+        return jitter_value
+
+    @staticmethod
+    def _default_jitter(_sg_id: ServiceGroupId, max_jitter_seconds: int) -> int:
+        if max_jitter_seconds <= 0:
+            return JITTER_MIN_SECONDS
+        return random.randint(JITTER_MIN_SECONDS, max_jitter_seconds)
+
+    @staticmethod
+    def _default_heavy_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+    ) -> SgwSnapshotPayloadModel:
+        return SgwSnapshotPayloadModel()
+
+    @staticmethod
+    def _default_light_poller(
+        _sg_id: ServiceGroupId,
+        _settings: CmtsOrchestratorSettings,
+        cable_modems: list[SgwCableModemModel],
+    ) -> list[SgwCableModemModel]:
+        return list(cable_modems)
+
+    @staticmethod
+    def _default_clock() -> float:
+        return float(time.time())
+
+    def _initialize_jitter(self, service_groups: list[ServiceGroupId]) -> None:
+        self._jitter_by_sg = {}
+        for sg_id in service_groups:
+            self._jitter_by_sg[sg_id] = self._resolve_jitter_seconds(sg_id)
+
+    def _initialize_worker_state(self, service_groups: list[ServiceGroupId]) -> None:
+        now_epoch = float(self._default_clock())
+        worker_started: dict[ServiceGroupId, float] = {}
+        refresh_counts: dict[ServiceGroupId, dict[str, int]] = {}
+        for sg_id in service_groups:
+            worker_started[sg_id] = self._worker_started_epoch.get(sg_id, now_epoch)
+            existing_counts = self._refresh_counts.get(sg_id)
+            if existing_counts is None:
+                refresh_counts[sg_id] = self._default_refresh_counts()
+            else:
+                refresh_counts[sg_id] = dict(existing_counts)
+                refresh_counts[sg_id].setdefault(REFRESH_COUNT_HEAVY, 0)
+                refresh_counts[sg_id].setdefault(REFRESH_COUNT_LIGHT, 0)
+        self._worker_started_epoch = worker_started
+        self._refresh_counts = refresh_counts
+
+    @staticmethod
+    def _default_refresh_counts() -> dict[str, int]:
+        return {
+            REFRESH_COUNT_HEAVY: 0,
+            REFRESH_COUNT_LIGHT: 0,
+        }
+
+    def _increment_refresh_counts(self, sg_id: ServiceGroupId, refresh_mode: str) -> None:
+        match refresh_mode:
+            case _ if refresh_mode == REFRESH_MODE_HEAVY:
+                keys = [REFRESH_COUNT_HEAVY, REFRESH_COUNT_LIGHT]
+            case _ if refresh_mode == REFRESH_MODE_LIGHT:
+                keys = [REFRESH_COUNT_LIGHT]
+            case _:
+                return
+        with self._lock:
+            counts = self._refresh_counts.get(sg_id)
+            if counts is None:
+                counts = self._default_refresh_counts()
+                self._refresh_counts[sg_id] = counts
+            for key in keys:
+                counts[key] = int(counts.get(key, 0)) + 1
+
+    @staticmethod
+    def _clamp_jitter(jitter_value: int, max_jitter: int) -> int:
+        if jitter_value < JITTER_MIN_SECONDS:
+            return JITTER_MIN_SECONDS
+        if jitter_value > max_jitter:
+            return max_jitter
+        return jitter_value
+
+
+__all__ = [
+    "REFRESH_MODE_NONE",
+    "REFRESH_MODE_HEAVY",
+    "REFRESH_MODE_LIGHT",
+    "REFRESH_RESULT_OK",
+    "REFRESH_RESULT_ERROR",
+    "REFRESH_RESULT_STALE",
+    "SgwManager",
+]
+
+# FILE: src/pypnm_cmts/sgw/models.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from pydantic import BaseModel, Field, model_serializer
+from pypnm.lib.types import IPv4Str, IPv6Str, MacAddressStr
+
+from pypnm_cmts.lib.constants import RfChannelType
+from pypnm_cmts.lib.types import ChSetId, CmtsCmRegState, ServiceGroupId
+from pypnm_cmts.orchestrator.models import (
+    SGW_LAST_ERROR_MAX_LENGTH,
+    SgwCacheMetadataModel,
+)
+
+DEFAULT_AGE_SECONDS = 0.0
+DEFAULT_CHANNEL_COUNT = 0
+
+
+class SgwChannelSummaryModel(BaseModel):
+    """Summary of channel inventory for a service group."""
+
+    count: int = Field(default=DEFAULT_CHANNEL_COUNT, description="Number of channels in the summary.")
+    channel_ids: list[int] = Field(default_factory=list, description="Channel identifiers in the summary.")
+
+
+class SgwRfChannelModel(BaseModel):
+    """RF channel inventory entry for SGW snapshots."""
+
+    channel_id: int = Field(default=0, description="Channel identifier.")
+    channel_type: RfChannelType = Field(default=RfChannelType.SC_QAM, description="Channel modulation type.")
+    center_frequency_hz: int | None = Field(default=None, description="Channel center frequency (Hz).")
+    start_frequency_hz: int | None = Field(default=None, description="Channel start frequency (Hz).")
+    plc_frequency_hz: int | None = Field(default=None, description="OFDM PLC frequency (Hz).")
+    channel_width_hz: int | None = Field(default=None, description="Channel width (Hz).")
+    lower_frequency_hz: int | None = Field(default=None, description="Lower boundary frequency (Hz).")
+    upper_frequency_hz: int | None = Field(default=None, description="Upper boundary frequency (Hz).")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Callable[[SgwRfChannelModel], dict[str, object]]) -> dict[str, object]:
+        data = handler(self)
+        if self.channel_type == RfChannelType.SC_QAM:
+            data.pop("start_frequency_hz", None)
+            data.pop("plc_frequency_hz", None)
+            return data
+        if self.channel_type == RfChannelType.OFDM:
+            data.pop("center_frequency_hz", None)
+            data.pop("start_frequency_hz", None)
+            return data
+        if self.channel_type == RfChannelType.OFDMA:
+            data.pop("center_frequency_hz", None)
+            data.pop("start_frequency_hz", None)
+            data.pop("plc_frequency_hz", None)
+        return data
+
+
+class SgwHeavyInventoryModel(BaseModel):
+    """Heavy refresh inventory payload prior to snapshot normalization."""
+
+    ds_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Downstream channel set identifier.")
+    us_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Upstream channel set identifier.")
+    ds_channel_ids: list[int] = Field(default_factory=list, description="Downstream channel identifiers.")
+    us_channel_ids: list[int] = Field(default_factory=list, description="Upstream channel identifiers.")
+    ds_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Downstream RF channel inventory.")
+    us_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Upstream RF channel inventory.")
+    cable_modems: list[SgwCableModemModel] = Field(default_factory=list, description="Cable modem membership list.")
+
+
+class SgwCableModemModel(BaseModel):
+    """Minimal cable modem identity for SGW snapshots."""
+
+    mac: MacAddressStr = Field(default=MacAddressStr(""), description="Cable modem MAC address.")
+    ipv4: IPv4Str = Field(default=IPv4Str(""), description="Cable modem IPv4 address.")
+    ipv6: IPv6Str = Field(default=IPv6Str(""), description="Cable modem IPv6 address.")
+    ds_channel_set: ChSetId = Field(default=ChSetId(0), description="Downstream channel set id.")
+    us_channel_set: ChSetId = Field(default=ChSetId(0), description="Upstream channel set id.")
+    registration_status: CmtsCmRegState = Field(default=CmtsCmRegState(1), description="Cable modem registration status.")
+
+
+class SgwSnapshotModel(BaseModel):
+    """Snapshot payload for a service group cache entry."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier for the snapshot.")
+    ds_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Downstream channel set identifier.")
+    us_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Upstream channel set identifier.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+    ds_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Downstream RF channel inventory.")
+    us_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Upstream RF channel inventory.")
+    cable_modems: list[SgwCableModemModel] = Field(default_factory=list, description="Cable modem membership list.")
+    metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
+
+
+class SgwSnapshotPayloadModel(BaseModel):
+    """Snapshot payload components from a heavy refresh."""
+
+    ds_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Downstream channel set identifier.")
+    us_ch_set_id: ChSetId = Field(default=ChSetId(0), description="Upstream channel set identifier.")
+    ds_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Downstream channel summary.")
+    us_channels: SgwChannelSummaryModel = Field(default_factory=SgwChannelSummaryModel, description="Upstream channel summary.")
+    ds_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Downstream RF channel inventory.")
+    us_rf_channels: list[SgwRfChannelModel] = Field(default_factory=list, description="Upstream RF channel inventory.")
+    cable_modems: list[SgwCableModemModel] = Field(default_factory=list, description="Cable modem membership list.")
+
+
+class SgwCacheEntryModel(BaseModel):
+    """Cache entry for serving group worker data."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier for the cache entry.")
+    snapshot: SgwSnapshotModel = Field(..., description="Snapshot payload for the cache entry.")
+
+
+class SgwRefreshErrorModel(BaseModel):
+    """Error detail captured during a refresh attempt."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier that failed to refresh.")
+    message: str = Field(default="", max_length=SGW_LAST_ERROR_MAX_LENGTH, description="Bounded refresh error message.")
+
+
+class SgwRefreshResultModel(BaseModel):
+    """Result summary for a single refresh cycle."""
+
+    snapshot_time_epoch: float = Field(default=0.0, ge=0.0, description="Snapshot timestamp in epoch seconds.")
+    heavy_refreshed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups refreshed via heavy refresh.")
+    light_refreshed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups refreshed via light refresh.")
+    errors: list[SgwRefreshErrorModel] = Field(default_factory=list, description="Errors captured during refresh.")
+
+
+class SgwWorkerProcessDebugModel(BaseModel):
+    """Debug snapshot of SGW worker uptime and start metadata."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier.")
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    started_epoch: float = Field(default=0.0, ge=0.0, description="Epoch time when the worker start was recorded.")
+    uptime_seconds: float = Field(default=0.0, ge=0.0, description="Worker uptime in seconds.")
+
+
+class SgwWorkerPollIntervalDebugModel(BaseModel):
+    """Debug snapshot of SGW poll intervals and refresh counters."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier.")
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    heavy_interval_seconds: int = Field(default=0, ge=0, description="Configured heavy poll interval in seconds.")
+    heavy_count: int = Field(default=0, ge=0, description="Number of heavy refresh cycles recorded.")
+    light_interval_seconds: int = Field(default=0, ge=0, description="Configured light poll interval in seconds.")
+    light_count: int = Field(default=0, ge=0, description="Number of light refresh cycles recorded.")
+
+
+__all__ = [
+    "SgwCacheEntryModel",
+    "SgwCableModemModel",
+    "SgwChannelSummaryModel",
+    "SgwHeavyInventoryModel",
+    "SgwRfChannelModel",
+    "SgwSnapshotModel",
+    "SgwSnapshotPayloadModel",
+    "SgwRefreshErrorModel",
+    "SgwRefreshResultModel",
+    "SgwWorkerPollIntervalDebugModel",
+    "SgwWorkerProcessDebugModel",
+]
+
+# FILE: tests/test_cli_debug.py
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import pytest
+
+from pypnm_cmts.cli import _run_cli
+from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.lib.constants import CacheRefreshMode
+from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.runtime_state import reset_sgw_runtime_state, set_sgw_startup_success
+from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+
+
+def _build_settings() -> CmtsOrchestratorSettings:
+    payload = {
+        "mode": OrchestratorMode.STANDALONE,
+        "adapter": {"hostname": "cmts.example", "community": "public"},
+        "service_groups": [{"sg_id": 1, "name": "sg-1", "enabled": True}],
+        "default_tests": ["test-a"],
+        "sgw": {
+            "enabled": True,
+            "poll_heavy_seconds": 300,
+            "poll_light_seconds": 60,
+            "refresh_jitter_seconds": 0,
+        },
+    }
+    return CmtsOrchestratorSettings.model_validate(payload)
+
+
+def _setup_runtime_state(service_groups: list[ServiceGroupId]) -> SgwManager:
+    settings = _build_settings()
+    store = SgwCacheStore()
+    manager = SgwManager(settings=settings, store=store, service_groups=service_groups)
+    set_sgw_startup_success(service_groups, store, manager, last_refresh_epoch=100.0)
+    return manager
+
+
+def test_cli_debug_show_process_outputs_table(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reset_sgw_runtime_state()
+    monkeypatch.setattr("pypnm_cmts.sgw.manager.time.time", lambda: 100.0)
+    _setup_runtime_state([ServiceGroupId(1), ServiceGroupId(2)])
+    monkeypatch.setattr("pypnm_cmts.cli._debug_now_epoch", lambda: 160.0)
+
+    class _Args:
+        command = "debug"
+        show = True
+        sgw_show_process = False
+        sgw_show_poll_interval = False
+        sgw_restart = ""
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "| id" in output
+    assert "sgw-1" in output
+    assert "00:01:00" in output
+    reset_sgw_runtime_state()
+
+
+def test_cli_debug_show_poll_intervals_outputs_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reset_sgw_runtime_state()
+    manager = _setup_runtime_state([ServiceGroupId(1)])
+    manager.refresh_once(100.0)
+
+    class _Args:
+        command = "debug"
+        show = False
+        sgw_show_process = False
+        sgw_show_poll_interval = True
+        sgw_restart = ""
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "heavy-poll-interval-seconds:count" in output
+    assert "300:1" in output
+    assert "60:1" in output
+    reset_sgw_runtime_state()
+
+
+def test_cli_debug_restart_queues_heavy_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reset_sgw_runtime_state()
+    manager = _setup_runtime_state([ServiceGroupId(3)])
+    monkeypatch.setattr("pypnm_cmts.cli._debug_now_epoch", lambda: 160.0)
+    captured: dict[str, object] = {}
+
+    def _fake_request_refresh(
+        sg_id: ServiceGroupId,
+        mode: CacheRefreshMode,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        captured["sg_id"] = sg_id
+        captured["mode"] = mode
+        captured["now_epoch"] = now_epoch
+        return (True, "")
+
+    monkeypatch.setattr(manager, "request_refresh", _fake_request_refresh)
+
+    class _Args:
+        command = "debug"
+        show = False
+        sgw_show_process = False
+        sgw_show_poll_interval = False
+        sgw_restart = "sgw-3"
+
+    monkeypatch.setattr(
+        "pypnm_cmts.cli._build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    exit_code = _run_cli()
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "queued heavy refresh for sgw-3" in output
+    assert captured["sg_id"] == ServiceGroupId(3)
+    assert captured["mode"] == CacheRefreshMode.HEAVY
+    assert captured["now_epoch"] == 160.0
+    reset_sgw_runtime_state()
+
+# FILE: docs/system/cli.md
+# CLI Service Launcher
+
+Use the `pypnm-cmts serve` command to start the FastAPI service with development-friendly options.
+
+## Table Of Contents
+
+- [Assumptions](#assumptions)
+- [When to Use](#when-to-use)
+- [Usage](#usage)
+- [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
+- [SGW Startup Discovery Modes](#sgw-startup-discovery-modes)
+- [Orchestrator Run Modes](#orchestrator-run-modes)
+- [Worker Result Persistence](#worker-result-persistence)
+- [Coordination Flags](#coordination-flags)
+- [Serve Options](#serve-options)
+- [Debug Tools](#debug-tools)
+- [Security Tools](#security-tools)
+- [Next Steps](#next-steps)
+
+## Assumptions
+
+- Commands are run from the repository root.
+- Virtual environment activation is handled by your environment.
+
+## When to Use
+
+- Start the CMTS API locally during development.
+- Enable hot reload when iterating on API code.
+
+## Usage
+
+### Basic HTTP
+
+```bash
+pypnm-cmts serve
+```
+
+The service binds to `127.0.0.1:8000` by default and reads CMTS adapter
+settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
+hostname and SNMP communities, or pass `--cmts-hostname` and `--read-community`
+as overrides.
+
+### Custom host/port
+
+```bash
+pypnm-cmts serve --host 0.0.0.0 --port 8080
+```
+
+### Reload on changes
+
+```bash
+pypnm-cmts serve --reload
+```
+
+### Reload with custom watch paths
+
+```bash
+pypnm-cmts serve --reload --reload-dir src --reload-dir tools
+```
+
+### HTTPS
+
+```bash
+pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
+```
+
+## Discovery (CMTS Inventory)
+
+Discover service groups and registered cable modems from a CMTS using SNMP.
+If `--write-community` is omitted or empty, the discovery path uses the effective read community.
+Use `--port` to override the SNMP port for the `discover` command; `run` and `serve` use `--snmp-port`.
+The `run` and `run-forever` commands load CMTS adapter settings from system.json unless you pass adapter overrides.
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --state-dir ./.data/coordination
+```
+
+```bash
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public --write-community private --state-dir ./.data/coordination
+```
+
+## SGW Startup Discovery Modes
+
+SGW discovery runs during `pypnm-cmts serve` startup. The mode is configured in `CmtsOrchestrator.sgw.discovery.mode`.
+If the mode is missing or empty, the default is `snmp`.
+
+### SNMP Mode (Default)
+
+SNMP discovery queries the CMTS to enumerate SG IDs.
+
+- Uses adapter settings from system.json or CLI/env overrides:
+  - `adapter.hostname`
+  - `adapter.community`
+  - `adapter.port`
+- Runs a precheck before discovery:
+  - ICMP ping
+  - SNMP sysDescr
+
+Example: set discovery mode in system.json and override the target at runtime:
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "snmp"
+      }
+    }
+  }
+}
+```
+
+```bash
+pypnm-cmts serve --cmts-hostname 192.168.0.100 --read-community public --write-community public
+```
+
+### Static Mode
+
+Static discovery uses the configured service group list and performs no SNMP calls.
+
+- Requires `service_groups` entries to be present.
+- If the list is empty, discovery returns no SGs.
+
+```json
+{
+  "CmtsOrchestrator": {
+    "sgw": {
+      "enabled": true,
+      "discovery": {
+        "mode": "static"
+      }
+    },
+    "service_groups": [
+      {
+        "sg_id": 1,
+        "enabled": true
+      },
+      {
+        "sg_id": 2,
+        "enabled": true
+      }
+    ]
+  }
+}
+```
+
+## Orchestrator Run Modes
+
+Run a single coordination tick and print JSON output.
+
+Worker mode supports a numeric service group id (bound worker) or no `--sg-id` (unbound worker).
+Use adapter overrides to supply CMTS hostname and read/write communities at runtime without editing system.json.
+
+Tick index is 1-based. The one-shot run reports `tick_index` = 1.
+Continuous runs increment `tick_index` once per tick in the same process.
+Worker persistence happens only when `lease_held` is true.
+
+```bash
+pypnm-cmts run --mode standalone
+```
+
+```bash
+pypnm-cmts run --mode controller
+```
+
+```bash
+pypnm-cmts run --mode worker --sg-id 1
+```
+
+Run continuously with a tick interval (seconds):
+
+```bash
+pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
+```
+
+```bash
+pypnm-cmts run-forever --mode controller --tick-interval-seconds 1
+```
+
+```bash
+pypnm-cmts run-forever --mode worker --sg-id 1 --tick-interval-seconds 1
+```
+
+```bash
+pypnm-cmts run-forever --mode worker --tick-interval-seconds 1
+```
+
+## Worker Result Persistence
+
+Worker mode persists test results under the coordination state directory:
+
+```
+<state_dir>/results/sg_<sg_id>/
+```
+
+Each file name is deterministic per tick:
+
+```
+sg<sg_id>_tick<tick_index>_<test_name>.json
+```
+
+Tick indices are 1-based within a single run.
+
+## Coordination Flags
+
+These flags are supported by `run` and `run-forever`.
+
+Example:
+
+```bash
+pypnm-cmts run-forever --mode standalone --owner-id replica-1 --target-service-groups 2 --shard-mode score \
+  --cmts-hostname 192.168.0.100 --read-community public --snmp-port 161 \
+  --state-dir ./.data/coordination --election-name cmts-primary
+```
+
+Flags:
+- --owner-id <str>
+- --target-service-groups <int>
+- --shard-mode sequential|score
+- --tick-interval-seconds <float>
+- --leader-ttl-seconds <int>
+- --lease-ttl-seconds <int>
+- --state-dir <path>
+- --election-name <str>
+- --cmts-hostname <str>
+- --read-community <str>
+- --write-community <str>
+- --snmp-port <int> (SNMP port override; --cmts-port is deprecated)
+
+If both `--snmp-port` and `--cmts-port` are supplied, `--snmp-port` takes precedence and the deprecated alias emits a warning.
+
+## Serve Options
+
+These options apply to `pypnm-cmts serve`.
+
+```text
+-v, --version Show PyPNM-CMTS version and exit.
+--host Host to bind (default: 127.0.0.1)
+--port Port to bind (default: 8000)
+--ssl Enable HTTPS (requires cert and key)
+--cert Path to SSL certificate (default: ./certs/cert.pem)
+--key Path to SSL private key (default: ./certs/key.pem)
+--log-level Uvicorn log level (default: info)
+--workers Number of worker processes (default: 1)
+--no-access-log Disable Uvicorn access log
+--reload Enable auto-reload on file changes (dev only)
+--reload-dir Directory to watch for changes (repeatable)
+--reload-include Glob pattern(s) to include (repeatable; default: *.py)
+--reload-exclude Glob pattern(s) to exclude (repeatable)
+```
+
+## Debug Tools
+
+Debug commands report the in-process SGW runtime state. If the SGW manager is not initialized,
+the command returns an error.
+
+```bash
+pypnm-cmts debug --show
+```
+
+```bash
+pypnm-cmts debug --sgw-show-process
+```
+
+```bash
+pypnm-cmts debug --sgw-show-poll-interval
+```
+
+```bash
+pypnm-cmts debug --sgw-restart sgw-1
+```
+
+## Security Tools
+
+Repository security checks live under `tools/security`.
+The MAC scan respects `.gitignore` directory entries by default; use `--skip-gitignore` to scan ignored paths.
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found
+```
+
+```bash
+./tools/security/scan-mac-addresses.py --fail-on-found --skip-gitignore
+```
+
+## Next Steps
+
+- Review the system configuration defaults in `src/pypnm_cmts/settings/system.json`.
+- Check the FastAPI reference for available endpoints.
+
+# FILE: docs/system/pypnm-cmts-manpage.md
+# PyPNM-CMTS CLI Man Page
+
+## Name
+
+`pypnm-cmts` - Orchestration, discovery, and service launcher for PyPNM-CMTS.
+
+## Synopsis
+
+```
+pypnm-cmts [-h] [-v] {run,run-forever,discover,serve,config,config-menu,debug} ...
+```
+
+## Description
+
+`pypnm-cmts` controls orchestration ticks, CMTS discovery, and the FastAPI service.
+Configuration is sourced from `system.json` unless overridden by CLI flags.
+
+## Commands
+
+### run
+
+Run a single orchestration tick and print JSON output.
+
+```
+pypnm-cmts run --mode <standalone|controller|worker|combined> [options]
+```
+
+### run-forever
+
+Run orchestration ticks continuously and print JSON output per tick (JSONL).
+
+```
+pypnm-cmts run-forever --mode <standalone|controller|worker|combined> [options]
+```
+
+### discover
+
+Discover service groups and registered cable modems from a CMTS and print the snapshot.
+
+```
+pypnm-cmts discover --cmts-hostname 192.168.0.100 [options]
+```
+
+### serve
+
+Start the FastAPI service via Uvicorn.
+
+```
+pypnm-cmts serve [options]
+```
+
+### config
+
+Non-interactive system.json helpers (init, validate, show).
+
+```
+pypnm-cmts config <init|validate|show> [options]
+```
+
+### config-menu
+
+Launch the interactive system.json configuration menu.
+
+```
+pypnm-cmts config-menu [options]
+```
+
+### debug
+
+Show SGW runtime debug summaries for the current process.
+
+```
+pypnm-cmts debug [options]
+```
+
+## Common Orchestrator Options (run, run-forever)
+
+- `--mode`: Execution mode: `standalone` (coordination only), `controller` (leader only), `worker` (lease + tests), `combined` (controller + worker).
+- `--config`: Path to `system.json` (defaults to built-in config).
+- `--cmts-hostname`: Override `adapter.hostname` for discovery/runtime.
+- `--read-community`: Override `adapter.community` (SNMPv2c read community).
+- `--write-community`: Override `adapter.write_community` (SNMPv2c write community).
+- `--snmp-port`: Override `adapter.port` (SNMP port). `--cmts-port` is deprecated.
+- `--sg-id`: Service group id for worker mode (required for bound workers).
+- `--owner-id`: Override coordination owner id.
+- `--target-service-groups`: Override target SG count per replica (0 means all).
+- `--shard-mode`: Shard strategy: `sequential` (default) or `score`.
+- `--tick-interval-seconds`: Override tick interval (seconds).
+- `--leader-ttl-seconds`: Override leader TTL (seconds).
+- `--lease-ttl-seconds`: Override service group lease TTL (seconds).
+- `--state-dir`: Override coordination state directory.
+- `--election-name`: Override leader election namespace.
+
+## run-forever Options
+
+- `--max-ticks`: Stop after N ticks (optional; useful for tests).
+
+## discover Options
+
+- `--cmts-hostname`: CMTS hostname or IP address (required if not in config).
+- `--read-community`: SNMPv2c read community string (default: `public`).
+- `--write-community`: SNMPv2c write community string (defaults to read community when empty).
+- `--port`: SNMP port for discovery (default: `161`).
+- `--port` applies only to `discover`; `run` and `serve` use `--snmp-port` (`--cmts-port` is deprecated).
+- `--config`: Path to `system.json` (defaults to built-in config).
+- `--state-dir`: Override coordination state directory for snapshot persistence.
+- `--text`: Emit text output instead of JSON.
+
+## serve Options
+
+- `--host`: Host to bind (default: `127.0.0.1`).
+- `--port`: Port to bind (default: `8000`).
+- `--ssl`: Enable HTTPS (requires cert and key).
+- `--cert`: Path to SSL certificate (PEM).
+- `--key`: Path to SSL private key (PEM).
+- `--cmts-hostname`: Override `adapter.hostname` for SGW startup discovery.
+- `--read-community`: Override `adapter.community` for SGW startup discovery.
+- `--write-community`: Override `adapter.write_community` for SGW startup discovery.
+- `--with-runner`: Start the orchestrator runner in-process (combined mode).
+- `--log-level`: Uvicorn log level (default: `info`).
+- `--workers`: Number of Uvicorn worker processes (default: `1`).
+- `--no-access-log`: Disable Uvicorn access logging.
+- `--reload`: Enable auto-reload on file changes (development only).
+- `--reload-dir`: Directory to watch for changes (repeatable).
+- `--reload-include`: Glob pattern(s) to include for reload (repeatable).
+- `--reload-exclude`: Glob pattern(s) to exclude from reload (repeatable).
+
+## debug Options
+
+- `--show`: Show SGW process and poll interval summaries.
+- `--sgw-show-process`: Show SGW worker uptime table.
+- `--sgw-show-poll-interval`: Show poll intervals with refresh counts.
+- `--sgw-restart`: Queue a heavy refresh for a worker id (`sgw-<id>` or numeric).
+- Debug output reflects the in-process SGW runtime; if the manager is not initialized, the command returns an error.
+
+## config init Options
+
+- `--path`: Optional target `system.json` path.
+- `--force`: Overwrite existing file.
+- `--print`: Print the resulting JSON payload.
+- `--dry-run`: Do not write; only print when `--print` is set.
+
+## config validate Options
+
+- `--path`: Optional `system.json` path override.
+- `--json`: Emit JSON output.
+
+Exit codes:
+
+- `0`: Valid configuration.
+- `2`: Invalid configuration (missing or malformed fields).
+- `1`: Tool/runtime error.
+
+## config show Options
+
+- `--path`: Optional `system.json` path override.
+- `--pretty`: Pretty-print JSON output.
+
+## Examples
+
+```
+pypnm-cmts run --mode standalone
+pypnm-cmts run --mode worker --sg-id 1
+pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
+pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public
+pypnm-cmts serve --host 0.0.0.0 --port 8080
+pypnm-cmts serve --reload
+pypnm-cmts debug --show
+pypnm-cmts config init --print
+pypnm-cmts config validate
+pypnm-cmts config show --pretty
+```
+
+## Configuration Notes
+
+- `serve` uses `CmtsOrchestrator` settings for SGW discovery; `--cmts-hostname`, `--read-community`, and `--write-community` override adapter values at startup.
+- `sgw.discovery.mode` controls how SG IDs are obtained (`snmp` by default, `static` for fixed lists).
+- For MAC or IP examples in docs, use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
+
+## Exit Codes
+
+- `0`: Success.
+- `1`: Runtime failure.
+- `2`: Usage error or validation failure.
+
+# FILE: docs/todo/todo.md
+# PyPNM-CMTS TODO (Phase 7.8)
+
+Last Updated: 2026-01-07 (America/Denver)
+
+This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
+
+## Completed (Phase 7.7)
+
+Phase 7.7 is closed. Archive references live at:
+
+- docs/architecture/archive/phase-7.7/README.md
+
+## Completed (Phase 7.8)
+
+- [x] Phase 7.8 · Step 1: Burndown + TODO reset (2026-01-04)
+- [x] Phase 7.8 · Step 2: SG discovery contract + static discovery implementation (2026-01-04)
+
+## Open Items (Phase 7.8)
+
+- [ ] Phase 7.8 · Step 3: SNMP discovery implementation (real)
+- [ ] Phase 7.8 · Step 4: Heavy refresh inventory pipeline hardening
+- [ ] Phase 7.8 · Step 5: Light refresh delta pipeline hardening
+- [ ] Phase 7.8 · Step 6: SGW background scheduler/worker lifecycle hardening
+- [ ] Phase 7.8 · Step 7: Endpoint refresh semantics + rate limiting validation
+- [ ] Phase 7.8 · Step 8: Observability pass (structured logs, metrics stubs, readiness clarity)
+- [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
+- [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
+- [ ] Keep AGENTS response preferences aligned with user updates (update file when requested)
+- [ ] Before proposing or making PyPNM (pypnm-docsis) changes, state the plan and rationale explicitly
+- [ ] Ensure any modified or newly created file updates the SPDX header year to 2026
+- [ ] If a file already has a SPDX year and the year has changed, update it as a range (example: 2025 -> 2025-2026)
+- [ ] When fixing an error, add or update the FAQ entry with the error and resolution
+
+## Deferred Items
+
+- [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite (currently skipped).
+
+## CLI Debug Tools
+
+- [x] pypnm-cmts debug --show
+
+    ```bash
+        pypnm-cmts debug --show
+        
+        --sgw-show-process
+        --sgw-show-poll-interval
+        --sgw-restart <ServingGroupWorker-ID>
+
+    ```
+
+- [x] pypnm-cmts debug --sgw-show-process
+
+    ```bash
+
+        pypnm-cmts debug --sgw-show-process
+
+        | id    | uptime   |
+        |-------|----------|
+        | sgw-1 | 00:15:23 |
+        | sgw-2 | 00:10:45 |
+
+    ```
+
+- [x] pypnm-cmts debug --sgw-show-poll-interval
+
+    ```bash
+
+        pypnm-cmts debug --sgw-show-poll-interval
+
+        | id    | heavy-poll-interval-seconds:count | light-poll-interval-seconds:count |
+        |-------|-----------------------------------|-----------------------------------|
+        | sgw-1 | 300:3                             | 60:12                             |
+        | sgw-2 | 300:2                             | 60:8                              | 
+
+    ```
+

@@ -1,12 +1,13 @@
 # PyPNM-CMTS TODO (Phase 7.8)
 
-Last Updated: 2026-01-05 (America/Denver)
+Last Updated: 2026-01-07 (America/Denver)
 
 This is the running, repo-wide TODO list for PyPNM-CMTS. Items are written so they can be checked off by Codex as work completes.
 
 ## Completed (Phase 7.7)
 
 Phase 7.7 is closed. Archive references live at:
+
 - docs/architecture/archive/phase-7.7/README.md
 
 ## Completed (Phase 7.8)
@@ -33,3 +34,45 @@ Phase 7.7 is closed. Archive references live at:
 ## Deferred Items
 
 - [ ] Re-enable `tests/test_sgw_manager_refresh.py::test_sgw_manager_refresh_forever_uses_clock_and_stops` after resolving slow execution in full suite (currently skipped).
+
+## SGW Debug Endpoints
+
+- [x] GET /ops/servingGroupWorker/process
+
+    ```bash
+        curl -s http://127.0.0.1:8000/ops/servingGroupWorker/process
+
+        | id    | uptime   |
+        |-------|----------|
+        | sgw-1 | 00:15:23 |
+        | sgw-2 | 00:10:45 |
+
+    ```
+
+- [x] GET /ops/servingGroupWorker/poll-interval
+
+    ```bash
+        curl -s http://127.0.0.1:8000/ops/servingGroupWorker/poll-interval
+
+        | id    | heavy-poll-interval-seconds:count | light-poll-interval-seconds:count |
+        |-------|-----------------------------------|-----------------------------------|
+        | sgw-1 | 300:3                             | 60:12                             |
+        | sgw-2 | 300:2                             | 60:8                              | 
+
+    ```
+
+- [x] POST /ops/servingGroupWorker/restart
+
+    ```bash
+        curl -s -X POST http://127.0.0.1:8000/ops/servingGroupWorker/restart -H "Content-Type: application/json" \
+          -d '{"worker_id":"sgw-1"}'
+
+    ```
+
+- [x] POST /ops/servingGroupWorker/resetCounters
+
+    ```bash
+        curl -s -X POST http://127.0.0.1:8000/ops/servingGroupWorker/resetCounters -H "Content-Type: application/json" \
+          -d '{"worker_id":"sgw-1"}'
+
+    ```

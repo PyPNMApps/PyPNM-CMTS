@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pypnm_cmts.config.orchestrator_config import (
     ServiceGroupDescriptor,
 )
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
+from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.runtime_state import (
     reset_sgw_runtime_state,
@@ -68,6 +69,18 @@ def _mark_sgw_ready(settings: CmtsOrchestratorSettings) -> None:
     store = SgwCacheStore()
     manager = SgwManager(settings=settings, store=store, service_groups=[])
     set_sgw_startup_success([], store, manager, now_epoch)
+
+
+def _set_sgw_runtime(
+    settings: CmtsOrchestratorSettings,
+    service_groups: list[ServiceGroupId],
+    now_epoch: float,
+) -> SgwManager:
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    manager = SgwManager(settings=settings, store=store, service_groups=service_groups)
+    set_sgw_startup_success(service_groups, store, manager, now_epoch)
+    return manager
 
 
 def test_ops_health_returns_ok(tmp_path: Path, monkeypatch: object) -> None:
@@ -327,3 +340,135 @@ def test_ops_status_fallback_combined_mode_signature(tmp_path: Path, monkeypatch
     assert len(workers) == 1
     assert workers[0]["pid"] == 555555
     assert workers[0]["sg_id"] is None
+
+
+def test_ops_sgw_process_reports_workers(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    service_groups = [
+        ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True),
+        ServiceGroupDescriptor(sg_id=2, name="sg-2", enabled=True),
+    ]
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        service_groups,
+        election_name="ops-sgw",
+    )
+    monkeypatch.setattr("pypnm_cmts.sgw.manager.time.time", lambda: 100.0)
+    _set_sgw_runtime(settings, [ServiceGroupId(1), ServiceGroupId(2)], now_epoch=100.0)
+    monkeypatch.setattr("pypnm_cmts.api.routes.operational.service.time.time", lambda: 160.0)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/servingGroupWorker/process")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    workers = payload["workers"]
+    assert [entry["worker_id"] for entry in workers] == ["sgw-1", "sgw-2"]
+    assert [entry["sg_id"] for entry in workers] == [1, 2]
+    reset_sgw_runtime_state()
+
+
+def test_ops_sgw_poll_interval_reports_counts(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    service_groups = [ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True)]
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        service_groups,
+        election_name="ops-sgw",
+    )
+    manager = _set_sgw_runtime(settings, [ServiceGroupId(1)], now_epoch=100.0)
+    manager.refresh_once(100.0)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/servingGroupWorker/poll-interval")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    workers = payload["workers"]
+    assert len(workers) == 1
+    assert workers[0]["heavy_interval_seconds"] == int(settings.sgw.poll_heavy_seconds)
+    assert workers[0]["light_interval_seconds"] == int(settings.sgw.poll_light_seconds)
+    assert workers[0]["heavy_count"] == 1
+    assert workers[0]["light_count"] == 1
+    reset_sgw_runtime_state()
+
+
+def test_ops_sgw_restart_queues_refresh(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    service_groups = [ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True)]
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        service_groups,
+        election_name="ops-sgw",
+    )
+    manager = _set_sgw_runtime(settings, [ServiceGroupId(1)], now_epoch=100.0)
+    captured: dict[str, object] = {}
+
+    def _fake_request_refresh(
+        sg_id: ServiceGroupId,
+        mode: object,
+        now_epoch: float,
+    ) -> tuple[bool, str]:
+        captured["sg_id"] = sg_id
+        captured["mode"] = mode
+        captured["now_epoch"] = now_epoch
+        return (True, "")
+
+    monkeypatch.setattr(manager, "request_refresh", _fake_request_refresh)
+    monkeypatch.setattr("pypnm_cmts.api.routes.operational.service.time.time", lambda: 160.0)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.post("/ops/servingGroupWorker/restart", json={"worker_id": "sgw-1"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["sg_id"] == 1
+    assert "queued heavy refresh for sgw-1" in payload["message"]
+    assert captured["sg_id"] == ServiceGroupId(1)
+    reset_sgw_runtime_state()
+
+
+def test_ops_sgw_process_requires_manager(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        [],
+        election_name="ops-sgw",
+    )
+    reset_sgw_runtime_state()
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.get("/ops/servingGroupWorker/process")
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.ERROR.value
+
+
+def test_ops_sgw_reset_clears_counts(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    service_groups = [ServiceGroupDescriptor(sg_id=1, name="sg-1", enabled=True)]
+    settings = _build_settings(
+        OrchestratorMode.STANDALONE,
+        state_dir,
+        service_groups,
+        election_name="ops-sgw",
+    )
+    manager = _set_sgw_runtime(settings, [ServiceGroupId(1)], now_epoch=100.0)
+    manager.refresh_once(100.0)
+    app = _load_app(settings, monkeypatch)
+    client = _client(app)
+    response = client.post("/ops/servingGroupWorker/resetCounters", json={"worker_id": "sgw-1"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    response = client.get("/ops/servingGroupWorker/poll-interval")
+    assert response.status_code == 200
+    poll_payload = response.json()
+    workers = poll_payload["workers"]
+    assert workers[0]["heavy_count"] == 0
+    assert workers[0]["light_count"] == 0
+    reset_sgw_runtime_state()

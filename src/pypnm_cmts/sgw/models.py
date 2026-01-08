@@ -128,6 +128,26 @@ class SgwRefreshResultModel(BaseModel):
     errors: list[SgwRefreshErrorModel] = Field(default_factory=list, description="Errors captured during refresh.")
 
 
+class SgwWorkerProcessDebugModel(BaseModel):
+    """Debug snapshot of SGW worker uptime and start metadata."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier.")
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    started_epoch: float = Field(default=0.0, ge=0.0, description="Epoch time when the worker start was recorded.")
+    uptime_seconds: float = Field(default=0.0, ge=0.0, description="Worker uptime in seconds.")
+
+
+class SgwWorkerPollIntervalDebugModel(BaseModel):
+    """Debug snapshot of SGW poll intervals and refresh counters."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier.")
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    heavy_interval_seconds: int = Field(default=0, ge=0, description="Configured heavy poll interval in seconds.")
+    heavy_count: int = Field(default=0, ge=0, description="Number of heavy refresh cycles recorded.")
+    light_interval_seconds: int = Field(default=0, ge=0, description="Configured light poll interval in seconds.")
+    light_count: int = Field(default=0, ge=0, description="Number of light refresh cycles recorded.")
+
+
 __all__ = [
     "SgwCacheEntryModel",
     "SgwCableModemModel",
@@ -138,4 +158,6 @@ __all__ = [
     "SgwSnapshotPayloadModel",
     "SgwRefreshErrorModel",
     "SgwRefreshResultModel",
+    "SgwWorkerPollIntervalDebugModel",
+    "SgwWorkerProcessDebugModel",
 ]

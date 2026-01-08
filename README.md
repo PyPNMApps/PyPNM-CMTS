@@ -120,6 +120,15 @@ settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname`/`--read-community`
 overrides at runtime.
 
+### Tested CMTS platforms
+
+| Vendor | Model | Status |
+| ------ | ----- | ------ |
+| Casa Systems  | C100G | TBD |
+| Cisco         | CBR8  | TBD |
+| CommScope     | RMD   | TBD |
+| Harmonic      | XXX   | TBD |
+
 ## Documentation
 
 - Docs are being assembled; see `docs/` as the starting point.

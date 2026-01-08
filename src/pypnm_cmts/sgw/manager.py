@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ from pypnm_cmts.sgw.models import (
     SgwRefreshResultModel,
     SgwSnapshotModel,
     SgwSnapshotPayloadModel,
+    SgwWorkerPollIntervalDebugModel,
+    SgwWorkerProcessDebugModel,
 )
 from pypnm_cmts.sgw.store import SgwCacheStore
 
@@ -36,6 +38,8 @@ REFRESH_MODE_LIGHT = "light"
 REFRESH_RESULT_OK = "ok"
 REFRESH_RESULT_ERROR = "error"
 REFRESH_RESULT_STALE = "stale"
+REFRESH_COUNT_HEAVY = "heavy"
+REFRESH_COUNT_LIGHT = "light"
 
 HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
 LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
@@ -77,17 +81,21 @@ class SgwManager:
         self._metrics = metrics if metrics is not None else NoOpSgwMetrics()
         self._jitter_by_sg: dict[ServiceGroupId, int] = {}
         self._refresh_requests: dict[ServiceGroupId, CacheRefreshMode] = {}
+        self._worker_started_epoch: dict[ServiceGroupId, float] = {}
+        self._refresh_counts: dict[ServiceGroupId, dict[str, int]] = {}
         self._stop_requested = False
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         if self._service_groups:
             self._initialize_jitter(self._service_groups)
+            self._initialize_worker_state(self._service_groups)
 
     def set_service_groups(self, service_groups: list[ServiceGroupId]) -> None:
         """Update the service groups managed by this instance."""
         with self._lock:
             self._service_groups = list(service_groups)
             self._initialize_jitter(self._service_groups)
+            self._initialize_worker_state(self._service_groups)
 
     def get_service_groups(self) -> list[ServiceGroupId]:
         """Return the current list of service groups managed by this manager."""
@@ -99,6 +107,80 @@ class SgwManager:
         Return the cache store associated with this manager.
         """
         return self._store
+
+    def get_worker_process_snapshot(self, now_epoch: float) -> list[SgwWorkerProcessDebugModel]:
+        """
+        Return a debug snapshot of SGW worker uptime and start timestamps.
+
+        Args:
+            now_epoch (float): Current time in epoch seconds.
+
+        Returns:
+            list[SgwWorkerProcessDebugModel]: Worker identifiers with uptime and start metadata.
+        """
+        if float(now_epoch) < 0:
+            raise ValueError("now_epoch must be non-negative.")
+        with self._lock:
+            service_groups = sorted(self._service_groups, key=int)
+            started_epochs = dict(self._worker_started_epoch)
+        snapshots: list[SgwWorkerProcessDebugModel] = []
+        for sg_id in service_groups:
+            started_epoch = float(started_epochs.get(sg_id, float(now_epoch)))
+            uptime = max(0.0, float(now_epoch) - started_epoch)
+            snapshots.append(
+                SgwWorkerProcessDebugModel(
+                    worker_id=self._format_worker_id(sg_id),
+                    sg_id=sg_id,
+                    started_epoch=started_epoch,
+                    uptime_seconds=uptime,
+                )
+            )
+        return snapshots
+
+    def get_worker_poll_interval_snapshot(self) -> list[SgwWorkerPollIntervalDebugModel]:
+        """
+        Return a debug snapshot of poll intervals and refresh counts per SGW.
+
+        Returns:
+            list[SgwWorkerPollIntervalDebugModel]: Poll intervals with refresh counters per worker.
+        """
+        with self._lock:
+            service_groups = sorted(self._service_groups, key=int)
+            refresh_counts = {
+                sg_id: dict(counts) for sg_id, counts in self._refresh_counts.items()
+            }
+        heavy_interval = int(self._settings.sgw.poll_heavy_seconds)
+        light_interval = int(self._settings.sgw.poll_light_seconds)
+        snapshots: list[SgwWorkerPollIntervalDebugModel] = []
+        for sg_id in service_groups:
+            counts = refresh_counts.get(sg_id, self._default_refresh_counts())
+            snapshots.append(
+                SgwWorkerPollIntervalDebugModel(
+                    worker_id=self._format_worker_id(sg_id),
+                    sg_id=sg_id,
+                    heavy_interval_seconds=heavy_interval,
+                    heavy_count=int(counts.get(REFRESH_COUNT_HEAVY, 0)),
+                    light_interval_seconds=light_interval,
+                    light_count=int(counts.get(REFRESH_COUNT_LIGHT, 0)),
+                )
+            )
+        return snapshots
+
+    def reset_refresh_counts(self, sg_id: ServiceGroupId) -> tuple[bool, str]:
+        """
+        Reset refresh counters for the specified service group worker.
+
+        Args:
+            sg_id (ServiceGroupId): Service group identifier.
+
+        Returns:
+            tuple[bool, str]: (success, message)
+        """
+        with self._lock:
+            if sg_id not in self._service_groups:
+                return (False, "sg_id not managed by sgw")
+            self._refresh_counts[sg_id] = self._default_refresh_counts()
+        return (True, "")
 
     def stop(self) -> None:
         """Request that the refresh loop stop."""
@@ -289,6 +371,8 @@ class SgwManager:
                 self._metrics.increment_refresh_error(refresh_mode)
             if stale:
                 self._metrics.increment_staleness()
+            if refresh_mode != REFRESH_MODE_NONE and (refresh_applied or error_message != ""):
+                self._increment_refresh_counts(sg_id, refresh_mode)
             if refresh_applied or error_message != "" or stale:
                 result = REFRESH_RESULT_OK
                 if error_message != "":
@@ -527,6 +611,45 @@ class SgwManager:
         self._jitter_by_sg = {}
         for sg_id in service_groups:
             self._jitter_by_sg[sg_id] = self._resolve_jitter_seconds(sg_id)
+
+    def _initialize_worker_state(self, service_groups: list[ServiceGroupId]) -> None:
+        now_epoch = float(self._default_clock())
+        worker_started: dict[ServiceGroupId, float] = {}
+        refresh_counts: dict[ServiceGroupId, dict[str, int]] = {}
+        for sg_id in service_groups:
+            worker_started[sg_id] = self._worker_started_epoch.get(sg_id, now_epoch)
+            existing_counts = self._refresh_counts.get(sg_id)
+            if existing_counts is None:
+                refresh_counts[sg_id] = self._default_refresh_counts()
+            else:
+                refresh_counts[sg_id] = dict(existing_counts)
+                refresh_counts[sg_id].setdefault(REFRESH_COUNT_HEAVY, 0)
+                refresh_counts[sg_id].setdefault(REFRESH_COUNT_LIGHT, 0)
+        self._worker_started_epoch = worker_started
+        self._refresh_counts = refresh_counts
+
+    @staticmethod
+    def _default_refresh_counts() -> dict[str, int]:
+        return {
+            REFRESH_COUNT_HEAVY: 0,
+            REFRESH_COUNT_LIGHT: 0,
+        }
+
+    def _increment_refresh_counts(self, sg_id: ServiceGroupId, refresh_mode: str) -> None:
+        match refresh_mode:
+            case _ if refresh_mode == REFRESH_MODE_HEAVY:
+                keys = [REFRESH_COUNT_HEAVY, REFRESH_COUNT_LIGHT]
+            case _ if refresh_mode == REFRESH_MODE_LIGHT:
+                keys = [REFRESH_COUNT_LIGHT]
+            case _:
+                return
+        with self._lock:
+            counts = self._refresh_counts.get(sg_id)
+            if counts is None:
+                counts = self._default_refresh_counts()
+                self._refresh_counts[sg_id] = counts
+            for key in keys:
+                counts[key] = int(counts.get(key, 0)) + 1
 
     @staticmethod
     def _clamp_jitter(jitter_value: int, max_jitter: int) -> int:

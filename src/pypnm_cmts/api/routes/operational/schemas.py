@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -10,6 +10,10 @@ from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     CoordinationPath,
     ServiceGroupId,
+)
+from pypnm_cmts.sgw.models import (
+    SgwWorkerPollIntervalDebugModel,
+    SgwWorkerProcessDebugModel,
 )
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
@@ -79,6 +83,58 @@ class VersionResponseModel(BaseModel):
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
 
 
+class SgwProcessResponseModel(BaseModel):
+    """SGW worker process debug response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW debug status indicator.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    workers: list[SgwWorkerProcessDebugModel] = Field(default_factory=list, description="SGW worker process snapshots.")
+    message: str = Field(default="", description="Optional error message when unavailable.")
+
+
+class SgwPollIntervalResponseModel(BaseModel):
+    """SGW poll interval debug response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW debug status indicator.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    workers: list[SgwWorkerPollIntervalDebugModel] = Field(default_factory=list, description="SGW poll interval snapshots.")
+    message: str = Field(default="", description="Optional error message when unavailable.")
+
+
+class SgwRestartRequestModel(BaseModel):
+    """SGW restart request payload."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier (sgw-<id> or numeric).")
+
+
+class SgwRestartResponseModel(BaseModel):
+    """SGW restart response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW restart status indicator.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    sg_id: ServiceGroupId | None = Field(default=None, description="Parsed service group identifier when available.")
+    message: str = Field(default="", description="Restart status message.")
+
+
+class SgwResetRequestModel(BaseModel):
+    """SGW refresh counter reset request payload."""
+
+    worker_id: str = Field(default="", description="Serving group worker identifier (sgw-<id> or numeric).")
+
+
+class SgwResetResponseModel(BaseModel):
+    """SGW refresh counter reset response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW reset status indicator.")
+    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    sg_id: ServiceGroupId | None = Field(default=None, description="Parsed service group identifier when available.")
+    message: str = Field(default="", description="Reset status message.")
+
+
 __all__ = [
     "OperationalIdentityModel",
     "HealthResponseModel",
@@ -86,4 +142,10 @@ __all__ = [
     "OperationalProcessInfoModel",
     "OperationalStatusResponseModel",
     "VersionResponseModel",
+    "SgwProcessResponseModel",
+    "SgwPollIntervalResponseModel",
+    "SgwRestartRequestModel",
+    "SgwRestartResponseModel",
+    "SgwResetRequestModel",
+    "SgwResetResponseModel",
 ]

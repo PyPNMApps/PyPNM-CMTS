@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -13,6 +13,12 @@ from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
     OperationalStatusResponseModel,
     ReadyResponseModel,
+    SgwPollIntervalResponseModel,
+    SgwProcessResponseModel,
+    SgwResetRequestModel,
+    SgwResetResponseModel,
+    SgwRestartRequestModel,
+    SgwRestartResponseModel,
     VersionResponseModel,
 )
 from pypnm_cmts.api.routes.operational.service import OperationalService
@@ -104,6 +110,110 @@ class OperationalRouter:
             Returns process status and coordination metadata.
             """
             return self._service.status()
+
+        @self.router.get(
+            "/servingGroupWorker/process",
+            response_model=SgwProcessResponseModel,
+            summary="SGW worker process status",
+            description="Returns SGW worker identifiers with uptime details.",
+            responses={
+                HTTPStatus.SERVICE_UNAVAILABLE.value: {
+                    "model": SgwProcessResponseModel,
+                    "description": "SGW runtime unavailable",
+                }
+            },
+        )
+        def sgw_process() -> SgwProcessResponseModel:
+            """
+            **SGW Process**
+
+            Returns worker identifiers with uptime details.
+            """
+            payload = self._service.sgw_process()
+            if payload.status != OperationalStatus.OK:
+                return JSONResponse(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                    content=payload.model_dump(mode="json"),
+                )
+            return payload
+
+        @self.router.get(
+            "/servingGroupWorker/poll-interval",
+            response_model=SgwPollIntervalResponseModel,
+            summary="SGW poll interval summary",
+            description="Returns SGW poll intervals with refresh counters.",
+            responses={
+                HTTPStatus.SERVICE_UNAVAILABLE.value: {
+                    "model": SgwPollIntervalResponseModel,
+                    "description": "SGW runtime unavailable",
+                }
+            },
+        )
+        def sgw_poll_interval() -> SgwPollIntervalResponseModel:
+            """
+            **SGW Poll Interval**
+
+            Returns poll intervals with refresh counts per worker.
+            """
+            payload = self._service.sgw_poll_intervals()
+            if payload.status != OperationalStatus.OK:
+                return JSONResponse(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                    content=payload.model_dump(mode="json"),
+                )
+            return payload
+
+        @self.router.post(
+            "/servingGroupWorker/restart",
+            response_model=SgwRestartResponseModel,
+            summary="Queue a heavy SGW refresh",
+            description="Queues a heavy refresh for the specified worker id.",
+            responses={
+                HTTPStatus.SERVICE_UNAVAILABLE.value: {
+                    "model": SgwRestartResponseModel,
+                    "description": "SGW runtime unavailable or request rejected",
+                }
+            },
+        )
+        def sgw_restart(payload: SgwRestartRequestModel) -> SgwRestartResponseModel:
+            """
+            **SGW Restart**
+
+            Queues a heavy refresh for the specified worker.
+            """
+            response = self._service.sgw_restart(payload)
+            if response.status != OperationalStatus.OK:
+                return JSONResponse(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                    content=response.model_dump(mode="json"),
+                )
+            return response
+
+        @self.router.post(
+            "/servingGroupWorker/resetCounters",
+            response_model=SgwResetResponseModel,
+            summary="Reset SGW refresh counters",
+            description="Resets heavy/light refresh counters for the specified worker id.",
+            responses={
+                HTTPStatus.SERVICE_UNAVAILABLE.value: {
+                    "model": SgwResetResponseModel,
+                    "description": "SGW runtime unavailable or request rejected",
+                }
+            },
+        )
+        def sgw_reset(payload: SgwResetRequestModel) -> SgwResetResponseModel:
+            """
+            **SGW Reset**
+
+            Resets refresh counters for the specified worker.
+            """
+            response = self._service.sgw_reset(payload)
+            if response.status != OperationalStatus.OK:
+                return JSONResponse(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                    content=response.model_dump(mode="json"),
+                )
+            return response
 
 router = OperationalRouter().router
 

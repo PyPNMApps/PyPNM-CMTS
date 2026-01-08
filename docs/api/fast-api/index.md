@@ -17,6 +17,12 @@ curl http://127.0.0.1:8000/ops/health
 curl http://127.0.0.1:8000/ops/ready
 ```
 
+PyPNM endpoints from `pypnm-docsis` are mounted under the `/cm` prefix. Example:
+
+```bash
+curl http://127.0.0.1:8000/cm/health
+```
+
 SGW refresh runs in a background loop after startup prime. Cache-first endpoints
 may request a refresh, but they do not execute SNMP in the request thread.
 
@@ -30,6 +36,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `GET /ops/ready` - Readiness probe.
 - `GET /ops/version` - Service identity and version.
 - `GET /ops/status` - Operational process status snapshot.
+- `GET /ops/servingGroupWorker/process` - SGW worker uptime snapshot.
+- `GET /ops/servingGroupWorker/poll-interval` - SGW poll interval summary.
+- `POST /ops/servingGroupWorker/restart` - Queue a heavy refresh for an SGW worker.
+- `POST /ops/servingGroupWorker/resetCounters` - Reset refresh counters for an SGW worker.
 
 ## Endpoint Documentation
 

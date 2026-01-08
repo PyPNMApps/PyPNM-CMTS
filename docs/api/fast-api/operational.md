@@ -148,6 +148,136 @@ Expected log markers:
 If discovery returns an empty list, readiness is still reported as `ready` but endpoints that depend on SG cache will
 return empty results.
 
+### GET /ops/servingGroupWorker/process
+
+SGW Worker Process Summary.
+Returns worker identifiers with uptime snapshots.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/servingGroupWorker/process
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "workers": [
+    {
+      "worker_id": "sgw-1",
+      "sg_id": 1,
+      "started_epoch": 1700000000.0,
+      "uptime_seconds": 60.0
+    }
+  ],
+  "message": ""
+}
+```
+
+### GET /ops/servingGroupWorker/poll-interval
+
+SGW Poll Interval Summary.
+Returns poll intervals and refresh counts for each worker.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/servingGroupWorker/poll-interval
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "workers": [
+    {
+      "worker_id": "sgw-1",
+      "sg_id": 1,
+      "heavy_interval_seconds": 300,
+      "heavy_count": 1,
+      "light_interval_seconds": 60,
+      "light_count": 1
+    }
+  ],
+  "message": ""
+}
+```
+
+### POST /ops/servingGroupWorker/restart
+
+Queue a heavy refresh for a specific SGW worker.
+
+Example:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/ops/servingGroupWorker/restart \
+  -H "Content-Type: application/json" \
+  -d '{"worker_id":"sgw-1"}'
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "sg_id": 1,
+  "message": "queued heavy refresh for sgw-1"
+}
+```
+
+### POST /ops/servingGroupWorker/resetCounters
+
+Reset SGW refresh counters for a specific worker.
+
+Example:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/ops/servingGroupWorker/resetCounters \
+  -H "Content-Type: application/json" \
+  -d '{"worker_id":"sgw-1"}'
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "controller",
+    "election_name": "cmts-primary",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "sg_id": 1,
+  "message": "reset refresh counts for sgw-1"
+}
+```
+
 ### GET /ops/version
 
 Service Identity, Version, And Runtime Metadata.
