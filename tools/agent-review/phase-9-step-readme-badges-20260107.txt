@@ -15,7 +15,9 @@
 # PyPNM-CMTS - CMTS Operations Toolkit for PyPNM (Under Development)
 
 [![PyPI version](https://img.shields.io/pypi/v/pypnm-docsis-cmts)](https://pypi.org/project/pypnm-docsis-cmts/)
+[![Repo version](https://img.shields.io/badge/version-0.1.58.0-blue)](https://github.com/PyPNMApps/PyPNM-CMTS/blob/main/src/pypnm_cmts/version.py)
 [![CI](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml/badge.svg)](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-orange)](https://ubuntu.com/download)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 
