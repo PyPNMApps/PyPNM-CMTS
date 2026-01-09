@@ -23,6 +23,8 @@ PyPNM endpoints from `pypnm-docsis` are mounted under the `/cm` prefix. Example:
 curl http://127.0.0.1:8000/cm/health
 ```
 
+CMTS endpoints document JSON-only responses; binary or archive responses are advertised only for PyPNM endpoints that return files.
+
 SGW refresh runs in a background loop after startup prime. Cache-first endpoints
 may request a refresh, but they do not execute SNMP in the request thread.
 
@@ -30,8 +32,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 
 - `GET /cmts/system/sysDescr` - CMTS sysDescr lookup.
 - `GET /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
+- `GET /cmts/servingGroup/status` - SGW startup status and cache readiness.
 - `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
 - `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
+- `POST /cmts/pnm/rxmer/getCapture` - Orchestrated RxMER capture per serving group.
 - `GET /ops/health` - Liveness probe.
 - `GET /ops/ready` - Readiness probe.
 - `GET /ops/version` - Service identity and version.
@@ -44,6 +48,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 ## Endpoint Documentation
 
 - [Operational endpoints](operational.md)
+- [RxMER orchestration](pnm-rxmer.md)
 - [Serving group endpoints](serving-group.md)
 
 ## GET /cmts/system/sysDescr

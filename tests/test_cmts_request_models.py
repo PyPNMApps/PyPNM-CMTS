@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
 import pytest
-from pypnm.lib.types import MacAddressStr
+from pydantic import ValidationError
+from pypnm.lib.types import ChannelId, MacAddressStr
 
 from pypnm_cmts.api.common.cmts_request import (
     CmtsCableModemFilterModel,
+    CmtsPnmCaptureParametersModel,
+    CmtsSnmpV2CModel,
+    CmtsTftpParametersModel,
     CmtsRequestEnvelopeModel,
     CmtsServingGroupFilterModel,
 )
@@ -21,35 +25,31 @@ from pypnm_cmts.lib.types import ServiceGroupId
 
 
 @pytest.mark.unit
-def test_serving_group_filter_dedupes_and_sorts() -> None:
-    model = CmtsServingGroupFilterModel(id=[ServiceGroupId(2), ServiceGroupId(1), ServiceGroupId(2)])
-    assert model.id == [ServiceGroupId(1), ServiceGroupId(2)]
+def test_serving_group_filter_rejects_duplicates() -> None:
+    with pytest.raises(ValidationError, match="serving_group.id contains duplicate values"):
+        CmtsServingGroupFilterModel(id=[ServiceGroupId(2), ServiceGroupId(1), ServiceGroupId(2)])
 
 
 @pytest.mark.unit
 def test_serving_group_filter_rejects_negative() -> None:
-    with pytest.raises(ValueError, match="serving_group.id values must be zero or greater."):
+    with pytest.raises(ValidationError, match="serving_group.id values must be zero or greater."):
         CmtsServingGroupFilterModel(id=[ServiceGroupId(-1)])
 
 
 @pytest.mark.unit
-def test_cable_modem_filter_dedupes() -> None:
-    model = CmtsCableModemFilterModel(
-        mac_address=[
-            MacAddressStr("aa:bb:cc:dd:ee:ff"),
-            MacAddressStr("aa:bb:cc:dd:ee:ff"),
-            MacAddressStr("aa:bb:cc:dd:ee:01"),
-        ]
-    )
-    assert model.mac_address == [
-        MacAddressStr("aa:bb:cc:dd:ee:ff"),
-        MacAddressStr("aa:bb:cc:dd:ee:01"),
-    ]
+def test_cable_modem_filter_rejects_duplicates() -> None:
+    with pytest.raises(ValidationError, match="cable_modem.mac_address contains duplicate values"):
+        CmtsCableModemFilterModel(
+            mac_address=[
+                MacAddressStr("aa:bb:cc:dd:ee:ff"),
+                MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            ]
+        )
 
 
 @pytest.mark.unit
 def test_cable_modem_filter_rejects_invalid_mac() -> None:
-    with pytest.raises(ValueError, match="cable_modem.mac_address entries must be valid MAC addresses."):
+    with pytest.raises(ValidationError, match="cable_modem.mac_address entries must be valid MAC addresses."):
         CmtsCableModemFilterModel(mac_address=["invalid-mac"])
 
 
@@ -96,3 +96,66 @@ def test_request_apply_defaults_uses_env_overrides(monkeypatch: pytest.MonkeyPat
     assert pnm.tftp is not None
     assert pnm.tftp.ipv4 == "192.168.0.100"
     assert pnm.tftp.ipv6 == "::1"
+
+
+@pytest.mark.unit
+def test_capture_channel_ids_rejects_duplicates() -> None:
+    with pytest.raises(ValidationError, match="pnm_parameters.capture.channel_ids contains duplicate values"):
+        CmtsPnmCaptureParametersModel(channel_ids=[ChannelId(3), ChannelId(1), ChannelId(3)])
+
+
+@pytest.mark.unit
+def test_tftp_requires_ipv4_ipv6_keys() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        CmtsTftpParametersModel.model_validate({})
+
+
+@pytest.mark.unit
+def test_tftp_accepts_null_defaults() -> None:
+    model = CmtsTftpParametersModel.model_validate({"ipv4": None, "ipv6": None})
+    assert model.ipv4 is None
+    assert model.ipv6 is None
+
+
+@pytest.mark.unit
+def test_tftp_rejects_blank_ipv4() -> None:
+    with pytest.raises(ValidationError, match="tftp.ipv4 must be null or a valid IP address"):
+        CmtsTftpParametersModel.model_validate({"ipv4": "", "ipv6": None})
+
+
+@pytest.mark.unit
+def test_snmpv2c_requires_community_key() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        CmtsSnmpV2CModel.model_validate({})
+
+
+@pytest.mark.unit
+def test_snmpv2c_accepts_null_default() -> None:
+    model = CmtsSnmpV2CModel.model_validate({"community": None})
+    assert model.community is None
+
+
+@pytest.mark.unit
+def test_snmpv2c_rejects_blank() -> None:
+    with pytest.raises(ValidationError, match="snmpV2C.community must not be blank"):
+        CmtsSnmpV2CModel.model_validate({"community": ""})
+
+
+@pytest.mark.unit
+def test_request_apply_defaults_preserves_capture() -> None:
+    capture = CmtsPnmCaptureParametersModel(channel_ids=[ChannelId(33)])
+    envelope = CmtsRequestEnvelopeModel(
+        cable_modem=CmtsCableModemFilterModel(
+            pnm_parameters={"capture": capture},
+        )
+    )
+    defaults = CmtsRequestDefaults(
+        cm_snmpv2c_write_community=None,
+        cm_tftp_ipv4="192.168.0.100",
+        cm_tftp_ipv6="::1",
+    )
+    applied = envelope.apply_defaults(defaults)
+    pnm = applied.cable_modem.pnm_parameters
+    assert pnm is not None
+    assert pnm.capture is not None
+    assert pnm.capture.channel_ids == [ChannelId(33)]

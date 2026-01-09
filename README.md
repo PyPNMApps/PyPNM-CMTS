@@ -13,7 +13,7 @@
 
 # PyPNM-CMTS - CMTS Operations Toolkit for PyPNM (Under Development)
 
-[![Repo version](https://img.shields.io/badge/version-0.1.58.0-blue)](https://github.com/PyPNMApps/PyPNM-CMTS/blob/main/src/pypnm_cmts/version.py)
+[![Repo version](https://img.shields.io/badge/version-0.1.58.3-blue)](https://github.com/PyPNMApps/PyPNM-CMTS/blob/main/src/pypnm_cmts/version.py)
 [![PyPI version](https://img.shields.io/pypi/v/pypnm-docsis-cmts)](https://pypi.org/project/pypnm-docsis-cmts/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![CI](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml/badge.svg)](https://github.com/PyPNMApps/PyPNM-CMTS/actions/workflows/ci.yml)
@@ -126,11 +126,11 @@ overrides at runtime.
 ### Tested CMTS platforms
 
 | Vendor | Model | Status |
-| ------ | ----- | ------ |
-| Casa Systems  | C100G | TBD |
-| Cisco         | CBR8  | TBD |
-| CommScope     | RMD   | TBD |
-| Harmonic      | XXX   | TBD |
+|--------|-------|--------|
+| Casa Systems  | C100G                   | TBD |
+| Cisco         | CBR8                    | TBD |
+| CommScope     | RMD                     | TBD |
+| Harmonic      | CableOS Cloud-Native    | TBD |
 
 ## Documentation
 

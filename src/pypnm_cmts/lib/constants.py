@@ -35,9 +35,26 @@ class RfChannelType(str, Enum):
     OFDMA = "ofdma"
 
 
+class PnmCaptureStatus(str, Enum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class PnmCaptureFailureReason(str, Enum):
+    PER_MODEM_TIMEOUT = "per_modem_timeout"
+    OVERALL_TIMEOUT = "overall_timeout"
+    HTTP_ERROR = "http_error"
+    PYPNM_ERROR = "pypnm_error"
+    REQUEST_ERROR = "request_error"
+    UNKNOWN = "unknown"
+
+
 __all__ = [
     "CacheRefreshMode",
     "OperationalStatus",
+    "PnmCaptureFailureReason",
+    "PnmCaptureStatus",
     "RfChannelType",
     "ReadinessCheck",
 ]

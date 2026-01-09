@@ -27,6 +27,7 @@ All CMTS-backed endpoints accept a single top-level `cmts` object. The fields un
 
 - PNM endpoints may accept optional overrides for TFTP and SNMP write community per request.
 - TFTP and SNMP values apply to all cable modems in-scope for the request.
+- `cmts.cable_modem.pnm_parameters.capture.channel_ids` optionally filters downstream channels for capture operations; empty or missing means all channels.
 
 ### Non-PNM Operations
 
@@ -103,8 +104,10 @@ Unknown numeric values map to `"text": "other"`.
       "mac_address": ["aa:bb:cc:dd:ee:ff"],
       "pnm_parameters": {
         "tftp": {
-          "ipv4": "192.168.0.100",
-          "ipv6": "2001:db8::10"
+          "ipv4": "192.168.0.100"
+        },
+        "capture": {
+          "channel_ids": [193]
         }
       },
       "snmp": {

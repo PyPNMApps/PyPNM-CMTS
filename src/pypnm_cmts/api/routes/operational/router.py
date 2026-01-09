@@ -22,6 +22,7 @@ from pypnm_cmts.api.routes.operational.schemas import (
     VersionResponseModel,
 )
 from pypnm_cmts.api.routes.operational.service import OperationalService
+from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 from pypnm_cmts.lib.constants import OperationalStatus
 
 
@@ -48,6 +49,7 @@ class OperationalRouter:
             response_model=HealthResponseModel,
             summary="Operational health probe",
             description="Returns a basic liveness signal and runtime metadata.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def health() -> HealthResponseModel:
             """
@@ -63,6 +65,7 @@ class OperationalRouter:
             summary="Operational readiness probe",
             description="Returns readiness based on local prerequisites.",
             responses={
+                **JSON_ONLY_FAST_API_RESPONSE,
                 HTTPStatus.SERVICE_UNAVAILABLE.value: {
                     "model": ReadyResponseModel,
                     "description": "Not ready",
@@ -88,6 +91,7 @@ class OperationalRouter:
             response_model=VersionResponseModel,
             summary="Operational version probe",
             description="Returns version and runtime metadata.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def version() -> VersionResponseModel:
             """
@@ -102,6 +106,7 @@ class OperationalRouter:
             response_model=OperationalStatusResponseModel,
             summary="Operational process status",
             description="Returns process and coordination snapshot metadata.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def status() -> OperationalStatusResponseModel:
             """
@@ -117,6 +122,7 @@ class OperationalRouter:
             summary="SGW worker process status",
             description="Returns SGW worker identifiers with uptime details.",
             responses={
+                **JSON_ONLY_FAST_API_RESPONSE,
                 HTTPStatus.SERVICE_UNAVAILABLE.value: {
                     "model": SgwProcessResponseModel,
                     "description": "SGW runtime unavailable",
@@ -143,6 +149,7 @@ class OperationalRouter:
             summary="SGW poll interval summary",
             description="Returns SGW poll intervals with refresh counters.",
             responses={
+                **JSON_ONLY_FAST_API_RESPONSE,
                 HTTPStatus.SERVICE_UNAVAILABLE.value: {
                     "model": SgwPollIntervalResponseModel,
                     "description": "SGW runtime unavailable",
@@ -169,6 +176,7 @@ class OperationalRouter:
             summary="Queue a heavy SGW refresh",
             description="Queues a heavy refresh for the specified worker id.",
             responses={
+                **JSON_ONLY_FAST_API_RESPONSE,
                 HTTPStatus.SERVICE_UNAVAILABLE.value: {
                     "model": SgwRestartResponseModel,
                     "description": "SGW runtime unavailable or request rejected",
@@ -195,6 +203,7 @@ class OperationalRouter:
             summary="Reset SGW refresh counters",
             description="Resets heavy/light refresh counters for the specified worker id.",
             responses={
+                **JSON_ONLY_FAST_API_RESPONSE,
                 HTTPStatus.SERVICE_UNAVAILABLE.value: {
                     "model": SgwResetResponseModel,
                     "description": "SGW runtime unavailable or request rejected",

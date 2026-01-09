@@ -8,13 +8,13 @@ from enum import Enum
 from http import HTTPStatus
 
 from fastapi import APIRouter, HTTPException
-from pypnm.lib.fastapi_constants import FAST_API_RESPONSE
 
 from pypnm_cmts.api.routes.system.schemas import (
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
 )
 from pypnm_cmts.api.routes.system.service import SystemCmtsSnmpService
+from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 
 
 class SystemRouter:
@@ -39,7 +39,7 @@ class SystemRouter:
             response_model=CmtsSysDescrResponse,
             summary="Retrieve CMTS sysDescr",
             description="Fetches the system description from a CMTS.",
-            responses=FAST_API_RESPONSE,
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         async def get_sysdescr() -> CmtsSysDescrResponse:
             """

@@ -17,6 +17,7 @@ from pypnm_cmts.api.routes.serving_group.schemas import (
     ServingGroupStatusResponse,
 )
 from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 
 
 class ServingGroupRouter:
@@ -42,6 +43,7 @@ class ServingGroupRouter:
             response_model=GetServingGroupIdsResponse,
             summary="Retrieve discovered serving group ids",
             description="Returns discovered serving group ids and cache summaries.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def get_ids() -> GetServingGroupIdsResponse:
             """
@@ -56,6 +58,7 @@ class ServingGroupRouter:
             response_model=ServingGroupStatusResponse,
             summary="Serving group worker status",
             description="Returns SGW startup status and cache readiness.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def get_status() -> ServingGroupStatusResponse:
             """
@@ -70,6 +73,7 @@ class ServingGroupRouter:
             response_model=GetServingGroupCableModemsResponse,
             summary="Retrieve cable modems for a serving group",
             description="Returns cached cable modem membership for a serving group.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def get_cable_modems(
             request: GetServingGroupCableModemsRequest,
@@ -86,6 +90,7 @@ class ServingGroupRouter:
             response_model=GetServingGroupTopologyResponse,
             summary="Retrieve serving group topology",
             description="Returns cached topology summary for a serving group.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def get_topology(
             request: GetServingGroupTopologyRequest,

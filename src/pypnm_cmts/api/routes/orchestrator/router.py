@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from enum import Enum
 from fastapi import APIRouter
 
 from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
+from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
 from pypnm_cmts.orchestrator.models import (
     OrchestratorRunResultModel,
@@ -38,6 +39,7 @@ class OrchestratorRouter:
             response_model=OrchestratorRunResultModel,
             summary="Execute a single orchestration tick",
             description="Executes one orchestration tick using the current coordination backend.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def run_once(request: OrchestratorRunRequest) -> OrchestratorRunResultModel:
             """
@@ -65,6 +67,7 @@ class OrchestratorRouter:
             response_model=OrchestratorStatusModel,
             summary="Retrieve orchestration status",
             description="Returns inventory and coordination status without executing a tick.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def status(request: OrchestratorRunRequest) -> OrchestratorStatusModel:
             """

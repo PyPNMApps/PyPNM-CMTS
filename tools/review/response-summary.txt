@@ -1,0 +1,5 @@
+Summary
+- Confirmed: PyPNM payload is built in `src/pypnm_cmts/api/routes/pnm/rxmer/service.py` within `_build_pypnm_payload()` (lines 335-375).
+- IP selection is in `_resolve_modem_ip()` (lines 377-385), and capture is only added when channel_ids is present (lines 354-365).
+
+# FILE: (no files touched)

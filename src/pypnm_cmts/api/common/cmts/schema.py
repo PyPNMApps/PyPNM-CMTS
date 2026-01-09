@@ -30,7 +30,7 @@ class CmtsSnmpConfig(BaseModel):
     model_config        = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     port: int           = Field(default=Snmp_v2c.SNMP_PORT, description="SNMP port.")
 
-    snmp_v2c: SNMPv2c   = Field(default_factory=SNMPv2c, description="SNMP v2c settings")
+    snmp_v2c: SNMPv2c   = Field(default_factory=lambda: SNMPv2c(community=None), description="SNMP v2c settings")
     snmp_v3: SNMPv3 | None = Field(default=None, description="SNMP v3 settings")
 
 

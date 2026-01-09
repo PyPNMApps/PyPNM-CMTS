@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 
@@ -12,6 +13,8 @@ class StartUp:
     """Initialize shared PyPNM-CMTS startup routines."""
 
     _LOGS_LINK_NAME = "logs"
+    _DATA_LINK_NAME = ".data"
+    _DATA_BACKUP_PREFIX = ".data.bak"
     _logging_configured = False
 
     @staticmethod
@@ -20,6 +23,7 @@ class StartUp:
         StartUp._ensure_cmts_system_config()
         StartUp._configure_logging()
         StartUp._ensure_logs_symlink()
+        StartUp._ensure_data_symlink()
         return True
 
     @staticmethod
@@ -72,6 +76,48 @@ class StartUp:
                 return
 
         link_path.symlink_to(log_dir, target_is_directory=True)
+
+    @staticmethod
+    def _ensure_data_symlink() -> None:
+        """
+        Ensure the repo-level data symlink points at the pypnm-docsis data directory.
+        """
+        data_root = StartUp._resolve_pypnm_data_root()
+        if data_root is None:
+            return
+
+        data_root.mkdir(parents=True, exist_ok=True)
+        project_root = StartUp._project_root()
+        link_path = project_root / StartUp._DATA_LINK_NAME
+
+        if link_path.exists() and not link_path.is_symlink():
+            if not link_path.is_dir():
+                return
+            backup_path = StartUp._next_data_backup_path(project_root)
+            try:
+                link_path.rename(backup_path)
+            except Exception:
+                return
+
+        if link_path.is_symlink():
+            try:
+                if link_path.resolve() == data_root.resolve():
+                    return
+                link_path.unlink()
+            except Exception:
+                return
+
+        link_path.symlink_to(data_root, target_is_directory=True)
+
+    @staticmethod
+    def _next_data_backup_path(project_root: Path) -> Path:
+        backup_stamp = str(int(time.time()))
+        candidate = project_root / f"{StartUp._DATA_BACKUP_PREFIX}-{backup_stamp}"
+        suffix = 1
+        while candidate.exists():
+            candidate = project_root / f"{StartUp._DATA_BACKUP_PREFIX}-{backup_stamp}-{suffix}"
+            suffix += 1
+        return candidate
 
     @staticmethod
     def _ensure_cmts_system_config() -> None:
@@ -163,6 +209,32 @@ class StartUp:
 
         config_path = package_root / "settings" / "system.json"
         return (config_path.parent.parent / log_dir).resolve()
+
+    @staticmethod
+    def _resolve_pypnm_data_root() -> Path | None:
+        """
+        Resolve the data directory root from the installed pypnm-docsis configuration.
+        """
+        try:
+            import sys
+
+            import pypnm
+            from pypnm.config.system_config_settings import SystemConfigSettings
+        except Exception:
+            return None
+
+        package_root = StartUp._site_packages_root(sys.prefix)
+        if package_root is None:
+            package_root = Path(pypnm.__file__).resolve().parent
+
+        pnm_dir = Path(SystemConfigSettings.pnm_dir())
+        if pnm_dir.is_absolute():
+            resolved_pnm_dir = pnm_dir
+        else:
+            config_path = package_root / "settings" / "system.json"
+            resolved_pnm_dir = (config_path.parent.parent / pnm_dir).resolve()
+
+        return resolved_pnm_dir.parent
 
     @staticmethod
     def _site_packages_root(prefix: str) -> Path | None:
