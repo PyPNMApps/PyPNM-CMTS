@@ -50,8 +50,25 @@ class PnmCaptureFailureReason(str, Enum):
     UNKNOWN = "unknown"
 
 
+class OperationState(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+
+class OperationStage(str, Enum):
+    ELIGIBILITY = "eligibility"
+    PRECHECK = "precheck"
+    CAPTURE = "capture"
+
+
 __all__ = [
     "CacheRefreshMode",
+    "OperationStage",
+    "OperationState",
     "OperationalStatus",
     "PnmCaptureFailureReason",
     "PnmCaptureStatus",

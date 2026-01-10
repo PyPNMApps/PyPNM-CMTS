@@ -1,47 +1,51 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2026 Maurice Garcia -->
+
 # RxMER Orchestration Endpoints
 
-RxMER capture orchestration uses the SGW cache to identify cable modems in a serving group and triggers PyPNM RxMER capture concurrently per modem. Requests target the CMTS API and PyPNM is invoked under the `/cm` mount.
+RxMER serving-group orchestration uses a filesystem-backed operation model. The CMTS API creates and tracks job state while PyPNM captures are executed later in the pipeline.
 
-## POST /cmts/pnm/rxmer/getCapture
-
-Orchestrate RxMER capture for a single serving group. The request enforces exactly one `cmts.serving_group.id`. Optional `cmts.cable_modem.pnm_parameters.capture.channel_ids` are forwarded to PyPNM to filter channels; empty or missing lists capture all channels. Per-modem and overall timeouts are configurable via `execution`.
-
-### Flow
+## Lifecycle
 
 ```mermaid
 flowchart TD
-    A[Request: serving group + capture + execution] --> B[Check in-flight run]
-    B -->|already running| I[Return existing run_id + summary]
-    B -->|new run| C[Validate serving group selection]
-    C --> D[Load SGW snapshot]
-    D --> E[Filter eligible modems]
-    E --> F[Build PyPNM request payloads]
-    F --> G[Concurrent HTTP POST to PyPNM]
-    G --> H{Retryable failure?}
-    H -->|yes| G
-    H -->|no| J[Aggregate results + summary]
-    J --> K[Return response]
+    A[startCapture] --> B[state=QUEUED]
+    B --> C[state=RUNNING]
+    C --> D{cancel?}
+    D -->|yes| E[cancel.flag set]
+    E --> F[state=CANCELLED]
+    D -->|no| G[state=COMPLETED]
+    C --> H[state=FAILED]
+    G --> I[results]
+    F --> I
+    H --> I
 ```
+
+## POST /cmts/pnm/rxmer/sg/startCapture
+
+Create a new serving-group RxMER operation. The response returns a new `operation_id` and initial counters.
+Status values use numeric `ServiceStatusCode`.
+
+Current behavior (Step 3): startCapture schedules background execution and returns immediately. Status, cancel, and results operate on persisted state and JSONL linkage records. Cancel creates `cancel.flag`, and the runner transitions to `CANCELLED`.
 
 ### Request
 
 ```json
 {
   "cmts": {
-    "serving_group": {
-      "id": [3147266]
-    },
+    "serving_group": { "id": [] },
     "cable_modem": {
+      "mac_address": [],
       "pnm_parameters": {
-        "capture": {
-          "channel_ids": [193]
-        }
-      }
+        "tftp": { "ipv4": null, "ipv6": null },
+        "capture": { "channel_ids": [] }
+      },
+      "snmp": { "snmpV2C": { "community": "public" } }
     }
   },
   "execution": {
-    "max_workers": 32,
-    "retry_count": 6,
+    "max_workers": 16,
+    "retry_count": 3,
     "retry_delay_seconds": 5.0,
     "per_modem_timeout_seconds": 30.0,
     "overall_timeout_seconds": 120.0
@@ -55,52 +59,176 @@ flowchart TD
 {
   "status": 0,
   "message": "",
-  "timestamp": "2026-01-08T02:10:00.000000+00:00",
-  "run_id": "3c7db8f0-1d38-4d28-88b2-1a2c4f8a2f8a",
-  "already_running": false,
-  "requested_sg_id": 3147266,
-  "requested_channel_ids": [193],
-  "summary": {
-    "requested_count": 2,
-    "attempted_count": 1,
-    "success_count": 1,
-    "failure_count": 0,
-    "failures_by_reason": {},
-    "elapsed_seconds": 1.23
-  },
-  "total_modems": 2,
-  "eligible_modems": 1,
-  "started_modems": 1,
-  "success_modems": 1,
-  "failed_modems": 0,
-  "skipped_modems": 1,
-  "results": [
-    {
-      "mac_address": "aa:bb:cc:dd:ee:ff",
-      "ipv4": "192.168.0.100",
-      "ipv6": null,
-      "status": "success",
-      "message": "ok",
-      "transaction_id": "tx-123",
-      "operation_id": "op-456",
-      "attempts": 1,
-      "http_status": 200,
-      "pypnm_status": 0,
-      "started_epoch": 1767444600.0,
-      "finished_epoch": 1767444601.0
-    }
-  ]
+  "operation": {
+    "operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1",
+    "state": "queued",
+    "counters": {
+      "total_modems": 0,
+      "eligible_modems": 0,
+      "precheck_passed": 0,
+      "capture_started": 0,
+      "completed": 0,
+      "success": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "timestamps": {
+      "created_epoch": 1767444600,
+      "started_epoch": 0,
+      "updated_epoch": 1767444600,
+      "finished_epoch": 0
+    },
+    "request_summary": {
+      "serving_group_ids": [],
+      "mac_addresses": [],
+      "channel_ids": [],
+      "execution": {
+        "max_workers": 16,
+        "retry_count": 3,
+        "retry_delay_seconds": 5.0,
+        "per_modem_timeout_seconds": 30.0,
+        "overall_timeout_seconds": 120.0
+      }
+    },
+    "error_summary": null
+  }
 }
 ```
 
-### Notes
+## POST /cmts/pnm/rxmer/sg/status
 
-- `cmts.serving_group.id` must include exactly one SG id.
-- `execution` controls concurrency and bounded retry behavior.
-- `per_modem_timeout_seconds` bounds each individual cable-modem capture attempt.
-- `overall_timeout_seconds` bounds the total orchestration time.
-- Skipped modems report `status: "skipped"` with a reason in `message`.
-- When a matching capture is already in-flight, the response includes `already_running: true` with the existing `run_id`.
-- `failures_by_reason` keys are one of: `per_modem_timeout`, `overall_timeout`, `http_error`, `pypnm_error`, `request_error`, `unknown`.
-- If `cmts.cable_modem.pnm_parameters.tftp` or `cmts.cable_modem.snmp.snmpV2C` is provided, their fields must be present; use `null` for defaults and never send blank strings.
-- Duplicate entries in request lists (serving_group.id, cable_modem.mac_address, channel_ids) are rejected with 422.
+Return the persisted operation state.
+The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.
+
+### Request
+
+```json
+{
+  "pnm_capture_operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1"
+}
+```
+
+### Response
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "operation": {
+    "operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1",
+    "state": "queued",
+    "counters": {
+      "total_modems": 0,
+      "eligible_modems": 0,
+      "precheck_passed": 0,
+      "capture_started": 0,
+      "completed": 0,
+      "success": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "timestamps": {
+      "created_epoch": 1767444600,
+      "started_epoch": 0,
+      "updated_epoch": 1767444600,
+      "finished_epoch": 0
+    },
+    "request_summary": {
+      "serving_group_ids": [],
+      "mac_addresses": [],
+      "channel_ids": [],
+      "execution": {
+        "max_workers": 16,
+        "retry_count": 3,
+        "retry_delay_seconds": 5.0,
+        "per_modem_timeout_seconds": 30.0,
+        "overall_timeout_seconds": 120.0
+      }
+    },
+    "error_summary": null
+  }
+}
+```
+
+## POST /cmts/pnm/rxmer/sg/results
+
+Return linkage records for an operation. The response includes records only when the dataset is small enough to inline.
+The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.
+
+### Request
+
+```json
+{
+  "pnm_capture_operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1"
+}
+```
+
+### Response
+
+```json
+{
+  "status": 0,
+  "message": "no results recorded",
+  "summary": {
+    "record_count": 0,
+    "included_count": 0,
+    "files_scanned": 0
+  },
+  "records": []
+}
+```
+
+## POST /cmts/pnm/rxmer/sg/cancel
+
+Request cancellation for an operation.
+The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.
+
+### Request
+
+```json
+{
+  "pnm_capture_operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1"
+}
+```
+
+### Response
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "operation": {
+    "operation_id": "1b3f5f3d4f3c4ab29a9ff9a3f0b7c8d1",
+    "state": "cancelling",
+    "counters": {
+      "total_modems": 0,
+      "eligible_modems": 0,
+      "precheck_passed": 0,
+      "capture_started": 0,
+      "completed": 0,
+      "success": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "timestamps": {
+      "created_epoch": 1767444600,
+      "started_epoch": 0,
+      "updated_epoch": 1767444610,
+      "finished_epoch": 0
+    },
+    "request_summary": {
+      "serving_group_ids": [],
+      "mac_addresses": [],
+      "channel_ids": [],
+      "execution": {
+        "max_workers": 16,
+        "retry_count": 3,
+        "retry_delay_seconds": 5.0,
+        "per_modem_timeout_seconds": 30.0,
+        "overall_timeout_seconds": 120.0
+      }
+    },
+    "error_summary": null
+  }
+}
+```

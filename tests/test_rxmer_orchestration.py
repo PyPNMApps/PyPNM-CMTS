@@ -3,699 +3,598 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import TypeAlias
+from collections.abc import Callable
+from pathlib import Path
+import time
 
 import pytest
+from pydantic import ValidationError
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.config.system_config_settings import SystemConfigSettings
+from pypnm.lib.types import FileNameStr, InetAddressStr, MacAddressStr, TimestampSec, TransactionId
+from pypnm.lib.utils import Generate, TimeUnit
 
-from pypnm_cmts.api.common.service.pnm import PnmHttpClient, PnmHttpResponseModel
-from pypnm_cmts.api.routes.pnm.rxmer.schemas import RxMerServiceGroupCaptureRequest
-from pypnm_cmts.api.routes.pnm.rxmer.service import (
-    RXMER_ENDPOINT_PATH,
-    RxMerServiceGroupCaptureService,
+from pypnm_cmts.api.common.cmts_request import (
+    CmtsCableModemFilterModel,
+    CmtsPnmCaptureParametersModel,
+    CmtsPnmParametersModel,
+    CmtsRequestEnvelopeModel,
+    CmtsServingGroupFilterModel,
+    CmtsSnmpModel,
+    CmtsSnmpV2CModel,
+    CmtsTftpParametersModel,
 )
-from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
-from pypnm_cmts.config.request_defaults import (
-    ENV_CM_SNMPV2C_WRITE_COMMUNITY,
-    ENV_CM_TFTP_IPV4,
-    ENV_CM_TFTP_IPV6,
+from pypnm_cmts.api.common.operations.models import PerModemLinkageRecordModel
+from pypnm_cmts.api.common.operations.runner import (
+    DEFAULT_OVERALL_TIMEOUT_MESSAGE,
+    OperationRunner,
+    OperationWorkItemModel,
+    OperationWorkerResultModel,
 )
-from pypnm_cmts.lib.constants import PnmCaptureFailureReason, PnmCaptureStatus
-from pypnm_cmts.lib.types import CmtsCmRegState, ServiceGroupId
-from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
-from pypnm_cmts.sgw.manager import SgwManager
-from pypnm_cmts.sgw.models import (
-    SgwCableModemModel,
-    SgwCacheEntryModel,
-    SgwSnapshotModel,
+from pypnm_cmts.api.common.operations.models import OperationStageResultModel
+from pypnm_cmts.api.common.operations.store import OperationStore
+from pypnm_cmts.api.routes.pnm.rxmer.schemas import (
+    RxMerServiceGroupExecutionModel,
+    RxMerServiceGroupOperationRequest,
+    RxMerServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.sgw.runtime_state import (
-    reset_sgw_runtime_state,
-    set_sgw_startup_success,
-)
-from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.api.routes.pnm.rxmer.service import RxMerServiceGroupOperationService
+from pypnm_cmts.lib.constants import OperationStage, OperationState
+from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
-SNAPSHOT_TIME_EPOCH = 1000.0
-PER_MODEM_TIMEOUT_SECONDS = 0.05
-OVERALL_TIMEOUT_SECONDS = 0.05
-SHORT_SLEEP_SECONDS = 0.02
-LONG_SLEEP_SECONDS = 0.2
-PnmPayload: TypeAlias = dict[str, object]
-HttpRequestRecord: TypeAlias = tuple[str, PnmPayload]
+POLL_INTERVAL_SECONDS = 0.02
+STATE_TIMEOUT_SECONDS = 2.0
+WORKER_DELAY_SECONDS = 0.1
 
 
-class FakePnmHttpClient(PnmHttpClient):
-    """In-memory PyPNM client for RxMER service tests."""
+def _build_service(
+    tmp_path: Path,
+    worker: Callable[[OperationWorkItemModel], OperationWorkerResultModel] | None = None,
+) -> RxMerServiceGroupOperationService:
+    store = OperationStore(base_dir=tmp_path)
+    runner = OperationRunner(store=store, worker=worker)
+    return RxMerServiceGroupOperationService(store=store, runner=runner)
 
-    def __init__(self, responses: list[PnmHttpResponseModel]) -> None:
-        self._responses = list(responses)
-        self.requests: list[HttpRequestRecord] = []
 
-    async def __aenter__(self) -> FakePnmHttpClient:
-        return self
+def _build_request(
+    mac_count: int = 0,
+    execution: RxMerServiceGroupExecutionModel | None = None,
+) -> RxMerServiceGroupStartCaptureRequest:
+    macs = [MacAddressStr(f"aa:bb:cc:dd:ee:{index:02x}") for index in range(mac_count)]
+    return RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            serving_group=CmtsServingGroupFilterModel(id=[ServiceGroupId(1)]),
+            cable_modem=CmtsCableModemFilterModel(mac_address=macs),
+        ),
+        execution=execution or RxMerServiceGroupExecutionModel(),
+    )
 
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        return None
 
-    async def post_json(self, path: str, payload: PnmPayload) -> PnmHttpResponseModel:
-        self.requests.append((path, payload))
-        if self._responses:
-            return self._responses.pop(0)
-        return PnmHttpResponseModel(
-            status_code=500,
-            payload={"status": ServiceStatusCode.FAILURE.value},
-            error_message="",
+def _wait_for_state(
+    store: OperationStore,
+    operation_id: PnmCaptureOperationId,
+    targets: set[OperationState],
+) -> OperationState | None:
+    deadline = time.monotonic() + STATE_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        state = store.load_state(operation_id)
+        if state.state in targets:
+            return state.state
+        time.sleep(POLL_INTERVAL_SECONDS)
+    return None
+
+
+def _slow_worker(item: OperationWorkItemModel) -> OperationWorkerResultModel:
+    started_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+    time.sleep(WORKER_DELAY_SECONDS)
+    finished_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+    return OperationWorkerResultModel(
+        stages=[
+            OperationStageResultModel(
+                stage=OperationStage.ELIGIBILITY,
+                status_code=ServiceStatusCode.SUCCESS,
+                transaction_ids=[],
+                filenames=[],
+                message="eligible",
+                started_epoch=started_epoch,
+                finished_epoch=finished_epoch,
+            ),
+            OperationStageResultModel(
+                stage=OperationStage.PRECHECK,
+                status_code=ServiceStatusCode.SUCCESS,
+                transaction_ids=[],
+                filenames=[],
+                message="precheck ok",
+                started_epoch=started_epoch,
+                finished_epoch=finished_epoch,
+            ),
+            OperationStageResultModel(
+                stage=OperationStage.CAPTURE,
+                status_code=ServiceStatusCode.SUCCESS,
+                transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+                filenames=[FileNameStr("capture.bin")],
+                message="completed",
+                started_epoch=started_epoch,
+                finished_epoch=finished_epoch,
+            ),
+        ]
+    )
+
+
+def test_rxmer_start_capture_creates_state(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    request = _build_request()
+    response = service.start_capture(request)
+
+    operation = response.operation
+    assert operation.state == OperationState.QUEUED
+
+    state_path = tmp_path / str(operation.operation_id) / "state.json"
+    assert state_path.exists()
+
+
+def test_rxmer_status_reads_state(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    request = _build_request()
+    start_response = service.start_capture(request)
+
+    status_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    status_response = service.status(status_request)
+    assert status_response.operation is not None
+    assert status_response.operation.operation_id == start_response.operation.operation_id
+
+
+def test_rxmer_cancel_creates_flag(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=2)
+    start_response = service.start_capture(request)
+
+    cancel_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    cancel_response = service.cancel(cancel_request)
+    assert cancel_response.operation is not None
+    assert cancel_response.operation.state in {OperationState.CANCELLING, OperationState.CANCELLED}
+    assert service._store.is_cancel_requested(start_response.operation.operation_id)
+
+
+def test_rxmer_results_empty(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    request = _build_request()
+    start_response = service.start_capture(request)
+
+    results_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    results_response = service.results(results_request)
+    assert results_response.summary.record_count == 0
+    assert results_response.records == []
+
+
+def test_rxmer_results_include_records(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    request = _build_request()
+    start_response = service.start_capture(request)
+
+    record = PerModemLinkageRecordModel(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+        sg_id=ServiceGroupId(1),
+        mac_address=MacAddressStr("aa:bb:cc:dd:ee:ff"),
+        ip_address=InetAddressStr("192.168.0.100"),
+        stage=OperationStage.ELIGIBILITY,
+        status_code=ServiceStatusCode.SUCCESS,
+        transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+        filenames=[FileNameStr("capture.bin")],
+        started_epoch=1,
+        finished_epoch=2,
+        message="",
+    )
+    service._store.append_result_record(record)
+
+    results_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    results_response = service.results(results_request)
+    assert results_response.summary.record_count == 1
+    assert len(results_response.records) == 1
+
+
+def test_rxmer_runner_transitions_to_running(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=2)
+    start_response = service.start_capture(request)
+
+    running_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.RUNNING},
+    )
+    assert running_state == OperationState.RUNNING
+
+
+def test_rxmer_runner_cancelled(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=2)
+    start_response = service.start_capture(request)
+
+    cancel_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    service.cancel(cancel_request)
+    cancelled_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.CANCELLED},
+    )
+    assert cancelled_state == OperationState.CANCELLED
+
+
+def test_rxmer_runner_emits_records(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=2)
+    start_response = service.start_capture(request)
+
+    terminal_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.COMPLETED, OperationState.FAILED},
+    )
+    assert terminal_state == OperationState.COMPLETED
+    assert service._store.count_result_records(start_response.operation.operation_id) > 0
+
+
+def test_rxmer_runner_no_modems_selected(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=0)
+    start_response = service.start_capture(request)
+
+    completed_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.COMPLETED},
+    )
+    assert completed_state == OperationState.COMPLETED
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.counters.total_modems == 0
+    assert service._store.count_result_records(start_response.operation.operation_id) == 0
+
+
+def test_rxmer_runner_retries_until_success(tmp_path: Path) -> None:
+    attempts: dict[str, int] = {}
+
+    def _flaky_worker(item: OperationWorkItemModel) -> OperationWorkerResultModel:
+        count = attempts.get(str(item.mac_address), 0) + 1
+        attempts[str(item.mac_address)] = count
+        started_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        finished_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        if count == 1:
+            return OperationWorkerResultModel(
+                stages=[
+                    OperationStageResultModel(
+                        stage=OperationStage.ELIGIBILITY,
+                        status_code=ServiceStatusCode.SUCCESS,
+                        transaction_ids=[],
+                        filenames=[],
+                        message="eligible",
+                        started_epoch=started_epoch,
+                        finished_epoch=finished_epoch,
+                    ),
+                    OperationStageResultModel(
+                        stage=OperationStage.PRECHECK,
+                        status_code=ServiceStatusCode.SUCCESS,
+                        transaction_ids=[],
+                        filenames=[],
+                        message="precheck ok",
+                        started_epoch=started_epoch,
+                        finished_epoch=finished_epoch,
+                    ),
+                    OperationStageResultModel(
+                        stage=OperationStage.CAPTURE,
+                        status_code=ServiceStatusCode.FAILURE,
+                        transaction_ids=[],
+                        filenames=[],
+                        message="failed once",
+                        started_epoch=started_epoch,
+                        finished_epoch=finished_epoch,
+                    ),
+                ]
+            )
+        return OperationWorkerResultModel(
+            stages=[
+                OperationStageResultModel(
+                    stage=OperationStage.ELIGIBILITY,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="eligible",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.PRECHECK,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="precheck ok",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.CAPTURE,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="recovered",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+            ]
+        )
+
+    service = _build_service(tmp_path, worker=_flaky_worker)
+    request = _build_request(
+        mac_count=1,
+        execution=RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=1,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=2.0,
+        ),
+    )
+    start_response = service.start_capture(request)
+    terminal_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.COMPLETED, OperationState.FAILED},
+    )
+    assert terminal_state == OperationState.COMPLETED
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.counters.success == 1
+    assert state.counters.failed == 0
+
+
+def test_rxmer_runner_per_modem_timeout(tmp_path: Path) -> None:
+    def _slow_timeout_worker(item: OperationWorkItemModel) -> OperationWorkerResultModel:
+        started_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        time.sleep(WORKER_DELAY_SECONDS)
+        finished_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        return OperationWorkerResultModel(
+            stages=[
+                OperationStageResultModel(
+                    stage=OperationStage.ELIGIBILITY,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="eligible",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.PRECHECK,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="precheck ok",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.CAPTURE,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="late",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+            ]
+        )
+
+    service = _build_service(tmp_path, worker=_slow_timeout_worker)
+    request = _build_request(
+        mac_count=2,
+        execution=RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=0,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=0.01,
+            overall_timeout_seconds=2.0,
+        ),
+    )
+    start_response = service.start_capture(request)
+    terminal_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.COMPLETED, OperationState.FAILED},
+    )
+    assert terminal_state == OperationState.FAILED
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.counters.failed == 2
+    assert state.counters.success == 0
+    records = service._store.load_result_records(start_response.operation.operation_id)
+    assert len(records) == 6
+    stages = {record.stage for record in records}
+    assert stages == {OperationStage.ELIGIBILITY, OperationStage.PRECHECK, OperationStage.CAPTURE}
+
+
+def test_rxmer_runner_overall_timeout(tmp_path: Path) -> None:
+    def _slow_overall_worker(item: OperationWorkItemModel) -> OperationWorkerResultModel:
+        started_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        time.sleep(WORKER_DELAY_SECONDS)
+        finished_epoch = TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
+        return OperationWorkerResultModel(
+            stages=[
+                OperationStageResultModel(
+                    stage=OperationStage.ELIGIBILITY,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="eligible",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.PRECHECK,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="precheck ok",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+                OperationStageResultModel(
+                    stage=OperationStage.CAPTURE,
+                    status_code=ServiceStatusCode.SUCCESS,
+                    transaction_ids=[],
+                    filenames=[],
+                    message="late",
+                    started_epoch=started_epoch,
+                    finished_epoch=finished_epoch,
+                ),
+            ]
+        )
+
+    service = _build_service(tmp_path, worker=_slow_overall_worker)
+    request = _build_request(
+        mac_count=2,
+        execution=RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=0,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=0.05,
+        ),
+    )
+    start_response = service.start_capture(request)
+    terminal_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.FAILED},
+    )
+    assert terminal_state == OperationState.FAILED
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.error_summary is not None
+    assert DEFAULT_OVERALL_TIMEOUT_MESSAGE in state.error_summary.message
+
+
+def test_rxmer_runner_cancel_mid_flight(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, worker=_slow_worker)
+    request = _build_request(mac_count=5)
+    start_response = service.start_capture(request)
+
+    running_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.RUNNING},
+    )
+    assert running_state == OperationState.RUNNING
+
+    cancel_request = RxMerServiceGroupOperationRequest(
+        pnm_capture_operation_id=start_response.operation.operation_id,
+    )
+    service.cancel(cancel_request)
+    cancelled_state = _wait_for_state(
+        service._store,
+        start_response.operation.operation_id,
+        {OperationState.CANCELLED},
+    )
+    assert cancelled_state == OperationState.CANCELLED
+    assert service._runner.is_running(start_response.operation.operation_id) is False
+
+
+def test_rxmer_request_rejects_blank_snmp_community() -> None:
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupStartCaptureRequest(
+            cmts=CmtsRequestEnvelopeModel(
+                cable_modem=CmtsCableModemFilterModel(
+                    snmp=CmtsSnmpModel(
+                        snmpV2C=CmtsSnmpV2CModel(community=""),
+                    ),
+                )
+            )
         )
 
 
-class DelayedPnmHttpClient(PnmHttpClient):
-    """In-memory PyPNM client that delays responses for timeout testing."""
-
-    def __init__(self, delay_seconds: float, response: PnmHttpResponseModel) -> None:
-        self._delay_seconds = float(delay_seconds)
-        self._response = response
-        self.requests: list[HttpRequestRecord] = []
-
-    async def __aenter__(self) -> DelayedPnmHttpClient:
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        return None
-
-    async def post_json(self, path: str, payload: PnmPayload) -> PnmHttpResponseModel:
-        self.requests.append((path, payload))
-        await asyncio.sleep(self._delay_seconds)
-        return self._response
-
-
-class BlockingPnmHttpClient(PnmHttpClient):
-    """In-memory PyPNM client that blocks until released."""
-
-    def __init__(self, event: asyncio.Event, response: PnmHttpResponseModel) -> None:
-        self._event = event
-        self._response = response
-        self.requests: list[HttpRequestRecord] = []
-
-    async def __aenter__(self) -> BlockingPnmHttpClient:
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        return None
-
-    async def post_json(self, path: str, payload: PnmPayload) -> PnmHttpResponseModel:
-        self.requests.append((path, payload))
-        await self._event.wait()
-        return self._response
-
-def _configure_runtime_state(store: SgwCacheStore, sg_id: ServiceGroupId) -> None:
-    settings = CmtsOrchestratorSettings.model_validate(
-        {"adapter": {"hostname": "cmts.example", "community": "public"}}
-    )
-    manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
-    set_sgw_startup_success([sg_id], store, manager, SNAPSHOT_TIME_EPOCH)
-
-
-def _seed_snapshot(store: SgwCacheStore, sg_id: ServiceGroupId, modems: list[SgwCableModemModel]) -> None:
-    metadata = SgwCacheMetadataModel(snapshot_time_epoch=SNAPSHOT_TIME_EPOCH, age_seconds=0.0)
-    snapshot = SgwSnapshotModel(sg_id=sg_id, cable_modems=modems, metadata=metadata)
-    store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_passes_channel_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={
-                "status": ServiceStatusCode.SUCCESS.value,
-                "message": "ok",
-                "transaction_id": "tx-123",
-                "operation_id": "op-456",
-            },
-            error_message="",
+def test_rxmer_request_allows_null_snmp_community() -> None:
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            cable_modem=CmtsCableModemFilterModel(
+                snmp=CmtsSnmpModel(
+                    snmpV2C=CmtsSnmpV2CModel(community=None),
+                ),
+            )
         )
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {
-                "serving_group": {"id": [int(sg_id)]},
-                "cable_modem": {"pnm_parameters": {"capture": {"channel_ids": [194, 193]}}},
-            },
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
     )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.requested_sg_id == sg_id
-    assert [int(channel_id) for channel_id in response.requested_channel_ids] == [194, 193]
-    assert response.total_modems == 1
-    assert response.eligible_modems == 1
-    assert response.started_modems == 1
-    assert response.success_modems == 1
-    assert response.failed_modems == 0
-    assert response.skipped_modems == 0
-    assert response.summary.requested_count == 1
-    assert response.summary.attempted_count == 1
-    assert response.summary.success_count == 1
-    assert response.summary.failure_count == 0
-    assert response.results[0].status == PnmCaptureStatus.SUCCESS
-
-    assert len(http_client.requests) == 1
-    path, payload = http_client.requests[0]
-    assert path == RXMER_ENDPOINT_PATH
-    capture = payload["cable_modem"]["pnm_parameters"]["capture"]
-    assert capture["channel_ids"] == [194, 193]
+    assert request.cmts.cable_modem.snmp is not None
 
 
-@pytest.mark.asyncio
-async def test_rxmer_capture_normalizes_hex_ipv4(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="0xac132094",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.SUCCESS.value},
-            error_message="",
+def test_rxmer_request_rejects_blank_tftp_overrides() -> None:
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupStartCaptureRequest(
+            cmts=CmtsRequestEnvelopeModel(
+                cable_modem=CmtsCableModemFilterModel(
+                    pnm_parameters=CmtsPnmParametersModel(
+                        tftp=CmtsTftpParametersModel(ipv4="", ipv6=None),
+                    )
+                )
+            )
         )
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.results[0].ipv4 == "172.19.32.148"
-    _, payload = http_client.requests[0]
-    assert payload["cable_modem"]["ip_address"] == "172.19.32.148"
 
 
-@pytest.mark.asyncio
-async def test_rxmer_capture_omits_capture_without_channel_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.SUCCESS.value},
-            error_message="",
+def test_rxmer_request_allows_null_tftp_overrides() -> None:
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            cable_modem=CmtsCableModemFilterModel(
+                pnm_parameters=CmtsPnmParametersModel(
+                    tftp=CmtsTftpParametersModel(ipv4=None, ipv6=None),
+                    capture=CmtsPnmCaptureParametersModel(channel_ids=[]),
+                )
+            )
         )
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
     )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.success_modems == 1
-    assert len(http_client.requests) == 1
-    _, payload = http_client.requests[0]
-    pnm_parameters = payload["cable_modem"]["pnm_parameters"]
-    assert "capture" not in pnm_parameters
+    assert request.cmts.cable_modem.pnm_parameters is not None
 
 
-@pytest.mark.asyncio
-async def test_rxmer_capture_honors_mac_filter_counts(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modems = [
-        SgwCableModemModel(
-            mac="aa:bb:cc:dd:ee:ff",
-            ipv4="192.168.0.100",
-            ipv6="",
-            registration_status=CmtsCmRegState(8),
-        ),
-        SgwCableModemModel(
-            mac="aa:bb:cc:dd:ee:10",
-            ipv4="192.168.0.101",
-            ipv6="",
-            registration_status=CmtsCmRegState(8),
-        ),
-    ]
-    _seed_snapshot(store, sg_id, modems)
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.SUCCESS.value},
-            error_message="",
+def test_rxmer_execution_validation_rules() -> None:
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupExecutionModel(
+            max_workers=0,
+            retry_count=0,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=1.0,
         )
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {
-                "serving_group": {"id": [int(sg_id)]},
-                "cable_modem": {"mac_address": ["aa:bb:cc:dd:ee:ff"]},
-            },
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.total_modems == 1
-    assert response.eligible_modems == 1
-    assert response.started_modems == 1
-    assert response.success_modems == 1
-    assert response.failed_modems == 0
-    assert response.skipped_modems == 0
-    assert response.summary.requested_count == 1
-    assert response.summary.attempted_count == 1
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_skips_modem_without_ip(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    http_client = FakePnmHttpClient([])
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.skipped_modems == 1
-    assert response.results[0].status == PnmCaptureStatus.SKIPPED
-    assert response.results[0].message == "no modem ip address available"
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_sends_null_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.delenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, raising=False)
-    monkeypatch.delenv(ENV_CM_TFTP_IPV4, raising=False)
-    monkeypatch.delenv(ENV_CM_TFTP_IPV6, raising=False)
-    monkeypatch.setattr(SystemConfigSettings, "snmp_write_community", staticmethod(lambda: ""))
-    monkeypatch.setattr(SystemConfigSettings, "bulk_tftp_ip_v4", staticmethod(lambda: ""))
-    monkeypatch.setattr(SystemConfigSettings, "bulk_tftp_ip_v6", staticmethod(lambda: ""))
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={
-                "status": ServiceStatusCode.SUCCESS.value,
-                "message": "ok",
-                "transaction_id": "tx-123",
-            },
-            error_message="",
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=-1,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=1.0,
         )
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {"max_workers": 1, "retry_count": 0, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.success_modems == 1
-    assert len(http_client.requests) == 1
-    _, payload = http_client.requests[0]
-    tftp_payload = payload["cable_modem"]["pnm_parameters"]["tftp"]
-    snmp_payload = payload["cable_modem"]["snmp"]["snmpV2C"]
-    assert tftp_payload["ipv4"] is None
-    assert tftp_payload["ipv6"] is None
-    assert snmp_payload["community"] is None
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_retries_on_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.NOT_READY_AFTER_FILE_CAPTURE.value, "message": "busy"},
-            error_message="",
-        ),
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.NOT_READY_AFTER_FILE_CAPTURE.value, "message": "busy"},
-            error_message="",
-        ),
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={
-                "status": ServiceStatusCode.SUCCESS.value,
-                "message": "ok",
-                "transaction_id": "tx-789",
-            },
-            error_message="",
-        ),
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {
-                "serving_group": {"id": [int(sg_id)]},
-            },
-            "execution": {"max_workers": 1, "retry_count": 2, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.results[0].status == PnmCaptureStatus.SUCCESS
-    assert response.results[0].attempts == 3
-    assert len(http_client.requests) == 3
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_retries_on_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    responses = [
-        PnmHttpResponseModel(
-            status_code=503,
-            payload={},
-            error_message="",
-        ),
-        PnmHttpResponseModel(
-            status_code=200,
-            payload={"status": ServiceStatusCode.SUCCESS.value},
-            error_message="",
-        ),
-    ]
-    http_client = FakePnmHttpClient(responses)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {"max_workers": 1, "retry_count": 1, "retry_delay_seconds": 0.0},
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.results[0].attempts == 2
-    assert len(http_client.requests) == 2
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_per_modem_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    response_payload = PnmHttpResponseModel(
-        status_code=200,
-        payload={"status": ServiceStatusCode.SUCCESS.value},
-        error_message="",
-    )
-    http_client = DelayedPnmHttpClient(LONG_SLEEP_SECONDS, response_payload)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {
-                "max_workers": 1,
-                "retry_count": 0,
-                "retry_delay_seconds": 0.0,
-                "per_modem_timeout_seconds": PER_MODEM_TIMEOUT_SECONDS,
-                "overall_timeout_seconds": 0.0,
-            },
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.failed_modems == 1
-    assert response.summary.failure_count == 1
-    assert response.summary.failures_by_reason[PnmCaptureFailureReason.PER_MODEM_TIMEOUT] == 1
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_overall_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modems = [
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:ff", ipv4="192.168.0.100", ipv6="", registration_status=CmtsCmRegState(8)),
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:10", ipv4="192.168.0.101", ipv6="", registration_status=CmtsCmRegState(8)),
-    ]
-    _seed_snapshot(store, sg_id, modems)
-    _configure_runtime_state(store, sg_id)
-
-    response_payload = PnmHttpResponseModel(
-        status_code=200,
-        payload={"status": ServiceStatusCode.SUCCESS.value},
-        error_message="",
-    )
-    http_client = DelayedPnmHttpClient(LONG_SLEEP_SECONDS, response_payload)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {
-                "max_workers": 2,
-                "retry_count": 0,
-                "retry_delay_seconds": 0.0,
-                "per_modem_timeout_seconds": 0.0,
-                "overall_timeout_seconds": OVERALL_TIMEOUT_SECONDS,
-            },
-        }
-    )
-    response = await service.capture(request, "http://localhost/cm")
-
-    assert response.summary.failure_count >= 1
-    assert response.summary.failures_by_reason[PnmCaptureFailureReason.OVERALL_TIMEOUT] >= 1
-
-
-@pytest.mark.asyncio
-async def test_rxmer_capture_inflight_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
-    reset_sgw_runtime_state()
-    monkeypatch.setenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, "public")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV4, "192.168.0.100")
-    monkeypatch.setenv(ENV_CM_TFTP_IPV6, "::1")
-
-    sg_id = ServiceGroupId(3147266)
-    store = SgwCacheStore()
-    modem = SgwCableModemModel(
-        mac="aa:bb:cc:dd:ee:ff",
-        ipv4="192.168.0.100",
-        ipv6="",
-        registration_status=CmtsCmRegState(8),
-    )
-    _seed_snapshot(store, sg_id, [modem])
-    _configure_runtime_state(store, sg_id)
-
-    event = asyncio.Event()
-    response_payload = PnmHttpResponseModel(
-        status_code=200,
-        payload={"status": ServiceStatusCode.SUCCESS.value},
-        error_message="",
-    )
-    http_client = BlockingPnmHttpClient(event, response_payload)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-
-    request = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {"serving_group": {"id": [int(sg_id)]}},
-            "execution": {
-                "max_workers": 1,
-                "retry_count": 0,
-                "retry_delay_seconds": 0.0,
-                "per_modem_timeout_seconds": 0.0,
-                "overall_timeout_seconds": 0.0,
-            },
-        }
-    )
-    request_with_channel_ids = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {
-                "serving_group": {"id": [int(sg_id)]},
-                "cable_modem": {"pnm_parameters": {"capture": {"channel_ids": [194, 193]}}},
-            },
-            "execution": {
-                "max_workers": 1,
-                "retry_count": 0,
-                "retry_delay_seconds": 0.0,
-                "per_modem_timeout_seconds": 0.0,
-                "overall_timeout_seconds": 0.0,
-            },
-        }
-    )
-    request_with_channel_ids_reversed = RxMerServiceGroupCaptureRequest.model_validate(
-        {
-            "cmts": {
-                "serving_group": {"id": [int(sg_id)]},
-                "cable_modem": {"pnm_parameters": {"capture": {"channel_ids": [193, 194]}}},
-            },
-            "execution": {
-                "max_workers": 1,
-                "retry_count": 0,
-                "retry_delay_seconds": 0.0,
-                "per_modem_timeout_seconds": 0.0,
-                "overall_timeout_seconds": 0.0,
-            },
-        }
-    )
-    capture_task = asyncio.create_task(service.capture(request, "http://localhost/cm"))
-    await asyncio.sleep(SHORT_SLEEP_SECONDS)
-
-    duplicate_response = await service.capture(request, "http://localhost/cm")
-    assert duplicate_response.already_running is True
-    assert duplicate_response.run_id != ""
-
-    event.set()
-    response = await capture_task
-    assert response.already_running is False
-    assert response.run_id == duplicate_response.run_id
-
-    event = asyncio.Event()
-    http_client = BlockingPnmHttpClient(event, response_payload)
-    service = RxMerServiceGroupCaptureService(http_client=http_client)
-    capture_task = asyncio.create_task(service.capture(request_with_channel_ids, "http://localhost/cm"))
-    await asyncio.sleep(SHORT_SLEEP_SECONDS)
-    duplicate_response = await service.capture(request_with_channel_ids_reversed, "http://localhost/cm")
-    assert duplicate_response.already_running is True
-    assert duplicate_response.run_id != ""
-
-    event.set()
-    response = await capture_task
-    assert response.already_running is False
-    assert response.run_id == duplicate_response.run_id
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=0,
+            retry_delay_seconds=-1.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=1.0,
+        )
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=0,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=0.0,
+            overall_timeout_seconds=1.0,
+        )
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupExecutionModel(
+            max_workers=1,
+            retry_count=0,
+            retry_delay_seconds=0.0,
+            per_modem_timeout_seconds=1.0,
+            overall_timeout_seconds=0.0,
+        )

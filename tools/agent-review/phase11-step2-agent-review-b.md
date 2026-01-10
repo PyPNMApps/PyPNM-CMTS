@@ -1,3 +1,4 @@
+# FILE: src/pypnm_cmts/api/routes/pnm/rxmer/router.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
 
@@ -111,3 +112,4 @@ router = RxMerRouter().router
 __all__ = [
     "router",
 ]
+

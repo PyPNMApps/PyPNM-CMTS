@@ -10,10 +10,10 @@ from pypnm.lib.types import ChannelId, MacAddressStr
 from pypnm_cmts.api.common.cmts_request import (
     CmtsCableModemFilterModel,
     CmtsPnmCaptureParametersModel,
-    CmtsSnmpV2CModel,
-    CmtsTftpParametersModel,
     CmtsRequestEnvelopeModel,
     CmtsServingGroupFilterModel,
+    CmtsSnmpV2CModel,
+    CmtsTftpParametersModel,
 )
 from pypnm_cmts.config.request_defaults import (
     ENV_CM_SNMPV2C_WRITE_COMMUNITY,

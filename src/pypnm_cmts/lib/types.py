@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2025-2026 Maurice Garcia
 
 """Type aliases for PyPNM-CMTS."""
 from __future__ import annotations
@@ -30,6 +30,7 @@ ServiceGroupId           = NewType("ServiceGroupId", int)
 TickIndex                = NewType("TickIndex", int)
 OrchestratorRunId        = NewType("OrchestratorRunId", str)
 CoordinationPath         = PathLike
+PnmCaptureOperationId    = NewType("PnmCaptureOperationId", str)
 
 NodeName        = NewType("NodeName", str)
 MdCmSgId        = NewType("MdCmSgId", int)
@@ -62,6 +63,7 @@ __all__ = [
     "TickIndex",
     "OrchestratorRunId",
     "CoordinationPath",
+    "PnmCaptureOperationId",
     "NodeName",
     "MdCmSgId",
     "MdDsSgId",

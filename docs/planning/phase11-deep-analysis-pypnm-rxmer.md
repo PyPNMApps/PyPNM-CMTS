@@ -1,9 +1,4 @@
-Summary
-- Wrote deep analysis report for PyPNM RxMER router call graph, request contract, channel_id handling, and Phase 10 implementation options.
-- No code changes made in PyPNM or PyPNM-CMTS.
-
-# FILE: tools/agent-review/phase10-rxmer-router-deep-analysis.md
-# Phase 10 RxMER Router Deep Analysis (PyPNM)
+# Phase 11 RxMER Router Deep Analysis (PyPNM)
 
 ## 1) Entry Point Summary
 
@@ -173,7 +168,7 @@ Sequence:
 - Update RxMER API doc to mention `pnm_parameters.capture.channel_ids` as optional list for targeted capture.
 - If a flow diagram exists for RxMER capture, a Mermaid update could show the channel filter branching before capture.
 
-## Notes on Current Behavior vs Desired Phase 10
+## Notes on Current Behavior vs Desired Phase 11
 
 - Channel targeting already affects capture triggering through `_get_indexes_via_pnm_test_type()` and results filtering through `getPnmMeasurementStatistics(channel_ids)`.
 - If Phase 10 requires strict channel filtering regardless of measurement type, ensure that the interface-parameter path is used consistently across PNM endpoints.
