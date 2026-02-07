@@ -32,12 +32,12 @@ from pypnm_cmts.api.common.operations.runner import (
 )
 from pypnm_cmts.api.common.operations.models import OperationStageResultModel
 from pypnm_cmts.api.common.operations.store import OperationStore
-from pypnm_cmts.api.routes.pnm.rxmer.schemas import (
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupExecutionModel,
     RxMerServiceGroupOperationRequest,
     RxMerServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.api.routes.pnm.rxmer.service import RxMerServiceGroupOperationService
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import RxMerServiceGroupOperationService
 from pypnm_cmts.lib.constants import OperationStage, OperationState
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 

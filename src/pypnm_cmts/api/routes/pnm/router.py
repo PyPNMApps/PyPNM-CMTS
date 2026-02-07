@@ -4,7 +4,7 @@
 """PNM orchestration router."""
 from __future__ import annotations
 
-from pypnm_cmts.api.routes.pnm.rxmer.router import router
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.router import router
 
 __all__ = [
     "router",

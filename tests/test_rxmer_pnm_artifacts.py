@@ -16,11 +16,11 @@ from pypnm_cmts.api.common.cmts_request import (
     CmtsServingGroupFilterModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
-from pypnm_cmts.api.routes.pnm.rxmer.schemas import (
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupExecutionModel,
     RxMerServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.api.routes.pnm.rxmer.service import RxMerServiceGroupOperationService
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import RxMerServiceGroupOperationService
 from pypnm_cmts.lib.constants import OperationStage, OperationState, PnmCaptureFailureReason
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 from pypnm_cmts.sgw.models import SgwCableModemModel, SgwCacheEntryModel, SgwSnapshotModel

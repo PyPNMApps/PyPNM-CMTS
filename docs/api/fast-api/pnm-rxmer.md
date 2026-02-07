@@ -22,7 +22,7 @@ flowchart TD
     H --> I
 ```
 
-## POST /cmts/pnm/rxmer/sg/startCapture
+## POST /cmts/pnm/sg/ds/ofdm/rxmer/startCapture
 
 Create a new serving-group RxMER operation. The response returns a new `operation_id` and initial counters.
 Status values use numeric `ServiceStatusCode`.
@@ -102,7 +102,7 @@ Status types: orchestration responses use numeric `ServiceStatusCode`. `PnmCaptu
 }
 ```
 
-## POST /cmts/pnm/rxmer/sg/status
+## POST /cmts/pnm/sg/ds/ofdm/rxmer/status
 
 Return the persisted operation state.
 The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.
@@ -157,7 +157,7 @@ The request payload uses `pnm_capture_operation_id`, while the returned state us
 }
 ```
 
-## POST /cmts/pnm/rxmer/sg/results
+## POST /cmts/pnm/sg/ds/ofdm/rxmer/results
 
 Return linkage records for an operation. The response includes records only when the dataset is small enough to inline.
 The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.
@@ -185,7 +185,7 @@ The request payload uses `pnm_capture_operation_id`, while the returned state us
 }
 ```
 
-## POST /cmts/pnm/rxmer/sg/cancel
+## POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel
 
 Request cancellation for an operation.
 The request payload uses `pnm_capture_operation_id`, while the returned state uses `operation_id`.

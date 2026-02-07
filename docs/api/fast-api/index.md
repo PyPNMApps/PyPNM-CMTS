@@ -38,10 +38,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `GET /cmts/servingGroup/status` - SGW startup status and cache readiness.
 - `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
 - `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
-- `POST /cmts/pnm/rxmer/sg/startCapture` - Start serving group RxMER operation.
-- `POST /cmts/pnm/rxmer/sg/status` - Get serving group RxMER operation status.
-- `POST /cmts/pnm/rxmer/sg/results` - Get serving group RxMER operation results.
-- `POST /cmts/pnm/rxmer/sg/cancel` - Cancel serving group RxMER operation.
+- `POST /cmts/pnm/sg/ds/ofdm/rxmer/startCapture` - Start serving group RxMER operation.
+- `POST /cmts/pnm/sg/ds/ofdm/rxmer/status` - Get serving group RxMER operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/rxmer/results` - Get serving group RxMER operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel` - Cancel serving group RxMER operation.
 - `GET /ops/health` - Liveness probe.
 - `GET /ops/ready` - Readiness probe.
 - `GET /ops/version` - Service identity and version.

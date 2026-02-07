@@ -37,7 +37,7 @@ from pypnm_cmts.api.common.operations.runner import (
     OperationWorkerResultModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
-from pypnm_cmts.api.routes.pnm.rxmer.schemas import (
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupCancelResponse,
     RxMerServiceGroupOperationRequest,
     RxMerServiceGroupResultsResponse,
