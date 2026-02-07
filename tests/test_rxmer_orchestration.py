@@ -3,16 +3,25 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
-import time
 
 import pytest
 from pydantic import ValidationError
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.types import FileNameStr, InetAddressStr, MacAddressStr, TimestampSec, TransactionId
+from pypnm.lib.types import (
+    FileNameStr,
+    InetAddressStr,
+    IPv4Str,
+    IPv6Str,
+    MacAddressStr,
+    TimestampSec,
+    TransactionId,
+)
 from pypnm.lib.utils import Generate, TimeUnit
 
+import pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service as rxmer_service_module
 from pypnm_cmts.api.common.cmts_request import (
     CmtsCableModemFilterModel,
     CmtsPnmCaptureParametersModel,
@@ -23,23 +32,33 @@ from pypnm_cmts.api.common.cmts_request import (
     CmtsSnmpV2CModel,
     CmtsTftpParametersModel,
 )
-from pypnm_cmts.api.common.operations.models import PerModemLinkageRecordModel
+from pypnm_cmts.api.common.operations.models import (
+    OperationStageResultModel,
+    PerModemLinkageRecordModel,
+)
 from pypnm_cmts.api.common.operations.runner import (
     DEFAULT_OVERALL_TIMEOUT_MESSAGE,
     OperationRunner,
-    OperationWorkItemModel,
     OperationWorkerResultModel,
+    OperationWorkItemModel,
 )
-from pypnm_cmts.api.common.operations.models import OperationStageResultModel
 from pypnm_cmts.api.common.operations.store import OperationStore
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupExecutionModel,
     RxMerServiceGroupOperationRequest,
     RxMerServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import RxMerServiceGroupOperationService
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import (
+    RxMerServiceGroupOperationService,
+)
 from pypnm_cmts.lib.constants import OperationStage, OperationState
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+)
+from pypnm_cmts.sgw.store import SgwCacheStore
 
 POLL_INTERVAL_SECONDS = 0.02
 STATE_TIMEOUT_SECONDS = 2.0
@@ -49,10 +68,11 @@ WORKER_DELAY_SECONDS = 0.1
 def _build_service(
     tmp_path: Path,
     worker: Callable[[OperationWorkItemModel], OperationWorkerResultModel] | None = None,
+    sgw_store: SgwCacheStore | None = None,
 ) -> RxMerServiceGroupOperationService:
     store = OperationStore(base_dir=tmp_path)
     runner = OperationRunner(store=store, worker=worker)
-    return RxMerServiceGroupOperationService(store=store, runner=runner)
+    return RxMerServiceGroupOperationService(store=store, runner=runner, sgw_store=sgw_store)
 
 
 def _build_request(
@@ -67,6 +87,25 @@ def _build_request(
         ),
         execution=execution or RxMerServiceGroupExecutionModel(),
     )
+
+
+def _build_sgw_store(entries: list[tuple[ServiceGroupId, list[MacAddressStr]]]) -> SgwCacheStore:
+    store = SgwCacheStore()
+    for sg_id, mac_addresses in entries:
+        cable_modems = [
+            SgwCableModemModel(
+                mac=mac_address,
+                ipv4=IPv4Str("192.168.0.100"),
+                ipv6=IPv6Str(""),
+            )
+            for mac_address in mac_addresses
+        ]
+        snapshot = SgwSnapshotModel(
+            sg_id=sg_id,
+            cable_modems=cable_modems,
+        )
+        store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    return store
 
 
 def _wait_for_state(
@@ -258,6 +297,107 @@ def test_rxmer_runner_no_modems_selected(tmp_path: Path) -> None:
     state = service._store.load_state(start_response.operation.operation_id)
     assert state.counters.total_modems == 0
     assert service._store.count_result_records(start_response.operation.operation_id) == 0
+
+
+def test_rxmer_start_capture_expands_wildcard_sg_and_mac(tmp_path: Path) -> None:
+    sg_one = ServiceGroupId(1)
+    sg_two = ServiceGroupId(2)
+    mac_one = MacAddressStr("aa:bb:cc:dd:ee:01")
+    mac_two = MacAddressStr("aa:bb:cc:dd:ee:02")
+    mac_three = MacAddressStr("aa:bb:cc:dd:ee:03")
+    sgw_store = _build_sgw_store(
+        entries=[
+            (sg_one, [mac_one]),
+            (sg_two, [mac_two, mac_three]),
+        ]
+    )
+    service = _build_service(tmp_path, worker=_slow_worker, sgw_store=sgw_store)
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            serving_group=CmtsServingGroupFilterModel(id=[]),
+            cable_modem=CmtsCableModemFilterModel(mac_address=[]),
+        ),
+        execution=RxMerServiceGroupExecutionModel(max_workers=4),
+    )
+
+    start_response = service.start_capture(request)
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.request_summary.serving_group_ids == [sg_one, sg_two, sg_two]
+    assert state.request_summary.mac_addresses == [mac_one, mac_two, mac_three]
+
+
+def test_rxmer_start_capture_expands_wildcard_mac_for_selected_sg(tmp_path: Path) -> None:
+    sg_one = ServiceGroupId(1)
+    sg_two = ServiceGroupId(2)
+    mac_one = MacAddressStr("aa:bb:cc:dd:ee:01")
+    mac_two = MacAddressStr("aa:bb:cc:dd:ee:02")
+    sgw_store = _build_sgw_store(
+        entries=[
+            (sg_one, [mac_one]),
+            (sg_two, [mac_two]),
+        ]
+    )
+    service = _build_service(tmp_path, worker=_slow_worker, sgw_store=sgw_store)
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            serving_group=CmtsServingGroupFilterModel(id=[sg_two]),
+            cable_modem=CmtsCableModemFilterModel(mac_address=[]),
+        ),
+        execution=RxMerServiceGroupExecutionModel(max_workers=2),
+    )
+
+    start_response = service.start_capture(request)
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.request_summary.serving_group_ids == [sg_two]
+    assert state.request_summary.mac_addresses == [mac_two]
+
+
+def test_rxmer_start_capture_expands_wildcard_sg_for_selected_mac(tmp_path: Path) -> None:
+    sg_one = ServiceGroupId(1)
+    sg_two = ServiceGroupId(2)
+    target_mac = MacAddressStr("aa:bb:cc:dd:ee:aa")
+    sgw_store = _build_sgw_store(
+        entries=[
+            (sg_one, [target_mac]),
+            (sg_two, [MacAddressStr("aa:bb:cc:dd:ee:bb")]),
+        ]
+    )
+    service = _build_service(tmp_path, worker=_slow_worker, sgw_store=sgw_store)
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            serving_group=CmtsServingGroupFilterModel(id=[]),
+            cable_modem=CmtsCableModemFilterModel(mac_address=[target_mac]),
+        ),
+        execution=RxMerServiceGroupExecutionModel(max_workers=2),
+    )
+
+    start_response = service.start_capture(request)
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.request_summary.serving_group_ids == [sg_one]
+    assert state.request_summary.mac_addresses == [target_mac]
+
+
+def test_rxmer_start_capture_refreshes_runtime_sgw_store_when_unset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sg_id = ServiceGroupId(7)
+    mac = MacAddressStr("aa:bb:cc:dd:ee:07")
+    runtime_store = _build_sgw_store(entries=[(sg_id, [mac])])
+    service = _build_service(tmp_path, worker=_slow_worker, sgw_store=None)
+    monkeypatch.setattr(rxmer_service_module, "get_sgw_store", lambda: runtime_store)
+    request = RxMerServiceGroupStartCaptureRequest(
+        cmts=CmtsRequestEnvelopeModel(
+            serving_group=CmtsServingGroupFilterModel(id=[]),
+            cable_modem=CmtsCableModemFilterModel(mac_address=[]),
+        ),
+        execution=RxMerServiceGroupExecutionModel(max_workers=1),
+    )
+
+    start_response = service.start_capture(request)
+    state = service._store.load_state(start_response.operation.operation_id)
+    assert state.request_summary.serving_group_ids == [sg_id]
+    assert state.request_summary.mac_addresses == [mac]
 
 
 def test_rxmer_runner_retries_until_success(tmp_path: Path) -> None:

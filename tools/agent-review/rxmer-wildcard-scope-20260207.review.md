@@ -1,3 +1,11 @@
+## Agent Review Bundle Summary
+- Goal: Ensure RxMER startCapture logs operation start with operation_id and wildcard scope behavior remains correct.
+- Changes: Added INFO log in RxMerServiceGroupOperationService.start_capture with operation_id and resolved scope counts; retained prior wildcard scope fixes.
+- Files: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
+- Tests: ruff check src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py (pass); pytest -q tests/test_rxmer_orchestration.py tests/test_rxmer_pnm_artifacts.py (25 passed).
+- Notes: Log format is: rxmer startCapture queued operation_id=<id> scope_sg=<n> scope_macs=<n>.
+
+# FILE: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
 

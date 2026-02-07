@@ -23,7 +23,11 @@ from pypnm_cmts.api.common.operations.models import (
     PerModemLinkageRecordModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
-from pypnm_cmts.lib.constants import OperationStage, OperationState, PnmCaptureFailureReason
+from pypnm_cmts.lib.constants import (
+    OperationStage,
+    OperationState,
+    PnmCaptureFailureReason,
+)
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
 DEFAULT_WORKER_DELAY_SECONDS = 0.01
@@ -226,6 +230,7 @@ class OperationRunner:
             }
         )
         self._store.save_state_atomic(state)
+        self._log_terminal_state(state)
 
     def _execute_modem(self, item: OperationWorkItemModel) -> OperationWorkerResultModel:
         return self._worker(item)
@@ -327,6 +332,7 @@ class OperationRunner:
             }
         )
         self._store.save_state_atomic(state)
+        self._log_terminal_state(state)
 
     def _mark_failed(self, operation_id: PnmCaptureOperationId, message: str) -> None:
         state = self._store.load_state(operation_id)
@@ -338,6 +344,7 @@ class OperationRunner:
             }
         )
         self._store.save_state_atomic(state)
+        self._log_terminal_state(state)
 
     def _mark_completed(
         self,
@@ -354,6 +361,7 @@ class OperationRunner:
             }
         )
         self._store.save_state_atomic(updated)
+        self._log_terminal_state(updated)
 
     def _transition_to_running(self, state: OperationStateModel) -> OperationStateModel:
         timestamps = state.timestamps
@@ -541,6 +549,17 @@ class OperationRunner:
     def _cleanup(self, operation_id: PnmCaptureOperationId) -> None:
         with self._lock:
             self._threads.pop(operation_id, None)
+
+    def _log_terminal_state(self, state: OperationStateModel) -> None:
+        self.logger.info(
+            "operation terminal operation_id=%s state=%s total=%s success=%s failed=%s completed=%s",
+            state.operation_id,
+            state.state.value,
+            state.counters.total_modems,
+            state.counters.success,
+            state.counters.failed,
+            state.counters.completed,
+        )
 
 
 __all__ = [

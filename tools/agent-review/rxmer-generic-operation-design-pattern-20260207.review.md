@@ -1,3 +1,11 @@
+## Agent Review Bundle Summary
+- Goal: Document RxMER orchestration as the generic design pattern for future PNM operations.
+- Changes: Added a reusable operation framework section describing shared classes, composition boundaries, and inheritance rules for new operations.
+- Files: docs/api/fast-api/pypnm-cmts/sg-operations.md
+- Tests: mkdocs build -s (pass).
+- Notes: Pattern anchors future operations to api/common/operations shared models/store/runner with thin router/service per operation.
+
+# FILE: docs/api/fast-api/pypnm-cmts/sg-operations.md
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- Copyright (c) 2026 Maurice Garcia -->
 
