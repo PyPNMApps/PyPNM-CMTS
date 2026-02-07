@@ -1,3 +1,15 @@
+Summary:
+- Goal: Prevent pypnm-cmts serve from importing PyPNM via external local repos from inherited PYTHONPATH.
+- Changes: Added serve-time PYTHONPATH/sys.path sanitizer and replaced direct PYTHONPATH mutation in serve path.
+- Files:
+  - src/pypnm_cmts/cli.py
+- Tests:
+  - ruff check src/pypnm_cmts/cli.py --no-cache
+  - Python validation script invoking _sanitize_pythonpath_for_serve
+- Notes:
+  - Traceback value `config_path="string"` indicates request payload/path input issue separate from PYTHONPATH resolution.
+
+# FILE: src/pypnm_cmts/cli.py
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Maurice Garcia
