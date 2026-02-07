@@ -9,15 +9,19 @@ from pypnm.lib.types import (
     ChannelId,
     FileNameStr,
     InetAddressStr,
-    MacAddressStr,
-    TimestampSec,
-    TransactionId,
     IPv4Str,
     IPv6Str,
+    MacAddressStr,
     SnmpWriteCommunity,
+    TimestampSec,
+    TransactionId,
 )
 
-from pypnm_cmts.lib.constants import OperationStage, OperationState, PnmCaptureFailureReason
+from pypnm_cmts.lib.constants import (
+    OperationStage,
+    OperationState,
+    PnmCaptureFailureReason,
+)
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
 MIN_TIMEOUT_SECONDS = 1.0

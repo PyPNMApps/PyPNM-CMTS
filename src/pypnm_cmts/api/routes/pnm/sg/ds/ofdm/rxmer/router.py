@@ -15,7 +15,9 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupStartCaptureResponse,
     RxMerServiceGroupStatusResponse,
 )
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import RxMerServiceGroupOperationService
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import (
+    RxMerServiceGroupOperationService,
+)
 from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 
 

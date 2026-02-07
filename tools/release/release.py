@@ -574,6 +574,17 @@ def _run_tests() -> None:
     _print_status("Tests", "pass")
 
 
+def _run_ruff_checks() -> None:
+    """Run Ruff checks for source files before finalizing the release."""
+    print("Running Ruff checks (src)...")
+    result = _run([sys.executable, "-m", "ruff", "check", "src"], check=False, label="Ruff")
+    if result.returncode != 0:
+        print("ERROR: Ruff checks failed. Aborting release.", file=sys.stderr)
+        _print_status("Ruff", "fail")
+        sys.exit(result.returncode)
+    _print_status("Ruff", "pass")
+
+
 def _run_repo_hygiene_checks(skip_mac_scan: bool = False) -> None:
     """Run pre-release hygiene checks (secrets, MAC address scans, etc.)."""
     checks: list[tuple[str, list[str]]] = [("Secret scan", ["./tools/security/scan-secrets.sh"])]
@@ -783,20 +794,21 @@ def main() -> None:
             print("  5) Run repository hygiene checks (secrets only)")
         else:
             print("  5) Run repository hygiene checks (secrets/macs)")
+        print("  6) Run Ruff checks (src)")
         if not skip_tests:
-            print("  6) Run pytest")
+            print("  7) Run pytest")
         if not skip_docker:
-            print("  7) Run local docker preflight (tools/local/local_container_build.sh --smoke)")
+            print("  8) Run local docker preflight (tools/local/local_container_build.sh --smoke)")
         if not skip_k8s:
-            print("  8) Run local Kubernetes smoke test (tools/local/local_kubernetes_smoke.sh)")
-        print(f"  9) Build docs with mkdocs --strict")
+            print("  9) Run local Kubernetes smoke test (tools/local/local_kubernetes_smoke.sh)")
+        print(f" 10) Build docs with mkdocs --strict")
         if test_release:
-            print(" 10) Skip commit/tag/push (test-only)")
-            print(f" 11) Restore version files back to {current_version}")
+            print(" 11) Skip commit/tag/push (test-only)")
+            print(f" 12) Restore version files back to {current_version}")
         else:
-            print(f" 10) Commit version bump: 'Release {new_version}'")
-            print(f" 11) Create annotated tag '{tag_prefix}{new_version}'")
-            print(f" 12) Push branch '{branch}' and tag to origin")
+            print(f" 11) Commit version bump: 'Release {new_version}'")
+            print(f" 12) Create annotated tag '{tag_prefix}{new_version}'")
+            print(f" 13) Push branch '{branch}' and tag to origin")
         sys.exit(0)
 
     _ensure_virtualenv()
@@ -822,6 +834,7 @@ def main() -> None:
     _update_readme_tag(f"{tag_prefix}{new_version}")
 
     _run_repo_hygiene_checks(skip_mac_scan=skip_mac_scan)
+    _run_ruff_checks()
 
     if not skip_tests:
         _run_tests()
