@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -17,7 +16,6 @@ from pypnm.api.routes.common.extended.common_measure_schema import (
     DownstreamOfdmParameters,
 )
 from pypnm.api.routes.common.extended.common_messaging_service import (
-    MessagePayload,
     MessageResponse,
     MessageResponseType,
 )
@@ -26,16 +24,13 @@ from pypnm.api.routes.docs.pnm.ds.ofdm.rxmer.service import CmDsOfdmRxMerService
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
-from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import (
     ChannelId,
     FileNameStr,
     InetAddressStr,
     MacAddressStr,
-    TimestampSec,
     TransactionId,
 )
-from pypnm.lib.utils import Generate, TimeUnit
 
 from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
 from pypnm_cmts.api.common.operations.models import (
@@ -44,6 +39,8 @@ from pypnm_cmts.api.common.operations.models import (
     OperationRequestSummaryModel,
     OperationResultsSummaryModel,
     OperationStageResultModel,
+    OperationStateModel,
+    PerModemLinkageRecordModel,
 )
 from pypnm_cmts.api.common.operations.runner import (
     OperationRunner,
@@ -51,6 +48,18 @@ from pypnm_cmts.api.common.operations.runner import (
     OperationWorkItemModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
+from pypnm_cmts.api.common.service.pnm.capture import PnmCaptureHelper
+from pypnm_cmts.api.common.service.pnm.constants import (
+    MISSING_IP_MESSAGE,
+    MISSING_TRANSACTION_MESSAGE,
+    NO_MESSAGE_RESPONSE,
+    PRECHECK_FAILURE_MESSAGE,
+)
+from pypnm_cmts.api.common.service.pnm.modem import PnmModemResolver
+from pypnm_cmts.api.common.service.pnm.operation_service import (
+    DEFAULT_MAX_INLINE_RECORDS,
+    PnmServiceGroupOperationServiceBase,
+)
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupCancelResponse,
     RxMerServiceGroupOperationRequest,
@@ -59,19 +68,10 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupStartCaptureResponse,
     RxMerServiceGroupStatusResponse,
 )
-from pypnm_cmts.lib.constants import OperationStage, OperationState
+from pypnm_cmts.lib.constants import OperationStage
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
-from pypnm_cmts.sgw.models import SgwCableModemModel
 from pypnm_cmts.sgw.runtime_state import get_sgw_store
 from pypnm_cmts.sgw.store import SgwCacheStore
-
-DEFAULT_MAX_INLINE_RECORDS = 250
-NOT_FOUND_MESSAGE = "operation not found"
-CLEAR_MESSAGE = ""
-PRECHECK_FAILURE_MESSAGE = "precheck failed"
-MISSING_IP_MESSAGE = "modem ip address missing"
-NO_MESSAGE_RESPONSE = "capture returned no message response"
-MISSING_TRANSACTION_MESSAGE = "missing transaction_id or filename"
 
 CaptureExecutor = Callable[
     [CableModem, DownstreamOfdmParameters | None, tuple[Inet, Inet], str],
@@ -110,7 +110,7 @@ class RxMerCaptureWorker:
         request_summary = state.request_summary
         request_context = self._store.load_request_context(item.operation_id)
         ip_address = self._resolve_modem_ip(item.sg_id, item.mac_address)
-        now_epoch = self._now_epoch()
+        now_epoch = PnmCaptureHelper.now_epoch()
         stages: list[OperationStageResultModel] = []
         eligibility_result = OperationStageResultModel(
             stage=OperationStage.ELIGIBILITY,
@@ -133,11 +133,11 @@ class RxMerCaptureWorker:
             )
             return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
 
-        write_community = self._resolve_write_community(request_context)
+        write_community = PnmModemResolver.resolve_write_community(request_context)
         community_source = "request_override"
         if request_context is None or request_context.snmp_write_community is None:
             community_source = "system_default"
-        precheck_cm = self._build_cable_modem(
+        precheck_cm = PnmModemResolver.build_cable_modem(
             mac_address=item.mac_address,
             ip_address=ip_address,
             write_community=write_community,
@@ -175,7 +175,7 @@ class RxMerCaptureWorker:
 
         # Use a fresh CableModem instance for capture. The precheck executes in a
         # separate asyncio lifecycle and may close loop-bound SNMP transports.
-        capture_cm = self._build_cable_modem(
+        capture_cm = PnmModemResolver.build_cable_modem(
             mac_address=item.mac_address,
             ip_address=ip_address,
             write_community=write_community,
@@ -206,118 +206,17 @@ class RxMerCaptureWorker:
         sg_id: ServiceGroupId,
         mac_address: MacAddressStr,
     ) -> InetAddressStr | None:
-        store = self._sgw_store if self._sgw_store is not None else get_sgw_store()
-        if store is None:
-            self.logger.info(
-                "rxmer modem ip unresolved sg_id=%s mac=%s reason=sgw_store_missing",
-                sg_id,
-                mac_address,
-            )
-            return None
-        if self._sgw_store is None:
-            self._sgw_store = store
-        entry = store.get_entry(sg_id)
-        if entry is None:
-            self.logger.info(
-                "rxmer modem ip unresolved sg_id=%s mac=%s reason=sg_entry_missing",
-                sg_id,
-                mac_address,
-            )
-            return None
-        matched_modem = False
-        for modem in entry.snapshot.cable_modems:
-            if modem.mac != mac_address:
-                continue
-            matched_modem = True
-            raw_ipv4 = str(modem.ipv4).strip()
-            raw_ipv6 = str(modem.ipv6).strip()
-            normalized_ipv4 = self._normalize_ip_value(raw_ipv4)
-            normalized_ipv6 = self._normalize_ip_value(raw_ipv6)
-            ip_value = self._select_ip(modem)
-            self.logger.info(
-                "RxMER-Worker [MODem_IP_CANDIDATES] sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
-                sg_id,
-                mac_address,
-                raw_ipv4,
-                normalized_ipv4,
-                raw_ipv6,
-                normalized_ipv6,
-            )
-            if ip_value is None:
-                self.logger.info(
-                    "rxmer modem ip unresolved sg_id=%s mac=%s",
-                    sg_id,
-                    mac_address,
-                )
-                return None
-            try:
-                return InetAddressStr(str(Inet(ip_value)))
-            except Exception:
-                self.logger.info(
-                    "rxmer modem ip invalid sg_id=%s mac=%s ip_selected=%s",
-                    sg_id,
-                    mac_address,
-                    ip_value,
-                )
-                return None
-        if not matched_modem:
-            self.logger.info(
-                "rxmer modem ip unresolved sg_id=%s mac=%s reason=modem_not_in_sg_snapshot",
-                sg_id,
-                mac_address,
-            )
-        return None
-
-    @staticmethod
-    def _select_ip(modem: SgwCableModemModel) -> str | None:
-        ipv4 = RxMerCaptureWorker._normalize_ip_value(str(modem.ipv4))
-        if ipv4 not in {"", "0.0.0.0"}:
-            return ipv4
-        ipv6 = RxMerCaptureWorker._normalize_ip_value(str(modem.ipv6))
-        if ipv6 not in {"", "::"}:
-            return ipv6
-        return None
-
-    @staticmethod
-    def _normalize_ip_value(raw_value: str) -> str:
-        value = raw_value.strip()
-        if value == "":
-            return ""
-        if not value.startswith("0x"):
-            return value
-        return RxMerCaptureWorker._decode_hex_ip(value)
-
-    @staticmethod
-    def _decode_hex_ip(value: str) -> str:
-        encoded = value[2:]
-        if encoded == "":
-            return ""
-        try:
-            if len(encoded) == 8:
-                return str(ipaddress.IPv4Address(int(encoded, 16)))
-            if len(encoded) == 32:
-                return str(ipaddress.IPv6Address(int(encoded, 16)))
-        except Exception:
-            return value
-        return value
-
-    @staticmethod
-    def _resolve_write_community(context: OperationRequestContextModel | None) -> str:
-        if context is None or context.snmp_write_community is None:
-            return PnmConfigManager.get_write_community()
-        return str(context.snmp_write_community)
-
-    @staticmethod
-    def _build_cable_modem(
-        mac_address: MacAddressStr,
-        ip_address: InetAddressStr,
-        write_community: str,
-    ) -> CableModem:
-        return CableModem(
-            mac_address=MacAddress(mac_address),
-            inet=Inet(InetAddressStr(ip_address)),
-            write_community=write_community,
+        active_store = self._sgw_store if self._sgw_store is not None else get_sgw_store()
+        resolved_ip, store = PnmModemResolver.resolve_modem_ip(
+            sgw_store=active_store,
+            sg_id=sg_id,
+            mac_address=mac_address,
+            logger=self.logger,
+            log_prefix="RxMER-Worker",
         )
+        if self._sgw_store is None and store is not None:
+            self._sgw_store = store
+        return resolved_ip
 
     def _run_capture(
         self,
@@ -331,7 +230,7 @@ class RxMerCaptureWorker:
         interface_parameters = None
         if channel_ids:
             interface_parameters = DownstreamOfdmParameters(channel_id=list(channel_ids))
-        tftp_servers = self._resolve_tftp_servers(request_context)
+        tftp_servers = PnmCaptureHelper.resolve_tftp_servers(request_context)
         tftp_path = PnmConfigManager.get_tftp_path()
         self.logger.info(
             "RxMER-Worker [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
@@ -345,8 +244,13 @@ class RxMerCaptureWorker:
             tftp_path,
         )
         capture_response = self._capture_executor(cable_modem, interface_parameters, tftp_servers, tftp_path)
-        status_code, transaction_id, filename, message = self._parse_capture_response(capture_response)
-        created_epoch = self._now_epoch()
+        status_code, transaction_id, filename, message = PnmCaptureHelper.parse_capture_response(
+            response=capture_response,
+            expected_message_type=MessageResponseType.PNM_FILE_TRANSACTION.name,
+            no_message_response=NO_MESSAGE_RESPONSE,
+            missing_transaction_message=MISSING_TRANSACTION_MESSAGE,
+        )
+        created_epoch = PnmCaptureHelper.now_epoch()
         final_transaction_ids: list[TransactionId] = []
         final_filenames: list[FileNameStr] = []
         final_message = message
@@ -374,63 +278,6 @@ class RxMerCaptureWorker:
             started_epoch=created_epoch,
             finished_epoch=created_epoch,
         )
-
-    @staticmethod
-    def _resolve_tftp_servers(context: OperationRequestContextModel | None) -> tuple[Inet, Inet]:
-        default_v4, default_v6 = PnmConfigManager.get_tftp_servers()
-        ipv4 = default_v4 if context is None or context.tftp_ipv4 is None else Inet(str(context.tftp_ipv4))
-        ipv6 = default_v6 if context is None or context.tftp_ipv6 is None else Inet(str(context.tftp_ipv6))
-        return (ipv4, ipv6)
-
-    @staticmethod
-    def _parse_capture_response(
-        response: MessageResponse | None,
-    ) -> tuple[ServiceStatusCode, TransactionId | None, FileNameStr | None, str]:
-        if response is None:
-            return (ServiceStatusCode.FAILURE, None, None, NO_MESSAGE_RESPONSE)
-        status_code = response.status
-        if status_code != ServiceStatusCode.SUCCESS:
-            return (status_code, None, None, f"{status_code.name}")
-        payload = response.payload
-        if not isinstance(payload, list):
-            return (ServiceStatusCode.FAILURE, None, None, MISSING_TRANSACTION_MESSAGE)
-        for element in payload:
-            message_type, message = RxMerCaptureWorker._extract_payload_entry(element)
-            if message_type != MessageResponseType.PNM_FILE_TRANSACTION.name:
-                continue
-            if not isinstance(message, dict):
-                continue
-            transaction_id = message.get("transaction_id")
-            filename = message.get("filename")
-            if transaction_id is None or filename is None:
-                continue
-            return (
-                status_code,
-                TransactionId(str(transaction_id)),
-                FileNameStr(str(filename)),
-                CLEAR_MESSAGE,
-            )
-        return (ServiceStatusCode.PNM_FILE_TRANSACTION_ID_NOT_FOUND, None, None, MISSING_TRANSACTION_MESSAGE)
-
-    @staticmethod
-    def _extract_payload_entry(
-        element: MessagePayload | dict[str, object],
-    ) -> tuple[str | None, object | None]:
-        if isinstance(element, MessagePayload):
-            return (element.message_type, element.message)
-        if isinstance(element, dict):
-            message_type = element.get("message_type")
-            message = element.get("message")
-            return (
-                str(message_type) if message_type is not None else None,
-                message,
-            )
-        return (None, None)
-
-    @staticmethod
-    def _now_epoch() -> TimestampSec:
-        return TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
-
 
 def _run_pypnm_capture(
     cable_modem: CableModem,
@@ -462,7 +309,7 @@ def _run_on_isolated_event_loop(coro: Awaitable[T]) -> T:
         loop.close()
 
 
-class RxMerServiceGroupOperationService:
+class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
     """Service layer for SG-level RxMER operation lifecycle endpoints."""
 
     def __init__(
@@ -474,10 +321,14 @@ class RxMerServiceGroupOperationService:
         sgw_store: SgwCacheStore | None = None,
         max_inline_records: int = DEFAULT_MAX_INLINE_RECORDS,
     ) -> None:
-        self._store = store or OperationStore()
+        super().__init__(
+            store=store,
+            sgw_store=sgw_store,
+            runtime_store_loader=lambda: get_sgw_store(),
+            max_inline_records=max_inline_records,
+        )
         self._capture_executor = capture_executor or _run_pypnm_capture
         self._precheck_executor = precheck_executor or self._run_precheck
-        self._sgw_store = sgw_store or get_sgw_store()
         if runner is None:
             worker = RxMerCaptureWorker(
                 store=self._store,
@@ -487,103 +338,13 @@ class RxMerServiceGroupOperationService:
             )
             runner = OperationRunner(self._store, worker=worker)
         self._runner = runner
-        self._max_inline_records = max_inline_records
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
 
-    def start_capture(
-        self,
-        request: RxMerServiceGroupStartCaptureRequest,
-    ) -> RxMerServiceGroupStartCaptureResponse:
-        """Create a new SG-level RxMER operation state record."""
-        request_summary = self._build_request_summary(request)
-        request_context = self._build_request_context(request)
-        state = self._store.create_operation(request_summary, request_context)
+    def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(
             "RxMer-StartCapture [QUEUED] operation_id=%s, scope_sg=%s, scope_macs=%s",
             state.operation_id,
             len(state.request_summary.serving_group_ids),
             len(state.request_summary.mac_addresses),
-        )
-        started = self._runner.start(state.operation_id)
-        if not started:
-            self.logger.warning("Operation-Runner already active for %s", state.operation_id)
-        return RxMerServiceGroupStartCaptureResponse(
-            status=ServiceStatusCode.SUCCESS,
-            message="",
-            operation=state,
-        )
-
-    def status(
-        self,
-        request: RxMerServiceGroupOperationRequest,
-    ) -> RxMerServiceGroupStatusResponse:
-        """Return the persisted state for an operation."""
-        try:
-            state = self._store.load_state(request.pnm_capture_operation_id)
-        except FileNotFoundError:
-            return RxMerServiceGroupStatusResponse(
-                status=ServiceStatusCode.FAILURE,
-                message=NOT_FOUND_MESSAGE,
-                operation=None,
-            )
-        message = ""
-        if state.state == OperationState.COMPLETED and state.counters.total_modems == 0:
-            message = "no modems selected"
-        return RxMerServiceGroupStatusResponse(
-            status=ServiceStatusCode.SUCCESS,
-            message=message,
-            operation=state,
-        )
-
-    def cancel(
-        self,
-        request: RxMerServiceGroupOperationRequest,
-    ) -> RxMerServiceGroupCancelResponse:
-        """Request cancellation for an operation."""
-        try:
-            state = self._runner.request_cancel(request.pnm_capture_operation_id)
-        except FileNotFoundError:
-            return RxMerServiceGroupCancelResponse(
-                status=ServiceStatusCode.FAILURE,
-                message=NOT_FOUND_MESSAGE,
-                operation=None,
-            )
-        return RxMerServiceGroupCancelResponse(
-            status=ServiceStatusCode.SUCCESS,
-            message="",
-            operation=state,
-        )
-
-    def results(
-        self,
-        request: RxMerServiceGroupOperationRequest,
-    ) -> RxMerServiceGroupResultsResponse:
-        """Return linkage records for an operation when available."""
-        try:
-            self._store.load_state(request.pnm_capture_operation_id)
-        except FileNotFoundError:
-            return RxMerServiceGroupResultsResponse(
-                status=ServiceStatusCode.FAILURE,
-                message=NOT_FOUND_MESSAGE,
-            )
-
-        files_scanned = self._store.count_result_files(request.pnm_capture_operation_id)
-        total_records = self._store.count_result_records(request.pnm_capture_operation_id)
-        include_records = total_records <= self._max_inline_records
-        records = []
-        if include_records:
-            records = self._store.load_result_records(request.pnm_capture_operation_id)
-        summary = OperationResultsSummaryModel(
-            record_count=total_records,
-            included_count=len(records),
-            files_scanned=files_scanned,
-        )
-        message = "" if total_records > 0 else "no results recorded"
-        return RxMerServiceGroupResultsResponse(
-            status=ServiceStatusCode.SUCCESS,
-            message=message,
-            summary=summary,
-            records=records,
         )
 
     @staticmethod
@@ -609,6 +370,60 @@ class RxMerServiceGroupOperationService:
             )
         except Exception as exc:
             return (ServiceStatusCode.FAILURE, f"{PRECHECK_FAILURE_MESSAGE}: {exc}")
+
+    @staticmethod
+    def _extract_operation_id(
+        request: RxMerServiceGroupOperationRequest,
+    ) -> PnmCaptureOperationId:
+        return request.pnm_capture_operation_id
+
+    @staticmethod
+    def _build_start_response(
+        state: OperationStateModel,
+    ) -> RxMerServiceGroupStartCaptureResponse:
+        return RxMerServiceGroupStartCaptureResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message="",
+            operation=state,
+        )
+
+    @staticmethod
+    def _build_status_response(
+        status: ServiceStatusCode,
+        message: str,
+        state: OperationStateModel | None,
+    ) -> RxMerServiceGroupStatusResponse:
+        return RxMerServiceGroupStatusResponse(
+            status=status,
+            message=message,
+            operation=state,
+        )
+
+    @staticmethod
+    def _build_cancel_response(
+        status: ServiceStatusCode,
+        message: str,
+        state: OperationStateModel | None,
+    ) -> RxMerServiceGroupCancelResponse:
+        return RxMerServiceGroupCancelResponse(
+            status=status,
+            message=message,
+            operation=state,
+        )
+
+    @staticmethod
+    def _build_results_response(
+        status: ServiceStatusCode,
+        message: str,
+        summary: OperationResultsSummaryModel,
+        records: list[PerModemLinkageRecordModel],
+    ) -> RxMerServiceGroupResultsResponse:
+        return RxMerServiceGroupResultsResponse(
+            status=status,
+            message=message,
+            summary=summary,
+            records=records,
+        )
 
     def _build_request_summary(
         self,
@@ -640,78 +455,6 @@ class RxMerServiceGroupOperationService:
                 overall_timeout_seconds=execution.overall_timeout_seconds,
             ),
         )
-
-    def _resolve_modem_scope(
-        self,
-        requested_sg_ids: list[ServiceGroupId],
-        requested_mac_addresses: list[MacAddressStr],
-    ) -> tuple[list[ServiceGroupId], list[MacAddressStr]]:
-        if requested_sg_ids and requested_mac_addresses:
-            return requested_sg_ids, requested_mac_addresses
-        store = self._sgw_store if self._sgw_store is not None else get_sgw_store()
-        if store is None:
-            return requested_sg_ids, requested_mac_addresses
-        if self._sgw_store is None:
-            self._sgw_store = store
-
-        sg_ids = requested_sg_ids if requested_sg_ids else store.get_ids()
-        if not sg_ids:
-            return ([], [])
-
-        cache_entries = self._load_cache_entries(sg_ids)
-        if requested_mac_addresses:
-            return self._expand_macs_with_wildcard_sg(requested_mac_addresses, cache_entries)
-        return self._expand_modems_for_sgs(cache_entries)
-
-    def _load_cache_entries(
-        self,
-        sg_ids: list[ServiceGroupId],
-    ) -> list[tuple[ServiceGroupId, list[SgwCableModemModel]]]:
-        entries: list[tuple[ServiceGroupId, list[SgwCableModemModel]]] = []
-        store = self._sgw_store
-        if store is None:
-            return entries
-        for sg_id in sg_ids:
-            entry = store.get_entry(sg_id)
-            if entry is None:
-                continue
-            entries.append((sg_id, list(entry.snapshot.cable_modems)))
-        return entries
-
-    @staticmethod
-    def _expand_macs_with_wildcard_sg(
-        requested_mac_addresses: list[MacAddressStr],
-        cache_entries: list[tuple[ServiceGroupId, list[SgwCableModemModel]]],
-    ) -> tuple[list[ServiceGroupId], list[MacAddressStr]]:
-        mac_to_sg_ids: dict[MacAddressStr, list[ServiceGroupId]] = {}
-        for sg_id, cable_modems in cache_entries:
-            for cable_modem in cable_modems:
-                if cable_modem.mac not in mac_to_sg_ids:
-                    mac_to_sg_ids[cable_modem.mac] = []
-                mac_to_sg_ids[cable_modem.mac].append(sg_id)
-
-        expanded_sg_ids: list[ServiceGroupId] = []
-        expanded_mac_addresses: list[MacAddressStr] = []
-        for mac_address in requested_mac_addresses:
-            sg_ids = mac_to_sg_ids.get(mac_address)
-            if sg_ids is None:
-                continue
-            for sg_id in sg_ids:
-                expanded_sg_ids.append(sg_id)
-                expanded_mac_addresses.append(mac_address)
-        return (expanded_sg_ids, expanded_mac_addresses)
-
-    @staticmethod
-    def _expand_modems_for_sgs(
-        cache_entries: list[tuple[ServiceGroupId, list[SgwCableModemModel]]],
-    ) -> tuple[list[ServiceGroupId], list[MacAddressStr]]:
-        expanded_sg_ids: list[ServiceGroupId] = []
-        expanded_mac_addresses: list[MacAddressStr] = []
-        for sg_id, cable_modems in cache_entries:
-            for cable_modem in cable_modems:
-                expanded_sg_ids.append(sg_id)
-                expanded_mac_addresses.append(cable_modem.mac)
-        return (expanded_sg_ids, expanded_mac_addresses)
 
     @staticmethod
     def _resolve_channel_ids(cmts: CmtsRequestEnvelopeModel) -> list[ChannelId]:
