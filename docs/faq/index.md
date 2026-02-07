@@ -43,3 +43,15 @@ Resolution:
 2) Do not send empty strings for these fields.
 3) If `tftp` or `snmpV2C` objects are provided, their keys must be present (use `null` for defaults).
 4) Duplicate list entries in request filters are rejected (for example, repeated `serving_group.id` values).
+
+## Why can a successful RxMER capture appear as `FAILED` with missing transaction id?
+
+This can happen when capture payload parsing expects raw dictionaries while PyPNM returns typed payload entries.
+In that case, transaction metadata is not extracted even though capture succeeded, and the operation may be marked
+as failed with a missing transaction id message.
+
+Resolution:
+
+1) Update RxMER payload parsing to handle PyPNM `MessagePayload` entries.
+2) Validate that `PNM_FILE_TRANSACTION` entries produce both `transaction_id` and `filename`.
+3) Re-run the capture and confirm status transitions to `COMPLETED` when capture succeeds.

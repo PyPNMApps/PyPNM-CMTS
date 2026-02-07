@@ -13,7 +13,8 @@ flowchart TD
     B --> C[state=RUNNING]
     C --> D{cancel?}
     D -->|yes| E[cancel.flag set]
-    E --> F[state=CANCELLED]
+    E --> F[state=CANCELLING]
+    F --> G[state=CANCELLED]
     D -->|no| G[state=COMPLETED]
     C --> H[state=FAILED]
     G --> I[results]
@@ -26,7 +27,13 @@ flowchart TD
 Create a new serving-group RxMER operation. The response returns a new `operation_id` and initial counters.
 Status values use numeric `ServiceStatusCode`.
 
-Current behavior (Step 3): startCapture schedules background execution and returns immediately. Status, cancel, and results operate on persisted state and JSONL linkage records. Cancel creates `cancel.flag`, and the runner transitions to `CANCELLED`.
+Current behavior (Step 3): startCapture schedules background execution and returns immediately. Status, cancel, and results operate on persisted state and JSONL linkage records. Cancel creates `cancel.flag` and transitions to `CANCELLING`, and the runner transitions to `CANCELLED` when it observes the flag.
+
+Collect-only behavior (Step 9): PyPNM owns PNM artifacts in `.data/pnm/` and authoritative transaction records in `.data/db/transactions.json`. CMTS linkage records store transaction_id and filename pointers for later decode/analysis. See `docs/api/fast-api/pypnm-cmts/sg-operations.md` for the on-disk data model.
+
+Runner-level failures: the runner may synthesize stage outcomes when a per-modem timeout or internal exception occurs. In those cases, `ELIGIBILITY` and `PRECHECK` may be marked successful even if they did not run, and `CAPTURE` carries the failure status. `failure_reason` provides a normalized diagnostic for timeouts or runner-level failures.
+
+Status types: orchestration responses use numeric `ServiceStatusCode`. `PnmCaptureStatus` exists for other capture pipelines but is not used in RxMER orchestration responses.
 
 ### Request
 

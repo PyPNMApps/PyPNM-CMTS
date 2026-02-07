@@ -12,6 +12,7 @@ from pypnm.lib.types import TimestampSec
 from pypnm.lib.utils import Generate, TimeUnit
 
 from pypnm_cmts.api.common.operations.models import (
+    OperationRequestContextModel,
     OperationRequestSummaryModel,
     OperationStateModel,
     OperationTimestampsModel,
@@ -21,6 +22,7 @@ from pypnm_cmts.lib.constants import OperationState
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
 STATE_FILE_NAME = "state.json"
+REQUEST_CONTEXT_FILE_NAME = "request_context.json"
 CANCEL_FLAG_NAME = "cancel.flag"
 RESULTS_DIR_NAME = "results"
 RESULT_FILE_PREFIX = "sg-"
@@ -35,7 +37,11 @@ class OperationStore:
         self._base_dir = base_dir or DEFAULT_BASE_DIR
         self._state_lock = threading.Lock()
 
-    def create_operation(self, request_summary: OperationRequestSummaryModel) -> OperationStateModel:
+    def create_operation(
+        self,
+        request_summary: OperationRequestSummaryModel,
+        request_context: OperationRequestContextModel | None = None,
+    ) -> OperationStateModel:
         """Create a new operation directory and persist initial state."""
         operation_id = self._generate_operation_id()
         now_epoch = self._now_epoch()
@@ -53,6 +59,8 @@ class OperationStore:
         )
         self._ensure_operation_dirs(operation_id)
         self.save_state_atomic(state)
+        if request_context is not None:
+            self.save_request_context(operation_id, request_context)
         return state
 
     def load_state(self, operation_id: PnmCaptureOperationId) -> OperationStateModel:
@@ -77,6 +85,31 @@ class OperationStore:
                     return
             tmp_path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
             tmp_path.replace(path)
+
+    def save_request_context(
+        self,
+        operation_id: PnmCaptureOperationId,
+        context: OperationRequestContextModel,
+    ) -> None:
+        """Persist request context overrides to disk."""
+        path = self._request_context_path(operation_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(f".{uuid4().hex}.tmp")
+        with self._state_lock:
+            tmp_path.write_text(context.model_dump_json(indent=2), encoding="utf-8")
+            tmp_path.replace(path)
+
+    def load_request_context(
+        self,
+        operation_id: PnmCaptureOperationId,
+    ) -> OperationRequestContextModel | None:
+        """Load request context overrides if present."""
+        path = self._request_context_path(operation_id)
+        if not path.exists():
+            return None
+        with self._state_lock:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        return OperationRequestContextModel.model_validate(payload)
 
     def request_cancel(self, operation_id: PnmCaptureOperationId) -> OperationStateModel:
         """Create cancel.flag and update state unless already terminal."""
@@ -154,6 +187,9 @@ class OperationStore:
 
     def _state_path(self, operation_id: PnmCaptureOperationId) -> Path:
         return self._operation_dir(operation_id) / STATE_FILE_NAME
+
+    def _request_context_path(self, operation_id: PnmCaptureOperationId) -> Path:
+        return self._operation_dir(operation_id) / REQUEST_CONTEXT_FILE_NAME
 
     def _cancel_flag_path(self, operation_id: PnmCaptureOperationId) -> Path:
         return self._operation_dir(operation_id) / CANCEL_FLAG_NAME

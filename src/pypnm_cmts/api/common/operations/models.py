@@ -12,9 +12,12 @@ from pypnm.lib.types import (
     MacAddressStr,
     TimestampSec,
     TransactionId,
+    IPv4Str,
+    IPv6Str,
+    SnmpWriteCommunity,
 )
 
-from pypnm_cmts.lib.constants import OperationStage, OperationState
+from pypnm_cmts.lib.constants import OperationStage, OperationState, PnmCaptureFailureReason
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
 MIN_TIMEOUT_SECONDS = 1.0
@@ -97,6 +100,17 @@ class OperationRequestSummaryModel(BaseModel):
     )
 
 
+class OperationRequestContextModel(BaseModel):
+    """Internal request context for capture overrides."""
+
+    tftp_ipv4: IPv4Str | None = Field(default=None, description="Optional TFTP IPv4 override.")
+    tftp_ipv6: IPv6Str | None = Field(default=None, description="Optional TFTP IPv6 override.")
+    snmp_write_community: SnmpWriteCommunity | None = Field(
+        default=None,
+        description="Optional SNMP write community override.",
+    )
+
+
 class OperationErrorSummaryModel(BaseModel):
     """Optional error summary for failed operations."""
 
@@ -109,6 +123,10 @@ class OperationStageResultModel(BaseModel):
 
     stage: OperationStage = Field(..., description="Execution stage identifier.")
     status_code: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Stage status code.")
+    failure_reason: PnmCaptureFailureReason | None = Field(
+        default=None,
+        description="Optional normalized failure reason for the stage.",
+    )
     transaction_ids: list[TransactionId] = Field(
         default_factory=list,
         description="Transaction identifiers linked to this stage.",
@@ -156,6 +174,10 @@ class PerModemLinkageRecordModel(BaseModel):
     ip_address: InetAddressStr | None = Field(default=None, description="Cable modem IP address, if known.")
     stage: OperationStage = Field(default=OperationStage.ELIGIBILITY, description="Operation stage for this record.")
     status_code: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Status code for this stage.")
+    failure_reason: PnmCaptureFailureReason | None = Field(
+        default=None,
+        description="Optional normalized failure reason for the stage.",
+    )
     transaction_ids: list[TransactionId] = Field(
         default_factory=list,
         description="Transaction identifiers linked to this modem stage.",
@@ -189,6 +211,7 @@ __all__ = [
     "OperationCountersModel",
     "OperationErrorSummaryModel",
     "OperationExecutionModel",
+    "OperationRequestContextModel",
     "OperationRequestSummaryModel",
     "OperationResultsSummaryModel",
     "OperationStageResultModel",
