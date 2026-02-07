@@ -22,6 +22,8 @@ dist/
 *.log
 
 # PyPNM-CMTS
+.data
+.data/
 .data/*
 data/
 output/*
