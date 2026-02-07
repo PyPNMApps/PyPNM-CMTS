@@ -6,8 +6,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from typing import TypeVar
 
 from pypnm.api.routes.common.classes.operation.cable_modem_precheck import (
     CableModemServicePreCheck,
@@ -77,6 +78,7 @@ CaptureExecutor = Callable[
     MessageResponse,
 ]
 PrecheckExecutor = Callable[[CableModem], tuple[ServiceStatusCode, str]]
+T = TypeVar("T")
 
 
 class RxMerCaptureWorker:
@@ -233,7 +235,7 @@ class RxMerCaptureWorker:
             normalized_ipv6 = self._normalize_ip_value(raw_ipv6)
             ip_value = self._select_ip(modem)
             self.logger.info(
-                "rxmer modem ip candidates sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
+                "RxMER-Worker [MODem_IP_CANDIDATES] sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
                 sg_id,
                 mac_address,
                 raw_ipv4,
@@ -437,13 +439,25 @@ def _run_pypnm_capture(
     tftp_path: str,
 ) -> MessageResponse:
     service = CmDsOfdmRxMerService(cable_modem, tftp_servers, tftp_path)
+    return _run_on_isolated_event_loop(service.set_and_go(interface_parameters=interface_parameters))
+
+
+def _run_on_isolated_event_loop(coro: Awaitable[T]) -> T:
     loop = asyncio.DefaultEventLoopPolicy().new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(service.set_and_go(interface_parameters=interface_parameters))
+        return loop.run_until_complete(coro)
     finally:
         with suppress(Exception):
+            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        with suppress(Exception):
             loop.run_until_complete(loop.shutdown_asyncgens())
+        with suppress(Exception):
+            loop.run_until_complete(loop.shutdown_default_executor())
         asyncio.set_event_loop(None)
         loop.close()
 
@@ -590,7 +604,7 @@ class RxMerServiceGroupOperationService:
     @staticmethod
     def _run_precheck(cable_modem: CableModem) -> tuple[ServiceStatusCode, str]:
         try:
-            return asyncio.run(
+            return _run_on_isolated_event_loop(
                 CableModemServicePreCheck(cable_modem=cable_modem, validate_ofdm_exist=True).run_precheck()
             )
         except Exception as exc:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import time
 
@@ -312,6 +313,25 @@ def test_rxmer_precheck_and_capture_use_distinct_cable_modem_instances(tmp_path:
     )
     assert terminal_state == OperationState.COMPLETED
     assert observed_ids["precheck"] != observed_ids["capture"]
+
+
+def test_run_on_isolated_event_loop_cancels_pending_tasks() -> None:
+    finalized: dict[str, bool] = {"done": False}
+
+    async def _background() -> None:
+        try:
+            await asyncio.sleep(60)
+        finally:
+            finalized["done"] = True
+
+    async def _main() -> str:
+        asyncio.create_task(_background())
+        await asyncio.sleep(0)
+        return "ok"
+
+    result = rxmer_service_module._run_on_isolated_event_loop(_main())
+    assert result == "ok"
+    assert finalized["done"]
 
 
 def test_rxmer_capture_failure_records_linkage(tmp_path: Path) -> None:

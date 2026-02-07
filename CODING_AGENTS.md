@@ -6,6 +6,7 @@
 - First line is the summary/title.
 - Follow with detail lines prefixed by `- `.
 - Keep each detail on its own line.
+- Do not include double quotes, single quotes, or backticks in commit message output.
 
 Example:
 
