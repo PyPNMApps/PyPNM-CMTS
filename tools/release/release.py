@@ -574,12 +574,13 @@ def _run_tests() -> None:
     _print_status("Tests", "pass")
 
 
-def _run_repo_hygiene_checks() -> None:
+def _run_repo_hygiene_checks(skip_mac_scan: bool = False) -> None:
     """Run pre-release hygiene checks (secrets, MAC address scans, etc.)."""
-    checks: list[tuple[str, list[str]]] = [
-        ("Secret scan", ["./tools/security/scan-secrets.sh"]),
-        ("MAC scan", ["./tools/security/scan-mac-addresses.py", "--fail-on-found"]),
-    ]
+    checks: list[tuple[str, list[str]]] = [("Secret scan", ["./tools/security/scan-secrets.sh"])]
+    if skip_mac_scan:
+        _print_status("MAC scan", "skip")
+    else:
+        checks.append(("MAC scan", ["./tools/security/scan-mac-addresses.py", "--fail-on-found"]))
     print("Running repository hygiene checks...")
     for label, cmd in checks:
         script_path = Path(cmd[0])
@@ -706,6 +707,11 @@ def main() -> None:
         help="Skip running pytest before committing and tagging.",
     )
     parser.add_argument(
+        "--skip-mac-scan",
+        action="store_true",
+        help="Skip MAC address scan during repository hygiene checks.",
+    )
+    parser.add_argument(
         "--skip-docker-test",
         action="store_true",
         help="Skip local docker build/smoke preflight (tools/local/local_container_build.sh).",
@@ -732,6 +738,7 @@ def main() -> None:
     branch: str                  = args.branch
     tag_prefix: str              = args.tag_prefix
     skip_tests: bool             = args.skip_tests
+    skip_mac_scan: bool          = args.skip_mac_scan
     skip_docker: bool            = True
     skip_k8s: bool               = True
     dry_run: bool                = args.dry_run
@@ -772,7 +779,10 @@ def main() -> None:
         print(f"  2) Checkout branch '{branch}' and pull with --ff-only")
         print(f"  3) Update version {current_version} -> {new_version} via tools/bump_version.py")
         print(f"  4) Update README/docs TAG placeholders to {tag_prefix}{new_version}")
-        print("  5) Run repository hygiene checks (secrets/macs)")
+        if skip_mac_scan:
+            print("  5) Run repository hygiene checks (secrets only)")
+        else:
+            print("  5) Run repository hygiene checks (secrets/macs)")
         if not skip_tests:
             print("  6) Run pytest")
         if not skip_docker:
@@ -811,7 +821,7 @@ def main() -> None:
     _bump_version(new_version)
     _update_readme_tag(f"{tag_prefix}{new_version}")
 
-    _run_repo_hygiene_checks()
+    _run_repo_hygiene_checks(skip_mac_scan=skip_mac_scan)
 
     if not skip_tests:
         _run_tests()
