@@ -1,3 +1,11 @@
+## Agent Review Bundle Summary
+- Goal: Add actionable CMTS-side RxMER info logging to drill down per-modem execution failures.
+- Changes: Added INFO logs for request scope resolution, worker start, eligibility failure, precheck start/failure, capture start/result, and worker completion with operation/sg/mac context.
+- Files: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
+- Tests: ruff check src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py (pass); pytest -q tests/test_rxmer_orchestration.py tests/test_rxmer_pnm_artifacts.py (27 passed).
+- Notes: Logs now include ip candidate raw/normalized values and stage outcome telemetry to isolate failure stage quickly.
+
+# FILE: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
 
@@ -98,7 +106,7 @@ class RxMerCaptureWorker:
     def __call__(self, item: OperationWorkItemModel) -> OperationWorkerResultModel:
         """Run eligibility, precheck, and capture for a modem work item."""
         self.logger.info(
-            "RxMER-Worker [START] operation_id=%s, sg_id=%s, mac=%s, attempt=%s",
+            "rxmer worker start operation_id=%s sg_id=%s mac=%s attempt=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -122,7 +130,7 @@ class RxMerCaptureWorker:
         stages.append(eligibility_result)
         if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "RxMER-Worker [ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "rxmer worker eligibility_failed operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -135,21 +143,20 @@ class RxMerCaptureWorker:
         community_source = "request_override"
         if request_context is None or request_context.snmp_write_community is None:
             community_source = "system_default"
-        precheck_cm = self._build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
+        cm = CableModem(
+            mac_address=MacAddress(item.mac_address),
+            inet=Inet(InetAddressStr(ip_address)),
             write_community=write_community,
         )
         self.logger.info(
-            "RxMER-Worker [PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s community=%s",
+            "rxmer worker precheck_start operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
             ip_address,
             community_source,
-            write_community,
         )
-        precheck_status, precheck_message = self._precheck_executor(precheck_cm)
+        precheck_status, precheck_message = self._precheck_executor(cm)
         precheck_result = OperationStageResultModel(
             stage=OperationStage.PRECHECK,
             status_code=precheck_status,
@@ -162,7 +169,7 @@ class RxMerCaptureWorker:
         stages.append(precheck_result)
         if precheck_status != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "RxMER-Worker [PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "rxmer worker precheck_failed operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -171,24 +178,17 @@ class RxMerCaptureWorker:
             )
             return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
 
-        # Use a fresh CableModem instance for capture. The precheck executes in a
-        # separate asyncio lifecycle and may close loop-bound SNMP transports.
-        capture_cm = self._build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
-            write_community=write_community,
-        )
         capture_result = self._run_capture(
             operation_id=item.operation_id,
             sg_id=item.sg_id,
             mac_address=item.mac_address,
-            cable_modem=capture_cm,
+            cable_modem=cm,
             channel_ids=list(request_summary.channel_ids),
             request_context=request_context,
         )
         stages.append(capture_result)
         self.logger.info(
-            "RxMER-Worker [COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
+            "rxmer worker complete operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -305,18 +305,6 @@ class RxMerCaptureWorker:
             return PnmConfigManager.get_write_community()
         return str(context.snmp_write_community)
 
-    @staticmethod
-    def _build_cable_modem(
-        mac_address: MacAddressStr,
-        ip_address: InetAddressStr,
-        write_community: str,
-    ) -> CableModem:
-        return CableModem(
-            mac_address=MacAddress(mac_address),
-            inet=Inet(InetAddressStr(ip_address)),
-            write_community=write_community,
-        )
-
     def _run_capture(
         self,
         operation_id: PnmCaptureOperationId,
@@ -332,7 +320,7 @@ class RxMerCaptureWorker:
         tftp_servers = self._resolve_tftp_servers(request_context)
         tftp_path = PnmConfigManager.get_tftp_path()
         self.logger.info(
-            "RxMER-Worker [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
+            "rxmer worker capture_start operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
             operation_id,
             sg_id,
             mac_address,
@@ -354,7 +342,7 @@ class RxMerCaptureWorker:
         else:
             final_message = message or MISSING_TRANSACTION_MESSAGE
         self.logger.info(
-            "RxMER-Worker [CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
+            "rxmer worker capture_result operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
             operation_id,
             sg_id,
             mac_address,
@@ -485,14 +473,14 @@ class RxMerServiceGroupOperationService:
         request_context = self._build_request_context(request)
         state = self._store.create_operation(request_summary, request_context)
         self.logger.info(
-            "RxMer-StartCapture [QUEUED] operation_id=%s, scope_sg=%s, scope_macs=%s",
+            "rxmer startCapture queued operation_id=%s scope_sg=%s scope_macs=%s",
             state.operation_id,
             len(state.request_summary.serving_group_ids),
             len(state.request_summary.mac_addresses),
         )
         started = self._runner.start(state.operation_id)
         if not started:
-            self.logger.warning("Operation-Runner already active for %s", state.operation_id)
+            self.logger.warning("operation runner already active for %s", state.operation_id)
         return RxMerServiceGroupStartCaptureResponse(
             status=ServiceStatusCode.SUCCESS,
             message="",

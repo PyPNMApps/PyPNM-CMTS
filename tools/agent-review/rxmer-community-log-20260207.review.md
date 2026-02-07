@@ -1,3 +1,11 @@
+## Agent Review Bundle Summary
+- Goal: Log resolved SNMP community value during RxMER precheck for troubleshooting.
+- Changes: Added  to the RxMER precheck-start log line and passed resolved write community value.
+- Files: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
+- Tests: ruff check src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py; pytest -q tests/test_rxmer_orchestration.py tests/test_rxmer_pnm_artifacts.py
+- Notes: Community string is now visible in logs for both request override and system default paths.
+
+# FILE: src/pypnm_cmts/api/routes/pnm/sg/ds/ofdm/rxmer/service.py
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Maurice Garcia
 
@@ -122,7 +130,7 @@ class RxMerCaptureWorker:
         stages.append(eligibility_result)
         if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "RxMER-Worker [ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "rxmer worker eligibility_failed operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -135,9 +143,9 @@ class RxMerCaptureWorker:
         community_source = "request_override"
         if request_context is None or request_context.snmp_write_community is None:
             community_source = "system_default"
-        precheck_cm = self._build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
+        cm = CableModem(
+            mac_address=MacAddress(item.mac_address),
+            inet=Inet(InetAddressStr(ip_address)),
             write_community=write_community,
         )
         self.logger.info(
@@ -149,7 +157,7 @@ class RxMerCaptureWorker:
             community_source,
             write_community,
         )
-        precheck_status, precheck_message = self._precheck_executor(precheck_cm)
+        precheck_status, precheck_message = self._precheck_executor(cm)
         precheck_result = OperationStageResultModel(
             stage=OperationStage.PRECHECK,
             status_code=precheck_status,
@@ -162,7 +170,7 @@ class RxMerCaptureWorker:
         stages.append(precheck_result)
         if precheck_status != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "RxMER-Worker [PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "rxmer worker precheck_failed operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -171,24 +179,17 @@ class RxMerCaptureWorker:
             )
             return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
 
-        # Use a fresh CableModem instance for capture. The precheck executes in a
-        # separate asyncio lifecycle and may close loop-bound SNMP transports.
-        capture_cm = self._build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
-            write_community=write_community,
-        )
         capture_result = self._run_capture(
             operation_id=item.operation_id,
             sg_id=item.sg_id,
             mac_address=item.mac_address,
-            cable_modem=capture_cm,
+            cable_modem=cm,
             channel_ids=list(request_summary.channel_ids),
             request_context=request_context,
         )
         stages.append(capture_result)
         self.logger.info(
-            "RxMER-Worker [COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
+            "rxmer worker complete operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -304,18 +305,6 @@ class RxMerCaptureWorker:
         if context is None or context.snmp_write_community is None:
             return PnmConfigManager.get_write_community()
         return str(context.snmp_write_community)
-
-    @staticmethod
-    def _build_cable_modem(
-        mac_address: MacAddressStr,
-        ip_address: InetAddressStr,
-        write_community: str,
-    ) -> CableModem:
-        return CableModem(
-            mac_address=MacAddress(mac_address),
-            inet=Inet(InetAddressStr(ip_address)),
-            write_community=write_community,
-        )
 
     def _run_capture(
         self,

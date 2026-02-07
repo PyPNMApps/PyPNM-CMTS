@@ -26,6 +26,7 @@ Phase 7.7 is closed. Archive references live at:
 - [ ] Phase 7.8 · Step 9: Load-safety pass (lock contention, deep-copy boundaries, perf sanity checks)
 - [ ] Phase 7.8 · Step 10: Final QA + legacy hygiene scan + release readiness notes
 - [ ] Keep AGENTS response preferences aligned with user updates (update file when requested)
+- [x] Added commit message output preference to AGENTS/CODING_AGENTS (multi-line title + bullet lines) (2026-02-07)
 - [ ] Keep AGENTS response format aligned with structured summary requirements (Goal/Changes/Files touched/Tests run/Notes)
 - [ ] Include a summary + touched-file contents bundle at the end of each response
 - [ ] Before proposing or making PyPNM (pypnm-docsis) changes, state the plan and rationale explicitly
