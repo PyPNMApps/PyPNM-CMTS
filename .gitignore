@@ -22,7 +22,7 @@ dist/
 *.log
 
 # PyPNM-CMTS
-.data/
+.data/*
 data/
 output/*
 pypnm-cmts-version-control/*
