@@ -11,7 +11,7 @@ from pypnm_cmts.lib.types import (
     OwnerId,
     ServiceGroupId,
 )
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.types.orchestrator_types import OrchestratorMode, ShardMode
 
 
 class OrchestratorRunRequest(BaseModel):
@@ -27,7 +27,14 @@ class OrchestratorRunRequest(BaseModel):
         validation_alias=AliasChoices("target_service_group_count", "target_service_groups"),
         serialization_alias="target_service_group_count",
     )
-    shard_mode: str | None = Field(default=None, description="Optional shard mode override.")
+    shard_mode: ShardMode | None = Field(
+        default=None,
+        description=(
+            "Optional service group shard mode override. "
+            "Use 'sequential' for deterministic SG-ID ordering or 'score' "
+            "for score-based candidate ordering."
+        ),
+    )
     tick_interval_seconds: float | None = Field(default=None, description="Optional tick interval override (seconds).")
     leader_ttl_seconds: int | None = Field(default=None, description="Optional leader TTL override (seconds).")
     lease_ttl_seconds: int | None = Field(default=None, description="Optional lease TTL override (seconds).")

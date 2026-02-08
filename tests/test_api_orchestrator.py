@@ -119,6 +119,14 @@ def test_orchestrator_request_accepts_new_and_legacy_target_count_keys(tmp_path:
     assert legacy_key.target_service_group_count == 3
 
 
+def test_orchestrator_request_invalid_shard_mode_raises(tmp_path: Path) -> None:
+    _load_app(tmp_path)
+    from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
+
+    with pytest.raises(ValidationError):
+        OrchestratorRunRequest.model_validate({"mode": "standalone", "shard_mode": "invalid"})
+
+
 def test_orchestrator_status_does_not_persist_results(tmp_path: Path) -> None:
     app = _load_app(tmp_path)
     config_path = tmp_path / "system.json"

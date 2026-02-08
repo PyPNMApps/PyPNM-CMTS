@@ -20,7 +20,15 @@ class AdapterKind(str, Enum):
     SNMP = "snmp"
 
 
+class ShardMode(str, Enum):
+    """Supported service-group sharding strategy."""
+
+    SEQUENTIAL = "sequential"
+    SCORE = "score"
+
+
 __all__ = [
     "AdapterKind",
     "OrchestratorMode",
+    "ShardMode",
 ]
