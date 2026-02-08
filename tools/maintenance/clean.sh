@@ -20,6 +20,7 @@ Options:
   --python          Clean only Python caches (__pycache__, *.pyc, .pytest_cache, etc.)
   --build           Clean build/, dist/, *.egg-info
   --pnm             Clean .data/pnm/ and .data/db/
+  --sg-operations   Clean .data/sg_operations/
   --archive         Clean .data/archive/
   --excel           Clean .data/xlsx/ and .data/csv/
   --json            Clean .data/json/
@@ -47,7 +48,7 @@ declare -a ACTIONS=()
 # -----------------------------------------------------------------------------
 while (( $# )); do
   case "$1" in
-    --all|--logs|--python|--build|--pnm|--output|--plot-data|--msg-rsp|--archive|--excel|--json|--issues|--remove-issues|--settings-backup)
+    --all|--logs|--python|--build|--pnm|--sg-operations|--output|--plot-data|--msg-rsp|--archive|--excel|--json|--issues|--remove-issues|--settings-backup)
       ACTIONS+=("$1")
       shift
       ;;
@@ -144,6 +145,11 @@ clean_pnm() {
   safe_rm "$ROOT_DIR/.data/db/"*
 }
 
+clean_sg_operations() {
+  echo "Cleaning SG operations data..."
+  safe_rm "$ROOT_DIR/.data/sg_operations/"*
+}
+
 clean_excel() {
   echo "Cleaning Excel/CSV data..."
   safe_rm "$ROOT_DIR/.data/xlsx/"*
@@ -206,6 +212,7 @@ for action in "${ACTIONS[@]}"; do
       clean_python
       clean_build
       clean_pnm
+      clean_sg_operations
       clean_excel
       clean_json
       clean_output
@@ -234,6 +241,10 @@ for action in "${ACTIONS[@]}"; do
 
     --pnm)
       clean_pnm
+      ;;
+
+    --sg-operations)
+      clean_sg_operations
       ;;
 
     --excel)
