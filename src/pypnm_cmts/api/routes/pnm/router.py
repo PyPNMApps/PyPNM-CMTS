@@ -19,6 +19,9 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.modulation_profile.router import (
     router as modulation_profile_router,
 )
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.router import router as rxmer_router
+from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.router import (
+    router as pre_equalization_router,
+)
 
 router = APIRouter()
 router.include_router(rxmer_router)
@@ -26,6 +29,7 @@ router.include_router(channel_est_coeff_router)
 router.include_router(fec_summary_router)
 router.include_router(const_display_router)
 router.include_router(modulation_profile_router)
+router.include_router(pre_equalization_router)
 
 __all__ = [
     "router",
