@@ -8,13 +8,15 @@ import logging
 import time
 from pathlib import Path
 
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
+
 
 class StartUp:
     """Initialize shared PyPNM-CMTS startup routines."""
 
     _LOGS_LINK_NAME = "logs"
-    _DATA_LINK_NAME = ".data"
-    _DATA_BACKUP_PREFIX = ".data.bak"
+    _DEFAULT_DATA_LINK_NAME = "data"
+    _DEFAULT_DATA_BACKUP_PREFIX = "data.bak"
     _logging_configured = False
 
     @staticmethod
@@ -88,12 +90,13 @@ class StartUp:
 
         data_root.mkdir(parents=True, exist_ok=True)
         project_root = StartUp._project_root()
-        link_path = project_root / StartUp._DATA_LINK_NAME
+        link_name = StartUp._data_link_name()
+        link_path = project_root / link_name
 
         if link_path.exists() and not link_path.is_symlink():
             if not link_path.is_dir():
                 return
-            backup_path = StartUp._next_data_backup_path(project_root)
+            backup_path = StartUp._next_data_backup_path(project_root, link_name)
             try:
                 link_path.rename(backup_path)
             except Exception:
@@ -110,14 +113,30 @@ class StartUp:
         link_path.symlink_to(data_root, target_is_directory=True)
 
     @staticmethod
-    def _next_data_backup_path(project_root: Path) -> Path:
+    def _next_data_backup_path(project_root: Path, link_name: str) -> Path:
         backup_stamp = str(int(time.time()))
-        candidate = project_root / f"{StartUp._DATA_BACKUP_PREFIX}-{backup_stamp}"
+        backup_prefix = StartUp._data_backup_prefix(link_name)
+        candidate = project_root / f"{backup_prefix}-{backup_stamp}"
         suffix = 1
         while candidate.exists():
-            candidate = project_root / f"{StartUp._DATA_BACKUP_PREFIX}-{backup_stamp}-{suffix}"
+            candidate = project_root / f"{backup_prefix}-{backup_stamp}-{suffix}"
             suffix += 1
         return candidate
+
+    @staticmethod
+    def _data_link_name() -> str:
+        try:
+            name = CmtsSystemConfigSettings.data_root_dir().name.strip()
+            return name if name != "" else StartUp._DEFAULT_DATA_LINK_NAME
+        except Exception:
+            return StartUp._DEFAULT_DATA_LINK_NAME
+
+    @staticmethod
+    def _data_backup_prefix(link_name: str) -> str:
+        normalized = link_name.strip()
+        if normalized == "":
+            return StartUp._DEFAULT_DATA_BACKUP_PREFIX
+        return f"{normalized}.bak"
 
     @staticmethod
     def _ensure_cmts_system_config() -> None:

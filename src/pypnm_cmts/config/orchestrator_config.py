@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.config.config_manager import CmtsConfigManager
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     CoordinationPath,
@@ -23,7 +24,7 @@ DEFAULT_TESTS: list[str] = ["ds_ofdm_rxmer"]
 DEFAULT_OWNER_ID: OwnerId = OwnerId("")
 DEFAULT_TARGET_SERVICE_GROUPS: int = 0
 DEFAULT_WORKER_CAP: int = 0
-DEFAULT_STATE_DIR = Path(".data/coordination")
+DEFAULT_STATE_DIR = CmtsSystemConfigSettings.coordination_state_dir()
 DEFAULT_ELECTION_NAME: CoordinationElectionName = CoordinationElectionName("")
 DEFAULT_LEADER_TTL_SECONDS = 10
 DEFAULT_LEASE_TTL_SECONDS = 10

@@ -18,6 +18,7 @@ from pypnm_cmts.api.common.operations.models import (
     OperationTimestampsModel,
     PerModemLinkageRecordModel,
 )
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.lib.constants import OperationState
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 
@@ -27,14 +28,14 @@ CANCEL_FLAG_NAME = "cancel.flag"
 RESULTS_DIR_NAME = "results"
 RESULT_FILE_PREFIX = "sg-"
 RESULT_FILE_SUFFIX = ".jsonl"
-DEFAULT_BASE_DIR = Path(".data/sg_operations")
+FALLBACK_BASE_DIR = Path("sg_operations")
 
 
 class OperationStore:
     """Filesystem-backed store for operation state and linkage records."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = base_dir or DEFAULT_BASE_DIR
+        self._base_dir = base_dir or self._default_base_dir()
         self._state_lock = threading.Lock()
 
     def create_operation(
@@ -206,7 +207,14 @@ class OperationStore:
 
     @staticmethod
     def _generate_operation_id() -> PnmCaptureOperationId:
-        return PnmCaptureOperationId(uuid4().hex)
+        return PnmCaptureOperationId(str(Generate.operation_id()))
+
+    @staticmethod
+    def _default_base_dir() -> Path:
+        try:
+            return CmtsSystemConfigSettings.sg_operations_dir()
+        except Exception:
+            return FALLBACK_BASE_DIR
 
     @staticmethod
     def _now_epoch() -> TimestampSec:

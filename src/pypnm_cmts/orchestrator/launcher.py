@@ -15,6 +15,7 @@ from pypnm_cmts.config.orchestrator_config import (
     ServiceGroupDescriptor,
 )
 from pypnm_cmts.config.owner_id_resolver import OwnerIdResolver
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.coordination.manager import CoordinationManager
 from pypnm_cmts.coordination.models import (
     CoordinationTickResultModel,
@@ -41,7 +42,7 @@ from pypnm_cmts.orchestrator.sg_shard_planner import ServiceGroupShardPlanner
 from pypnm_cmts.orchestrator.work_runner import WorkRunner
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 
-DEFAULT_STATE_DIR = ".data/coordination"
+DEFAULT_STATE_DIR = str(CmtsSystemConfigSettings.coordination_state_dir())
 DEFAULT_ELECTION_PREFIX = "cmts"
 DEFAULT_ELECTION_LABEL = "primary"
 INVENTORY_SOURCE_CONFIG = "config"

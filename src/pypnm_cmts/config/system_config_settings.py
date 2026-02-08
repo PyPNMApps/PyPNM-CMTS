@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
 
 from pypnm.config.system_config_settings import SystemConfigSettings
@@ -355,3 +356,18 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
             cls._CMTS_SNMP_V3_KEY,
             "retries",
         )
+
+    @classmethod
+    def data_root_dir(cls) -> Path:
+        """Return the configured PyPNM data root directory."""
+        return Path(cls.pnm_dir()).parent
+
+    @classmethod
+    def coordination_state_dir(cls) -> Path:
+        """Return the CMTS coordination state directory."""
+        return cls.data_root_dir() / "coordination"
+
+    @classmethod
+    def sg_operations_dir(cls) -> Path:
+        """Return the CMTS SG operations directory derived from the configured PNM data root."""
+        return cls.data_root_dir() / "sg_operations"
