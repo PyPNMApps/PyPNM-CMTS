@@ -3,11 +3,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
-from typing import TypeVar
+from collections.abc import Callable
 
 from pypnm.api.routes.common.classes.operation.cable_modem_precheck import (
     CableModemServicePreCheck,
@@ -48,6 +45,7 @@ from pypnm_cmts.api.common.operations.runner import (
     OperationWorkItemModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
+from pypnm_cmts.api.common.service.pnm.asyncio_runner import PnmAsyncioRunner
 from pypnm_cmts.api.common.service.pnm.capture import PnmCaptureHelper
 from pypnm_cmts.api.common.service.pnm.constants import (
     MISSING_IP_MESSAGE,
@@ -78,7 +76,6 @@ CaptureExecutor = Callable[
     MessageResponse,
 ]
 PrecheckExecutor = Callable[[CableModem], tuple[ServiceStatusCode, str]]
-T = TypeVar("T")
 
 
 class RxMerCaptureWorker:
@@ -279,34 +276,20 @@ class RxMerCaptureWorker:
             finished_epoch=created_epoch,
         )
 
-def _run_pypnm_capture(
-    cable_modem: CableModem,
-    interface_parameters: DownstreamOfdmParameters | None,
-    tftp_servers: tuple[Inet, Inet],
-    tftp_path: str,
-) -> MessageResponse:
-    service = CmDsOfdmRxMerService(cable_modem, tftp_servers, tftp_path)
-    return _run_on_isolated_event_loop(service.set_and_go(interface_parameters=interface_parameters))
+class RxMerCaptureExecutor:
+    """RxMER-specific capture executor helpers."""
 
-
-def _run_on_isolated_event_loop(coro: Awaitable[T]) -> T:
-    loop = asyncio.DefaultEventLoopPolicy().new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
-    finally:
-        with suppress(Exception):
-            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        with suppress(Exception):
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        with suppress(Exception):
-            loop.run_until_complete(loop.shutdown_default_executor())
-        asyncio.set_event_loop(None)
-        loop.close()
+    @staticmethod
+    def run_pypnm_capture(
+        cable_modem: CableModem,
+        interface_parameters: DownstreamOfdmParameters | None,
+        tftp_servers: tuple[Inet, Inet],
+        tftp_path: str,
+    ) -> MessageResponse:
+        service = CmDsOfdmRxMerService(cable_modem, tftp_servers, tftp_path)
+        return PnmAsyncioRunner.run_on_isolated_event_loop(
+            service.set_and_go(interface_parameters=interface_parameters)
+        )
 
 
 class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
@@ -327,7 +310,7 @@ class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
             runtime_store_loader=lambda: get_sgw_store(),
             max_inline_records=max_inline_records,
         )
-        self._capture_executor = capture_executor or _run_pypnm_capture
+        self._capture_executor = capture_executor or RxMerCaptureExecutor.run_pypnm_capture
         self._precheck_executor = precheck_executor or self._run_precheck
         if runner is None:
             worker = RxMerCaptureWorker(
@@ -365,7 +348,7 @@ class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
     @staticmethod
     def _run_precheck(cable_modem: CableModem) -> tuple[ServiceStatusCode, str]:
         try:
-            return _run_on_isolated_event_loop(
+            return PnmAsyncioRunner.run_on_isolated_event_loop(
                 CableModemServicePreCheck(cable_modem=cable_modem, validate_ofdm_exist=True).run_precheck()
             )
         except Exception as exc:

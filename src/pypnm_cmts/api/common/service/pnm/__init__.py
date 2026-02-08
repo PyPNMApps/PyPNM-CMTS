@@ -3,6 +3,7 @@
 
 """PNM capture orchestration helpers for PyPNM-CMTS."""
 
+from pypnm_cmts.api.common.service.pnm.asyncio_runner import PnmAsyncioRunner
 from pypnm_cmts.api.common.service.pnm.capture import PnmCaptureHelper
 from pypnm_cmts.api.common.service.pnm.constants import (
     CLEAR_MESSAGE,
@@ -37,6 +38,7 @@ __all__ = [
     "MISSING_TRANSACTION_MESSAGE",
     "NOT_FOUND_MESSAGE",
     "NO_MESSAGE_RESPONSE",
+    "PnmAsyncioRunner",
     "PnmCaptureHelper",
     "PnmCaptureExecutionSettings",
     "PnmCaptureExecutor",

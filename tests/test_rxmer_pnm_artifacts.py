@@ -329,7 +329,7 @@ def test_run_on_isolated_event_loop_cancels_pending_tasks() -> None:
         await asyncio.sleep(0)
         return "ok"
 
-    result = rxmer_service_module._run_on_isolated_event_loop(_main())
+    result = rxmer_service_module.PnmAsyncioRunner.run_on_isolated_event_loop(_main())
     assert result == "ok"
     assert finalized["done"]
 
