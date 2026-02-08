@@ -4,13 +4,15 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import time
+from pathlib import Path
 
 from pypnm.api.routes.common.extended.common_messaging_service import MessageResponse
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import FileNameStr, IPv4Str, IPv6Str, MacAddressStr, TransactionId
+from pytest import MonkeyPatch
 
+import pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service as rxmer_service_module
 from pypnm_cmts.api.common.cmts_request import (
     CmtsCableModemFilterModel,
     CmtsRequestEnvelopeModel,
@@ -21,11 +23,20 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupExecutionModel,
     RxMerServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import RxMerServiceGroupOperationService
-import pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service as rxmer_service_module
-from pypnm_cmts.lib.constants import OperationStage, OperationState, PnmCaptureFailureReason
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import (
+    RxMerServiceGroupOperationService,
+)
+from pypnm_cmts.lib.constants import (
+    OperationStage,
+    OperationState,
+    PnmCaptureFailureReason,
+)
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
-from pypnm_cmts.sgw.models import SgwCableModemModel, SgwCacheEntryModel, SgwSnapshotModel
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+)
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 POLL_INTERVAL_SECONDS = 0.02
@@ -91,10 +102,15 @@ def test_rxmer_capture_persists_artifacts(tmp_path: Path) -> None:
     pnm_source_dir.mkdir(parents=True, exist_ok=True)
     sgw_store = _build_sgw_store(mac, sg_id)
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         (pnm_source_dir / str(TEST_FILENAME)).write_text("data", encoding="utf-8")
         payload = [
             {
@@ -153,10 +169,15 @@ def test_rxmer_capture_resolves_hex_ipv4_from_sgw(tmp_path: Path) -> None:
     pnm_source_dir.mkdir(parents=True, exist_ok=True)
     sgw_store = _build_sgw_store_with_ipv4(mac, sg_id, IPv4Str("0xac13203e"))
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         (pnm_source_dir / str(TEST_FILENAME)).write_text("data", encoding="utf-8")
         payload = [
             {
@@ -204,7 +225,7 @@ def test_rxmer_capture_resolves_hex_ipv4_from_sgw(tmp_path: Path) -> None:
 
 def test_rxmer_capture_refreshes_runtime_sgw_store_for_worker(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     mac = MacAddressStr("aa:bb:cc:dd:ee:11")
     sg_id = ServiceGroupId(11)
@@ -212,10 +233,15 @@ def test_rxmer_capture_refreshes_runtime_sgw_store_for_worker(
     pnm_source_dir = tmp_path / "pypnm"
     pnm_source_dir.mkdir(parents=True, exist_ok=True)
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         (pnm_source_dir / str(TEST_FILENAME)).write_text("data", encoding="utf-8")
         payload = [
             {
@@ -268,11 +294,16 @@ def test_rxmer_precheck_and_capture_use_distinct_cable_modem_instances(tmp_path:
     sgw_store = _build_sgw_store(mac, sg_id)
     observed_ids: dict[str, int] = {}
 
-    def _fake_precheck(cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(cm: object) -> tuple[ServiceStatusCode, str]:
         observed_ids["precheck"] = id(cm)
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         observed_ids["capture"] = id(cm)
         payload = [
             {
@@ -337,13 +368,17 @@ def test_run_on_isolated_event_loop_cancels_pending_tasks() -> None:
 def test_rxmer_capture_failure_records_linkage(tmp_path: Path) -> None:
     mac = MacAddressStr("aa:bb:cc:dd:ee:01")
     sg_id = ServiceGroupId(2)
-    pnm_source_dir = tmp_path / "pypnm"
     sgw_store = _build_sgw_store(mac, sg_id)
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         return MessageResponse(ServiceStatusCode.FAILURE, [])
 
     service = RxMerServiceGroupOperationService(
@@ -390,10 +425,15 @@ def test_rxmer_capture_per_modem_timeout_sets_failure_reason(tmp_path: Path) -> 
     pnm_source_dir.mkdir(parents=True, exist_ok=True)
     sgw_store = _build_sgw_store(mac, sg_id)
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _slow_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _slow_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         time.sleep(0.2)
         return MessageResponse(ServiceStatusCode.SUCCESS, [])
 

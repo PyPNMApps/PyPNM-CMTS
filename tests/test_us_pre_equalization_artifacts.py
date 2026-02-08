@@ -25,7 +25,11 @@ from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.service import (
 )
 from pypnm_cmts.lib.constants import OperationStage, OperationState
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
-from pypnm_cmts.sgw.models import SgwCableModemModel, SgwCacheEntryModel, SgwSnapshotModel
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+)
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 POLL_INTERVAL_SECONDS = 0.02
@@ -69,10 +73,15 @@ def test_us_pre_equalization_capture_records_two_files(tmp_path: Path) -> None:
     tx_two = TransactionId("222222222222222222222222")
     sgw_store = _build_sgw_store(mac, sg_id)
 
-    def _fake_precheck(_cm) -> tuple[ServiceStatusCode, str]:
+    def _fake_precheck(_cm: object) -> tuple[ServiceStatusCode, str]:
         return (ServiceStatusCode.SUCCESS, "precheck ok")
 
-    def _fake_capture(_cm, _interface_parameters, _tftp_servers, _tftp_path) -> MessageResponse:
+    def _fake_capture(
+        _cm: object,
+        _interface_parameters: object,
+        _tftp_servers: object,
+        _tftp_path: object,
+    ) -> MessageResponse:
         payload = [
             {
                 "status": ServiceStatusCode.SUCCESS.name,
@@ -125,4 +134,3 @@ def test_us_pre_equalization_capture_records_two_files(tmp_path: Path) -> None:
     assert capture_records
     assert capture_records[0].transaction_ids == [tx_one, tx_two]
     assert [str(name) for name in capture_records[0].filenames] == ["pre-eq-a.bin", "pre-eq-b.bin"]
-
