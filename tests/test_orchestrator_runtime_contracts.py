@@ -98,20 +98,20 @@ def test_worker_bound_sg_without_lease_returns_empty_work_results(
         lambda self: CoordinationStatusModel(held_sg_ids=[]),
     )
 
-    called = {"run_tests": False}
+    called = {"run_pnm_tests": False}
 
-    def _fake_run_tests(
+    def _fake_run_pnm_tests(
         self: object,
         sg_id: ServiceGroupId,
         tests: list[str],
         run_id: OrchestratorRunId,
     ) -> list[WorkResultModel]:
-        called["run_tests"] = True
+        called["run_pnm_tests"] = True
         return []
 
     monkeypatch.setattr(
-        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
-        _fake_run_tests,
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_pnm_tests",
+        _fake_run_pnm_tests,
     )
 
     launcher = CmtsOrchestratorLauncher(
@@ -125,7 +125,7 @@ def test_worker_bound_sg_without_lease_returns_empty_work_results(
     assert result.lease_held is False
     assert str(result.run_id) == ""
     assert result.work_results == []
-    assert called["run_tests"] is False
+    assert called["run_pnm_tests"] is False
 
 
 def test_run_forever_updates_service_groups_after_leader(

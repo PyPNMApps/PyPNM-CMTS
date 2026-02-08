@@ -33,6 +33,8 @@ TickIndex                = NewType("TickIndex", int)
 OrchestratorRunId        = NewType("OrchestratorRunId", str)
 CoordinationPath         = PathLike
 PnmCaptureOperationId    = NewType("PnmCaptureOperationId", str)
+# Orchestrator PNM operation key, for example ds_ofdm_rxmer.
+PnmTestName              = NewType("PnmTestName", str)
 
 NodeName        = NewType("NodeName", str)
 MdCmSgId        = NewType("MdCmSgId", int)
@@ -69,6 +71,7 @@ __all__ = [
     "OrchestratorRunId",
     "CoordinationPath",
     "PnmCaptureOperationId",
+    "PnmTestName",
     "NodeName",
     "MdCmSgId",
     "MdDsSgId",

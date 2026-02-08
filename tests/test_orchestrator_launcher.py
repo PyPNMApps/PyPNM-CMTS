@@ -543,7 +543,7 @@ def test_combined_run_once_behaves_like_controller_and_worker(
 
     captured: dict[str, ServiceGroupId] = {}
 
-    def _fake_run_tests(
+    def _fake_run_pnm_tests(
         self: object,
         sg_id: ServiceGroupId,
         tests: list[str],
@@ -553,8 +553,8 @@ def test_combined_run_once_behaves_like_controller_and_worker(
         return []
 
     monkeypatch.setattr(
-        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
-        _fake_run_tests,
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_pnm_tests",
+        _fake_run_pnm_tests,
     )
 
     launcher = CmtsOrchestratorLauncher(
@@ -593,7 +593,7 @@ def test_combined_run_forever_surfaces_held_leases_and_runs_work(
 
     captured: dict[str, ServiceGroupId] = {}
 
-    def _fake_run_tests(
+    def _fake_run_pnm_tests(
         self: object,
         sg_id: ServiceGroupId,
         tests: list[str],
@@ -603,8 +603,8 @@ def test_combined_run_forever_surfaces_held_leases_and_runs_work(
         return []
 
     monkeypatch.setattr(
-        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
-        _fake_run_tests,
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_pnm_tests",
+        _fake_run_pnm_tests,
     )
 
     results: list[OrchestratorRunResultModel] = []
@@ -648,7 +648,7 @@ def test_worker_runs_single_sg_when_multiple_acquired(
 
     captured: dict[str, ServiceGroupId] = {}
 
-    def _fake_run_tests(
+    def _fake_run_pnm_tests(
         self: object,
         sg_id: ServiceGroupId,
         tests: list[str],
@@ -658,8 +658,8 @@ def test_worker_runs_single_sg_when_multiple_acquired(
         return []
 
     monkeypatch.setattr(
-        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_tests",
-        _fake_run_tests,
+        "pypnm_cmts.orchestrator.work_runner.WorkRunner.run_pnm_tests",
+        _fake_run_pnm_tests,
     )
 
     launcher = CmtsOrchestratorLauncher(

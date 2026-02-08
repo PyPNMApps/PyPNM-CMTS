@@ -28,6 +28,7 @@ from pypnm_cmts.lib.types import (
     LeaderId,
     OrchestratorRunId,
     OwnerId,
+    PnmTestName,
     ServiceGroupId,
     TickIndex,
 )
@@ -702,11 +703,11 @@ class CmtsOrchestratorLauncher:
         if not acquired_sg_ids:
             return []
 
-        tests = [str(test_name) for test_name in settings.default_tests]
+        pnm_tests = [PnmTestName(str(test_name)) for test_name in settings.default_tests]
         runner = WorkRunner(state_dir=state_dir)
         sg_id = sorted(acquired_sg_ids, key=int)[0]
         run_id = self._build_run_id_for_sg(sg_id=sg_id, tick_index=tick_index)
-        return runner.run_tests(sg_id=sg_id, tests=tests, run_id=run_id)
+        return runner.run_pnm_tests(sg_id, pnm_tests, run_id)
 
     def _build_run_id(
         self,

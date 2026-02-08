@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pypnm_cmts.lib.types import (
     OrchestratorRunId,
+    PnmTestName,
     ServiceGroupId,
 )
 from pypnm_cmts.orchestrator.models import WorkStatus
@@ -18,7 +19,11 @@ def test_work_runner_returns_results_and_persists(tmp_path: Path) -> None:
     runner = WorkRunner(state_dir=state_dir)
 
     run_id = OrchestratorRunId("sg7_tick000001")
-    results = runner.run_tests(ServiceGroupId(7), ["test-a", "test-b"], run_id=run_id)
+    results = runner.run_pnm_tests(
+        ServiceGroupId(7),
+        [PnmTestName("test-a"), PnmTestName("test-b")],
+        run_id=run_id,
+    )
     assert len(results) == 2
     for result in results:
         assert result.status == WorkStatus.SUCCESS
