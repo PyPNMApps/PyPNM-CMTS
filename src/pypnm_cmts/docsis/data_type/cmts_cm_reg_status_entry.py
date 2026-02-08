@@ -19,6 +19,7 @@ from pypnm_cmts.lib.types import (
     DocsisQosVersion,
     EnergyMgtBits,
     InterfaceIndexOrZero,
+    IntList,
     MdCmSgId,
     RcpId,
 )
@@ -147,7 +148,7 @@ class DocsIf3CmtsCmRegStatusIdEntry(BaseModel):
         )
 
     @classmethod
-    async def get(cls, snmp: Snmp_v2c, indices: list[int]) -> list[DocsIf3CmtsCmRegStatusIdEntry]:
+    async def get(cls, snmp: Snmp_v2c, indices: IntList) -> list[DocsIf3CmtsCmRegStatusIdEntry]:
         logger = logging.getLogger(cls.__name__)
         results: list[DocsIf3CmtsCmRegStatusIdEntry] = []
 
@@ -165,7 +166,7 @@ class DocsIf3CmtsCmRegStatusIdEntry(BaseModel):
         return results
 
     @classmethod
-    async def get_entries(cls, snmp: Snmp_v2c, indices: list[int]) -> list[DocsIf3CmtsCmRegStatusEntry]:
+    async def get_entries(cls, snmp: Snmp_v2c, indices: IntList) -> list[DocsIf3CmtsCmRegStatusEntry]:
         """
         Convenience wrapper that returns only the `DocsIf3CmtsCmRegStatusEntry`
         objects (no status wrapper), preserving a return type of

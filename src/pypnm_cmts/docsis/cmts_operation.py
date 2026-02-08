@@ -41,6 +41,7 @@ from pypnm_cmts.lib.types import (
     CmRegSgId,
     CmtsCmRegStatusId,
     CmtsCmRegStatusMacAddr,
+    IntList,
     IPv4Str,
     IPv6LinkLocalStr,
     IPv6Str,
@@ -1163,7 +1164,7 @@ class CmtsOperation:
         Returns:
             list[CmtsCmRegStatusMacAddr]: List of tuples containing CmtsCmRegStatusId, MacAddressStr.
         """
-        indices: list[int]
+        indices: IntList
         results: list[CmtsCmRegStatusMacAddr] = []
         oid_base: str = "docsIf3CmtsCmRegStatusMacAddr"
         try:
@@ -1233,7 +1234,7 @@ class CmtsOperation:
             return results
 
         target = int(serving_group_id)
-        matched_indices: list[int] = []
+        matched_indices: IntList = []
         limit = len(indices)
         if len(values) < limit:
             limit = len(values)
@@ -1305,7 +1306,7 @@ class CmtsOperation:
         if len(values) < limit:
             limit = len(values)
 
-        matched_indices: list[int] = []
+        matched_indices: IntList = []
         for idx in range(limit):
             try:
                 if int(values[idx]) != target:

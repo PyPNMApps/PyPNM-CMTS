@@ -9,6 +9,8 @@ from collections.abc import Callable
 from pydantic import BaseModel
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
+from pypnm_cmts.lib.types import IntList
+
 
 class DocsIf31CmtsUsOfdmaChanEntry(BaseModel):
     docsIf31CmtsUsOfdmaChanTemplateIndex: int | None = None
@@ -111,7 +113,7 @@ class DocsIf31CmtsUsOfdmaChanRecord(BaseModel):
         )
 
     @classmethod
-    async def get(cls, snmp: Snmp_v2c, indices: list[int]) -> list[DocsIf31CmtsUsOfdmaChanRecord]:
+    async def get(cls, snmp: Snmp_v2c, indices: IntList) -> list[DocsIf31CmtsUsOfdmaChanRecord]:
         logger = logging.getLogger(cls.__name__)
         results: list[DocsIf31CmtsUsOfdmaChanRecord] = []
 
@@ -140,7 +142,7 @@ class DocsIf31CmtsUsOfdmaChanRecord(BaseModel):
             return []
 
         indices_raw = Snmp_v2c.extract_last_oid_index(results)
-        indices: list[int] = []
+        indices: IntList = []
         for value in indices_raw:
             if not isinstance(value, (int, str)):
                 continue

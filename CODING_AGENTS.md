@@ -36,3 +36,8 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 - Do not introduce raw generic integer collections like list[int] in production source.
 - Use named aliases from pypnm_cmts lib types for integer collections and optional integer collections.
 - When a needed alias does not exist in pypnm_cmts lib types, add it there first, then use the alias.
+
+## PNM Data Type Placement Rule
+
+- Place all PNM SNMP table data type models under `src/pypnm_cmts/pnm/data_type`.
+- Do not place PNM SNMP table data type models under `src/pypnm_cmts/docsis/data_type`.

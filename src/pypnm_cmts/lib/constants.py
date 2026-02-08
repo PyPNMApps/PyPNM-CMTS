@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 class OperationalStatus(str, Enum):
@@ -65,8 +65,15 @@ class OperationStage(str, Enum):
     CAPTURE = "capture"
 
 
+class DocsPnmBulkDataTransferProtocol(IntEnum):
+    TFTP = 1
+    HTTP = 2
+    HTTPS = 3
+
+
 __all__ = [
     "CacheRefreshMode",
+    "DocsPnmBulkDataTransferProtocol",
     "OperationStage",
     "OperationState",
     "OperationalStatus",

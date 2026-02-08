@@ -7,6 +7,8 @@ from __future__ import annotations
 from typing import NewType
 
 from pypnm.lib.types import (
+    HostNameStr,
+    InetAddressStr,
     InterfaceIndex,
     IPv4Str,
     IPv6Str,
@@ -42,6 +44,8 @@ MdDsSgId        = NewType("MdDsSgId", int)
 MdUsSgId        = NewType("MdUsSgId", int)
 MdNodeStatus    = tuple[InterfaceIndex, NodeName, MdCmSgId]
 
+UriStr                  = NewType("UriStr", str)
+
 CmtsCmRegStatusId       = NewType("CmtsCmRegStatusId", int)
 CmtsCmRegStatusMacAddr  = tuple[CmtsCmRegStatusId, MacAddressStr]
 CmtsCmRegState          = NewType("CmtsCmRegState", int)
@@ -55,6 +59,12 @@ Iso8601TimestampStr     = NewType("Iso8601TimestampStr", str)
 EnergyMgtBits           = NewType("EnergyMgtBits", int)
 InetAddressIPv4         = IPv4Str
 InetAddressIPv6         = IPv6Str
+PnmDestinationIndex     = NewType("PnmDestinationIndex", int)
+PnmDestinationPort      = NewType("PnmDestinationPort", int)
+PnmTransferProtocol     = NewType("PnmTransferProtocol", int)
+PnmRowStatus            = NewType("PnmRowStatus", int)
+PnmBaseUriStr           = NewType("PnmBaseUriStr", UriStr)
+
 
 __all__ = [
     "IntList",
@@ -90,6 +100,14 @@ __all__ = [
     "EnergyMgtBits",
     "InetAddressIPv4",
     "InetAddressIPv6",
+    "PnmDestinationIndex",
+    "PnmDestinationPort",
+    "PnmTransferProtocol",
+    "PnmRowStatus",
+    "PnmBaseUriStr",
+    "UriStr",
+    "HostNameStr",
+    "InetAddressStr",
     "RegisterCmMacInetAddress",
     "RegisterCmInetAddress",
 ]

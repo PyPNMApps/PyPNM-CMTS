@@ -5,5 +5,6 @@
 from __future__ import annotations
 
 from .types import CmRegSgId
+from .uri import Uri, UriResolutionModel
 
-__all__ = ["CmRegSgId"]
+__all__ = ["CmRegSgId", "Uri", "UriResolutionModel"]

@@ -9,6 +9,8 @@ from collections.abc import Callable
 from pydantic import BaseModel
 from pypnm.snmp.snmp_v2c import Snmp_v2c
 
+from pypnm_cmts.lib.types import IntList
+
 
 class DocsIfDownstreamEntry(BaseModel):
     docsIfDownChannelId: int | None = None
@@ -81,7 +83,7 @@ class DocsIfDownstreamChannelEntry(BaseModel):
         )
 
     @classmethod
-    async def get(cls, snmp: Snmp_v2c, indices: list[int]) -> list[DocsIfDownstreamChannelEntry]:
+    async def get(cls, snmp: Snmp_v2c, indices: IntList) -> list[DocsIfDownstreamChannelEntry]:
         logger = logging.getLogger(cls.__name__)
         results: list[DocsIfDownstreamChannelEntry] = []
 
@@ -110,7 +112,7 @@ class DocsIfDownstreamChannelEntry(BaseModel):
             return []
 
         indices_raw = Snmp_v2c.extract_last_oid_index(results)
-        indices: list[int] = []
+        indices: IntList = []
         for value in indices_raw:
             if not isinstance(value, (int, str)):
                 continue
