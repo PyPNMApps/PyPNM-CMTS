@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pypnm_cmts.config.orchestrator_config import ServiceGroupDescriptor
 from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.types.orchestrator_types import ShardMode
 
 
 class ServiceGroupShardPlanner:
@@ -15,13 +16,13 @@ class ServiceGroupShardPlanner:
     MIN_TARGET_SERVICE_GROUPS = 0
     MIN_WORKER_CAP = 0
     MIN_DIVISOR = 1
-    SHARD_MODE_SEQUENTIAL = "sequential"
-    SHARD_MODE_SCORE = "score"
+    SHARD_MODE_SEQUENTIAL = ShardMode.SEQUENTIAL
+    SHARD_MODE_SCORE = ShardMode.SCORE
 
     @staticmethod
     def plan(
         descriptors: list[ServiceGroupDescriptor],
-        shard_mode: str,
+        shard_mode: ShardMode,
         target_service_groups: int,
         worker_cap: int,
     ) -> tuple[list[ServiceGroupId], int]:
@@ -30,7 +31,7 @@ class ServiceGroupShardPlanner:
 
         Args:
             descriptors (list[ServiceGroupDescriptor]): Service group descriptors to plan from.
-            shard_mode (str): Sharding mode (sequential or score placeholder).
+            shard_mode (ShardMode): Sharding mode (sequential or score placeholder).
             target_service_groups (int): Target service groups per worker (0 means all).
             worker_cap (int): Optional cap on worker count (0 means no cap).
 
@@ -48,7 +49,10 @@ class ServiceGroupShardPlanner:
         return (ordered, worker_count)
 
     @staticmethod
-    def _order_sg_ids(sg_ids: list[ServiceGroupId], shard_mode: str) -> list[ServiceGroupId]:
+    def _order_sg_ids(
+        sg_ids: list[ServiceGroupId],
+        shard_mode: ShardMode,
+    ) -> list[ServiceGroupId]:
         match shard_mode:
             case ServiceGroupShardPlanner.SHARD_MODE_SCORE:
                 return ServiceGroupShardPlanner._order_by_score(sg_ids)
