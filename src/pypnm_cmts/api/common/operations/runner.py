@@ -91,6 +91,13 @@ class OperationRunner:
 
     def is_running(self, operation_id: PnmCaptureOperationId) -> bool:
         """Return whether a background thread is active for the operation."""
+        state = self._store.load_state(operation_id)
+        if state.state in {
+            OperationState.CANCELLED,
+            OperationState.COMPLETED,
+            OperationState.FAILED,
+        }:
+            return False
         with self._lock:
             thread = self._threads.get(operation_id)
             if thread is None:
