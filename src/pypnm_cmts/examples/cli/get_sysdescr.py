@@ -66,6 +66,11 @@ class SysDescrCli:
             action="store_true",
             help="Output sysDescr as text instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
 
         return parser
 
@@ -113,7 +118,7 @@ class SysDescrCli:
         return await operation.getSysDescr()
 
     @staticmethod
-    def render_output(system_description: CmtsSysDescrModel, as_text: bool) -> str:
+    def render_output(system_description: CmtsSysDescrModel, as_text: bool, json_pretty: bool = False) -> str:
         """
         Render the sysDescr output string based on the chosen format.
 
@@ -127,7 +132,7 @@ class SysDescrCli:
         if as_text:
             return str(system_description)
         payload = json.loads(system_description.to_json())
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -165,7 +170,7 @@ class SysDescrCli:
             SysDescrCli._emit_error(f"SNMP request failed: {exc}")
             return SysDescrCli.EXIT_FAILURE
 
-        print(SysDescrCli.render_output(system_description, args.text))
+        print(SysDescrCli.render_output(system_description, args.text, args.json_pretty))
 
         if system_description.is_empty:
             return SysDescrCli.EXIT_FAILURE

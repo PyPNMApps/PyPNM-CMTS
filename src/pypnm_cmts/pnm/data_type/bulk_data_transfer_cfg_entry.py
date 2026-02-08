@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 
 from pydantic import BaseModel
 from pypnm.snmp.modules import InetAddressType
@@ -21,6 +20,7 @@ from pypnm_cmts.lib.types import (
     PnmDestinationPort,
     PnmRowStatus,
 )
+from pypnm_cmts.pnm.data_type.snmp_table_io import SnmpSetFieldSpec, SnmpTableIo
 
 
 class DocsPnmBulkDataTransferCfgEntry(BaseModel):
@@ -43,11 +43,6 @@ class DocsPnmBulkDataTransferCfgRecord(BaseModel):
     index: int
     entry: DocsPnmBulkDataTransferCfgEntry
 
-    @staticmethod
-    def _encode_truth_value(value: bool) -> int:
-        """Encode SNMP TruthValue as true(1) / false(2)."""
-        return 1 if value else 2
-
     @classmethod
     async def set(
         cls,
@@ -63,96 +58,118 @@ class DocsPnmBulkDataTransferCfgRecord(BaseModel):
         """
         logger = logging.getLogger(cls.__name__)
 
-        updates = entry.model_dump(exclude_none=True)
-        if not updates:
+        updates_raw = entry.model_dump(exclude_none=True)
+        if not updates_raw:
             logger.warning("No docsPnmBulkDataTransferCfg fields provided for set.")
             return True
 
-        updates.pop("docsPnmBulkDataTransferCfgDestIndex", None)
+        updates = [
+            (field, value)
+            for field, value in updates_raw.items()
+            if field != "docsPnmBulkDataTransferCfgDestIndex"
+        ]
         if not updates:
             logger.warning("No writable docsPnmBulkDataTransferCfg fields provided for set.")
             return True
 
-        field_encoders: dict[str, Callable[[object], object]] = {
-            "docsPnmBulkDataTransferCfgDestHostIpAddrType": lambda value: int(value),
-            "docsPnmBulkDataTransferCfgProtocol": lambda value: int(value),
-            "docsPnmBulkDataTransferCfgLocalStore": lambda value: cls._encode_truth_value(bool(value)),
-        }
-        field_types: dict[str, Snmp_v2c.SnmpValueType] = {
-            "docsPnmBulkDataTransferCfgDestHostname": OctetString,
-            "docsPnmBulkDataTransferCfgDestHostIpAddrType": Integer32,
-            "docsPnmBulkDataTransferCfgDestHostIpAddress": OctetString,
-            "docsPnmBulkDataTransferCfgDestPort": Integer32,
-            "docsPnmBulkDataTransferCfgDestBaseUri": OctetString,
-            "docsPnmBulkDataTransferCfgProtocol": Integer32,
-            "docsPnmBulkDataTransferCfgLocalStore": Integer32,
-            "docsPnmBulkDataTransferCfgRowStatus": Integer32,
-        }
-
-        for field, raw_value in updates.items():
-            value = raw_value
-            try:
-                encoder = field_encoders.get(field)
-                if encoder is not None:
-                    value = encoder(raw_value)
-                value_type = field_types[field]
-                result = await snmp.set(f"{field}.{index}", value, value_type)
-                if not result:
-                    logger.warning("SNMP set returned no result for %s.%s", field, index)
-                    return False
-            except Exception as exc:
-                logger.warning("SNMP set failed for %s.%s: %s", field, index, exc)
-                return False
-
-        return True
+        field_specs = [
+            SnmpSetFieldSpec("docsPnmBulkDataTransferCfgDestHostname", OctetString),
+            SnmpSetFieldSpec(
+                "docsPnmBulkDataTransferCfgDestHostIpAddrType",
+                Integer32,
+                encoder=lambda value: int(value),
+            ),
+            SnmpSetFieldSpec("docsPnmBulkDataTransferCfgDestHostIpAddress", OctetString),
+            SnmpSetFieldSpec("docsPnmBulkDataTransferCfgDestPort", Integer32),
+            SnmpSetFieldSpec("docsPnmBulkDataTransferCfgDestBaseUri", OctetString),
+            SnmpSetFieldSpec(
+                "docsPnmBulkDataTransferCfgProtocol",
+                Integer32,
+                encoder=lambda value: int(value),
+            ),
+            SnmpSetFieldSpec(
+                "docsPnmBulkDataTransferCfgLocalStore",
+                Integer32,
+                encoder=lambda value: SnmpTableIo.encode_truth_value(bool(value)),
+            ),
+            SnmpSetFieldSpec("docsPnmBulkDataTransferCfgRowStatus", Integer32),
+        ]
+        return await SnmpTableIo.set_fields(
+            snmp=snmp,
+            index=index,
+            updates=updates,
+            field_specs=field_specs,
+            logger=logger,
+        )
 
     @classmethod
     async def from_snmp(cls, index: int, snmp: Snmp_v2c) -> DocsPnmBulkDataTransferCfgRecord | None:
         logger = logging.getLogger(cls.__name__)
 
-        def safe_cast(value: str, cast: Callable) -> object | None:
-            try:
-                return cast(value)
-            except Exception:
-                return None
-
-        async def fetch(field: str, cast: Callable | None = None) -> object | None:
-            try:
-                raw = await snmp.get(f"{field}.{index}")
-                val = Snmp_v2c.get_result_value(raw)
-                if val is None or val == "":
-                    return None
-                if cast is not None:
-                    return safe_cast(str(val), cast)
-                s = str(val).strip()
-                if s.isdigit():
-                    return int(s)
-                if s.lower() in ("true", "false"):
-                    return s.lower() == "true"
-                try:
-                    return float(s)
-                except ValueError:
-                    return s
-            except Exception as exc:
-                logger.warning(f"Failed to fetch {field}.{index}: {exc}")
-                return None
-
         entry = DocsPnmBulkDataTransferCfgEntry(
-            docsPnmBulkDataTransferCfgDestIndex=await fetch("docsPnmBulkDataTransferCfgDestIndex", PnmDestinationIndex),
-            docsPnmBulkDataTransferCfgDestHostname=await fetch("docsPnmBulkDataTransferCfgDestHostname", HostNameStr),
-            docsPnmBulkDataTransferCfgDestHostIpAddrType=await fetch(
-                "docsPnmBulkDataTransferCfgDestHostIpAddrType",
-                lambda value: InetAddressType(int(value)),
+            docsPnmBulkDataTransferCfgDestIndex=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestIndex",
+                logger=logger,
+                cast=PnmDestinationIndex,
             ),
-            docsPnmBulkDataTransferCfgDestHostIpAddress=await fetch("docsPnmBulkDataTransferCfgDestHostIpAddress", InetAddressStr),
-            docsPnmBulkDataTransferCfgDestPort=await fetch("docsPnmBulkDataTransferCfgDestPort", PnmDestinationPort),
-            docsPnmBulkDataTransferCfgDestBaseUri=await fetch("docsPnmBulkDataTransferCfgDestBaseUri", PnmBaseUriStr),
-            docsPnmBulkDataTransferCfgProtocol=await fetch(
-                "docsPnmBulkDataTransferCfgProtocol",
-                lambda value: DocsPnmBulkDataTransferProtocol(int(value)),
+            docsPnmBulkDataTransferCfgDestHostname=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestHostname",
+                logger=logger,
+                cast=HostNameStr,
             ),
-            docsPnmBulkDataTransferCfgLocalStore=await fetch("docsPnmBulkDataTransferCfgLocalStore", Snmp_v2c.truth_value),
-            docsPnmBulkDataTransferCfgRowStatus=await fetch("docsPnmBulkDataTransferCfgRowStatus", PnmRowStatus),
+            docsPnmBulkDataTransferCfgDestHostIpAddrType=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestHostIpAddrType",
+                logger=logger,
+                cast=lambda value: InetAddressType(int(value)),
+            ),
+            docsPnmBulkDataTransferCfgDestHostIpAddress=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestHostIpAddress",
+                logger=logger,
+                cast=InetAddressStr,
+            ),
+            docsPnmBulkDataTransferCfgDestPort=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestPort",
+                logger=logger,
+                cast=PnmDestinationPort,
+            ),
+            docsPnmBulkDataTransferCfgDestBaseUri=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgDestBaseUri",
+                logger=logger,
+                cast=PnmBaseUriStr,
+            ),
+            docsPnmBulkDataTransferCfgProtocol=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgProtocol",
+                logger=logger,
+                cast=lambda value: DocsPnmBulkDataTransferProtocol(int(value)),
+            ),
+            docsPnmBulkDataTransferCfgLocalStore=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgLocalStore",
+                logger=logger,
+                cast=Snmp_v2c.truth_value,
+            ),
+            docsPnmBulkDataTransferCfgRowStatus=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmBulkDataTransferCfgRowStatus",
+                logger=logger,
+                cast=PnmRowStatus,
+            ),
         )
 
         return cls(index=index, entry=entry)

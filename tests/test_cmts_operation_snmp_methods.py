@@ -30,6 +30,10 @@ from pypnm_cmts.pnm.data_type.bulk_data_transfer_cfg_entry import (
     DocsPnmBulkDataTransferCfgEntry,
     DocsPnmBulkDataTransferCfgRecord,
 )
+from pypnm_cmts.pnm.data_type.ofdma_rxmer_entry import (
+    DocsPnmCmtsUsOfdmaRxMerEntry,
+    DocsPnmCmtsUsOfdmaRxMerRecord,
+)
 
 
 class _DummySnmp:
@@ -806,4 +810,66 @@ def test_set_docs_pnm_bulk_data_transfer_cfg_record(
     assert ok is True
     assert captured["snmp"] is snmp
     assert captured["index"] == 7
+    assert captured["entry"] == entry
+
+
+def test_get_docs_pnm_cmts_us_ofdma_rxmer_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = [
+        DocsPnmCmtsUsOfdmaRxMerRecord(
+            index=42,
+            entry=DocsPnmCmtsUsOfdmaRxMerEntry(
+                docsPnmCmtsUsOfdmaRxMerEnable=True,
+            ),
+        )
+    ]
+
+    async def _get_all(_: object) -> list[DocsPnmCmtsUsOfdmaRxMerRecord]:
+        return expected
+
+    monkeypatch.setattr(DocsPnmCmtsUsOfdmaRxMerRecord, "get_all", _get_all)
+
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+
+    records = asyncio.run(operation.getDocsPnmCmtsUsOfdmaRxMerRecord())
+    assert records == expected
+
+
+def test_set_docs_pnm_cmts_us_ofdma_rxmer_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    entry = DocsPnmCmtsUsOfdmaRxMerEntry(
+        docsPnmCmtsUsOfdmaRxMerNumAvgs=10,
+    )
+
+    async def _set(
+        *,
+        snmp: object,
+        index: int,
+        entry: DocsPnmCmtsUsOfdmaRxMerEntry,
+    ) -> bool:
+        captured["snmp"] = snmp
+        captured["index"] = index
+        captured["entry"] = entry
+        return True
+
+    monkeypatch.setattr(DocsPnmCmtsUsOfdmaRxMerRecord, "set", _set)
+
+    snmp = _DummySnmp(object(), object())
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    ok = asyncio.run(operation.setDocsPnmCmtsUsOfdmaRxMerRecord(42, entry))
+    assert ok is True
+    assert captured["snmp"] is snmp
+    assert captured["index"] == 42
     assert captured["entry"] == entry

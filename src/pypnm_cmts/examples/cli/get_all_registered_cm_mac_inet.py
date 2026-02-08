@@ -53,6 +53,11 @@ class RegisterCmMacInetCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -132,7 +137,9 @@ class RegisterCmMacInetCli:
 
     @staticmethod
     def render_output(
-        entries: dict[int, list[RegisterCmMacInetAddress]], as_text: bool
+        entries: dict[int, list[RegisterCmMacInetAddress]],
+        as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for CM MAC/inet results.
@@ -140,7 +147,7 @@ class RegisterCmMacInetCli:
         if not entries:
             if as_text:
                 return "No entries found."
-            return json.dumps({"entries": {}})
+            return json.dumps({"entries": {}}, indent=2 if json_pretty else None)
 
         if as_text:
             lines: list[str] = []
@@ -165,7 +172,7 @@ class RegisterCmMacInetCli:
                         "ipv6_link_local": str(ipv6_ll),
                     }
                 )
-        return json.dumps({"entries": payload})
+        return json.dumps({"entries": payload}, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -208,7 +215,7 @@ class RegisterCmMacInetCli:
             RegisterCmMacInetCli._emit_error(str(exc))
             return RegisterCmMacInetCli.EXIT_FAILURE
 
-        print(RegisterCmMacInetCli.render_output(entries, args.text))
+        print(RegisterCmMacInetCli.render_output(entries, args.text, args.json_pretty))
 
         if not entries:
             return RegisterCmMacInetCli.EXIT_FAILURE

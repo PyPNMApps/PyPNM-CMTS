@@ -49,6 +49,11 @@ class ServiceGroupTopologyCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -103,6 +108,7 @@ class ServiceGroupTopologyCli:
     def render_output(
         entries: list[CmtsServiceGroupTopologyModel],
         as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render the output for the service-group topology results.
@@ -110,7 +116,7 @@ class ServiceGroupTopologyCli:
         if not entries:
             if as_text:
                 return "No entries found."
-            return json.dumps({"entries": []})
+            return json.dumps({"entries": []}, indent=2 if json_pretty else None)
 
         if as_text:
             lines = [
@@ -137,7 +143,7 @@ class ServiceGroupTopologyCli:
             return "\n".join(lines)
 
         payload = [ServiceGroupTopologyCli._entry_to_dict(entry) for entry in entries]
-        return json.dumps({"entries": payload})
+        return json.dumps({"entries": payload}, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -171,7 +177,7 @@ class ServiceGroupTopologyCli:
             ServiceGroupTopologyCli._emit_error(str(exc))
             return ServiceGroupTopologyCli.EXIT_FAILURE
 
-        output = ServiceGroupTopologyCli.render_output(entries, args.text)
+        output = ServiceGroupTopologyCli.render_output(entries, args.text, args.json_pretty)
         print(output)
         return ServiceGroupTopologyCli.EXIT_SUCCESS
 

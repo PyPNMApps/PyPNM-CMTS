@@ -7,8 +7,10 @@ import asyncio
 
 import pytest
 from pypnm.snmp.snmp_v2c import Snmp_v2c
+from pysnmp.proto.rfc1902 import Integer32, OctetString
 
 from pypnm_cmts.pnm.data_type.ofdma_rxmer_entry import (
+    DocsPnmCmtsUsOfdmaRxMerEntry,
     DocsPnmCmtsUsOfdmaRxMerRecord,
 )
 
@@ -23,6 +25,18 @@ class _DummySnmp:
 
     async def walk(self, oid: str) -> list[str]:
         return self._walk_results
+
+
+class _DummySnmpSet:
+    def __init__(self, should_fail_oid: str | None = None) -> None:
+        self.calls: list[tuple[str, object, object]] = []
+        self._should_fail_oid = should_fail_oid
+
+    async def set(self, oid: str, value: object, value_type: object) -> list[object] | None:
+        self.calls.append((oid, value, value_type))
+        if self._should_fail_oid is not None and oid == self._should_fail_oid:
+            return None
+        return [object()]
 
 
 def test_docs_pnm_cmts_us_ofdma_rxmer_from_snmp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,3 +82,32 @@ def test_docs_pnm_cmts_us_ofdma_rxmer_get_all(monkeypatch: pytest.MonkeyPatch) -
     assert len(records) == 2
     assert records[0].index == 10
     assert records[1].index == 11
+
+
+def test_docs_pnm_cmts_us_ofdma_rxmer_set() -> None:
+    snmp = _DummySnmpSet()
+    entry = DocsPnmCmtsUsOfdmaRxMerEntry(
+        docsPnmCmtsUsOfdmaRxMerEnable=True,
+        docsPnmCmtsUsOfdmaRxMerCmMac="00:11:22:33:44:55",
+        docsPnmCmtsUsOfdmaRxMerPreEq=False,
+        docsPnmCmtsUsOfdmaRxMerNumAvgs=25,
+        docsPnmCmtsUsOfdmaRxMerFileName="PNMCcapRxMER_test",
+        docsPnmCmtsUsOfdmaRxMerDestinationIndex=7,
+    )
+
+    ok = asyncio.run(DocsPnmCmtsUsOfdmaRxMerRecord.set(snmp, index=42, entry=entry))
+    assert ok is True
+    assert len(snmp.calls) == 6
+    assert ("docsPnmCmtsUsOfdmaRxMerEnable.42", 1, Integer32) in snmp.calls
+    assert ("docsPnmCmtsUsOfdmaRxMerCmMac.42", "00:11:22:33:44:55", OctetString) in snmp.calls
+    assert ("docsPnmCmtsUsOfdmaRxMerPreEq.42", 2, Integer32) in snmp.calls
+
+
+def test_docs_pnm_cmts_us_ofdma_rxmer_set_failure() -> None:
+    snmp = _DummySnmpSet(should_fail_oid="docsPnmCmtsUsOfdmaRxMerNumAvgs.42")
+    entry = DocsPnmCmtsUsOfdmaRxMerEntry(
+        docsPnmCmtsUsOfdmaRxMerNumAvgs=25,
+    )
+
+    ok = asyncio.run(DocsPnmCmtsUsOfdmaRxMerRecord.set(snmp, index=42, entry=entry))
+    assert ok is False

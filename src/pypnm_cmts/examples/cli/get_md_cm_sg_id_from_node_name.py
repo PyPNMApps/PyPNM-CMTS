@@ -52,6 +52,11 @@ class MdCmSgIdFromNodeNameCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -87,7 +92,11 @@ class MdCmSgIdFromNodeNameCli:
 
     @staticmethod
     def render_output(
-        node_name: str, exists: bool, sg_id: MdCmSgId, as_text: bool
+        node_name: str,
+        exists: bool,
+        sg_id: MdCmSgId,
+        as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for MD-CM-SG-ID lookup.
@@ -100,7 +109,7 @@ class MdCmSgIdFromNodeNameCli:
             "exists": exists,
             "md_cm_sg_id": int(sg_id),
         }
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -141,7 +150,7 @@ class MdCmSgIdFromNodeNameCli:
             MdCmSgIdFromNodeNameCli._emit_error(str(exc))
             return MdCmSgIdFromNodeNameCli.EXIT_FAILURE
 
-        print(MdCmSgIdFromNodeNameCli.render_output(node_name, exists, sg_id, args.text))
+        print(MdCmSgIdFromNodeNameCli.render_output(node_name, exists, sg_id, args.text, args.json_pretty))
 
         if not exists:
             return MdCmSgIdFromNodeNameCli.EXIT_FAILURE

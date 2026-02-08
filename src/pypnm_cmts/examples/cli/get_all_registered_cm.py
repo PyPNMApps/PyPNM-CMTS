@@ -57,6 +57,11 @@ class AllRegisterCmCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -152,6 +157,7 @@ class AllRegisterCmCli:
     def render_output(
         entries: dict[int, list[DocsIf3CmtsCmRegStatusEntry]],
         as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for CM registration entries.
@@ -170,7 +176,7 @@ class AllRegisterCmCli:
             payload[str(group_id)] = [
                 AllRegisterCmCli._entry_to_dict(entry) for entry in group_entries
             ]
-        return json.dumps({"entries": payload})
+        return json.dumps({"entries": payload}, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -220,7 +226,7 @@ class AllRegisterCmCli:
                 return AllRegisterCmCli.EXIT_FAILURE
             entries = {int(args.serving_group_id): results}
 
-        print(AllRegisterCmCli.render_output(entries, args.text))
+        print(AllRegisterCmCli.render_output(entries, args.text, args.json_pretty))
 
         if not entries:
             return AllRegisterCmCli.EXIT_FAILURE

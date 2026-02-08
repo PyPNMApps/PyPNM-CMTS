@@ -58,6 +58,10 @@ from pypnm_cmts.pnm.data_type.bulk_data_transfer_cfg_entry import (
     DocsPnmBulkDataTransferCfgEntry,
     DocsPnmBulkDataTransferCfgRecord,
 )
+from pypnm_cmts.pnm.data_type.ofdma_rxmer_entry import (
+    DocsPnmCmtsUsOfdmaRxMerEntry,
+    DocsPnmCmtsUsOfdmaRxMerRecord,
+)
 
 DEFAULT_MD_CM_SG_ID: MdCmSgId = MdCmSgId(0)
 DEFAULT_CM_REG_SG_ID: CmRegSgId = CmRegSgId(0)
@@ -727,6 +731,36 @@ class CmtsOperation:
         except Exception as exc:
             self.logger.error(
                 f"Failed to set docsPnmBulkDataTransferCfg record at index {index}: {exc}"
+            )
+            return False
+
+    async def getDocsPnmCmtsUsOfdmaRxMerRecord(self) -> list[DocsPnmCmtsUsOfdmaRxMerRecord]:
+        """
+        Fetch docsPnmCmtsUsOfdmaRxMer table records.
+        """
+        try:
+            return await DocsPnmCmtsUsOfdmaRxMerRecord.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve docsPnmCmtsUsOfdmaRxMer records: {exc}")
+            return []
+
+    async def setDocsPnmCmtsUsOfdmaRxMerRecord(
+        self,
+        index: int,
+        entry: DocsPnmCmtsUsOfdmaRxMerEntry,
+    ) -> bool:
+        """
+        Set writable docsPnmCmtsUsOfdmaRxMer fields for a table row.
+        """
+        try:
+            return await DocsPnmCmtsUsOfdmaRxMerRecord.set(
+                snmp=self._snmp,
+                index=index,
+                entry=entry,
+            )
+        except Exception as exc:
+            self.logger.error(
+                f"Failed to set docsPnmCmtsUsOfdmaRxMer record at index {index}: {exc}"
             )
             return False
 

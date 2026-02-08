@@ -42,6 +42,12 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 - Place all PNM SNMP table data type models under `src/pypnm_cmts/pnm/data_type`.
 - Do not place PNM SNMP table data type models under `src/pypnm_cmts/docsis/data_type`.
 
+## CMTS Operation CLI Rule
+
+- When a new SNMP table `get` or `set` entry method is added to `src/pypnm_cmts/docsis/cmts_operation.py`, add a corresponding CLI example under `src/pypnm_cmts/examples/cli` in the same change.
+- The CLI example must include JSON output support.
+- Any CLI example that supports JSON output must provide a `--json-pretty` flag to format JSON with indentation.
+
 ## Private Method Placement Rule
 
 - Except Python special methods (for example `__init__`), place private methods at the bottom of the class.

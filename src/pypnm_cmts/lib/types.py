@@ -64,6 +64,8 @@ PnmDestinationPort      = NewType("PnmDestinationPort", int)
 PnmTransferProtocol     = NewType("PnmTransferProtocol", int)
 PnmRowStatus            = NewType("PnmRowStatus", int)
 PnmBaseUriStr           = NewType("PnmBaseUriStr", UriStr)
+PnmUsOfdmaRxMerNumAvgs  = NewType("PnmUsOfdmaRxMerNumAvgs", int)
+PnmUsOfdmaRxMerMeasStatus = NewType("PnmUsOfdmaRxMerMeasStatus", int)
 
 
 __all__ = [
@@ -105,6 +107,8 @@ __all__ = [
     "PnmTransferProtocol",
     "PnmRowStatus",
     "PnmBaseUriStr",
+    "PnmUsOfdmaRxMerNumAvgs",
+    "PnmUsOfdmaRxMerMeasStatus",
     "UriStr",
     "HostNameStr",
     "InetAddressStr",

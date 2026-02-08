@@ -59,6 +59,11 @@ class CmInetAddressCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -160,6 +165,7 @@ class CmInetAddressCli:
         inet_tuple: RegisterCmInetAddress,
         as_text: bool,
         raw_values: dict[str, str | int] | None,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for CM inet address lookup.
@@ -183,7 +189,7 @@ class CmInetAddressCli:
         }
         if raw_values is not None:
             payload["raw"] = raw_values
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -232,7 +238,7 @@ class CmInetAddressCli:
 
         print(
             CmInetAddressCli.render_output(
-                mac, exists, inet_tuple, args.text, raw_values
+                mac, exists, inet_tuple, args.text, raw_values, args.json_pretty
             )
         )
 

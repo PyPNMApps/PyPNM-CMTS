@@ -2,6 +2,7 @@
 
 ## Table of contents
 
+- [CLI usage](#cli-usage)
 - [Get sysDescr (SNMPv2c)](#get-sysdescr-snmpv2c)
 - [Get docsIf3MdNodeStatusMdDsSgId (SNMPv2c)](#get-docsif3mdnodestatusmddssgid-snmpv2c)
 - [Get docsIf3MdNodeStatusMdUsSgId (SNMPv2c)](#get-docsif3mdnodestatusmdussgid-snmpv2c)
@@ -14,6 +15,8 @@
 - [Get MD-CM-SG-ID by node name (SNMPv2c)](#get-md-cm-sg-id-by-node-name-snmpv2c)
 - [Get CM registration SG ID by node name (SNMPv2c)](#get-cm-registration-sg-id-by-node-name-snmpv2c)
 - [Get CM registration SG ID by DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
+- [Get docsPnmBulkDataTransferCfg records (SNMPv2c)](#get-docspnmbulkdatatransfercfg-records-snmpv2c)
+- [Get docsPnmCmtsUsOfdmaRxMer records (SNMPv2c)](#get-docspnmcmtsusofdmarxmer-records-snmpv2c)
 - [Next steps](#next-steps)
 - [Orchestrator run modes](#orchestrator-run-modes)
 
@@ -22,6 +25,22 @@ Use these examples to fetch CMTS data via SNMP.
 Assumptions:
 - Commands are run from the repository root.
 - Python is available; optional `.env` activation is handled by your environment.
+
+## CLI usage
+
+- JSON is the default output for example CLIs.
+- Use `--text` for flat text output.
+- Use `--json-pretty` to pretty-print JSON output.
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && python src/pypnm_cmts/examples/cli/get_service_group_topology.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --json-pretty
+```
 
 ## Get sysDescr (SNMPv2c)
 
@@ -273,6 +292,56 @@ clear && python src/pypnm_cmts/examples/cli/get_cm_reg_sg_id_from_ds_sg_id.py \
   --cmts-hostname "${CMTS_HOST}" \
   --cmts-community "${SNMP_COMMUNITY}" \
   --ds-sg-id "${DS_SG_ID}"
+```
+
+## Get docsPnmBulkDataTransferCfg records (SNMPv2c)
+
+Fetch the bulk data transfer destination configuration table (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_bulk_data_transfer_cfg_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}"
+```
+
+Pretty JSON output:
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_bulk_data_transfer_cfg_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --json-pretty
+```
+
+## Get docsPnmCmtsUsOfdmaRxMer records (SNMPv2c)
+
+Fetch the CMTS US OFDMA RxMER per-channel control table (default JSON output).
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_cmts_us_ofdma_rxmer_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}"
+```
+
+Pretty JSON output:
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="public"
+
+clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_cmts_us_ofdma_rxmer_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community "${SNMP_COMMUNITY}" \
+  --json-pretty
 ```
 
 ## Next steps

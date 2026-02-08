@@ -48,6 +48,11 @@ class CmRegStatusSgIdViaMacCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -101,6 +106,7 @@ class CmRegStatusSgIdViaMacCli:
         mac_exists: MacAddressExist,
         sg_id: MdCmSgId,
         as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for the CM registration status SG ID lookup.
@@ -116,7 +122,7 @@ class CmRegStatusSgIdViaMacCli:
             "exists": bool(mac_exists),
             "md_cm_sg_id": int(sg_id),
         }
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -175,7 +181,7 @@ class CmRegStatusSgIdViaMacCli:
 
         print(
             CmRegStatusSgIdViaMacCli.render_output(
-                mac, reg_status_id, mac_exists, sg_id, args.text
+                mac, reg_status_id, mac_exists, sg_id, args.text, args.json_pretty
             )
         )
 

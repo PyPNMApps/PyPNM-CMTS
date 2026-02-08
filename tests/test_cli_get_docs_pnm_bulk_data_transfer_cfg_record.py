@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Maurice Garcia
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+import pytest
+from pypnm.lib.inet import Inet
+
+from pypnm_cmts.examples.cli.get_docs_pnm_bulk_data_transfer_cfg_record import (
+    DocsPnmBulkDataTransferCfgCli,
+)
+from pypnm_cmts.lib.constants import DocsPnmBulkDataTransferProtocol
+from pypnm_cmts.pnm.data_type.bulk_data_transfer_cfg_entry import (
+    DocsPnmBulkDataTransferCfgEntry,
+    DocsPnmBulkDataTransferCfgRecord,
+)
+
+
+def test_cli_parser_required_args() -> None:
+    parser = DocsPnmBulkDataTransferCfgCli.build_parser()
+    args = parser.parse_args(
+        ["--cmts-hostname", "192.168.0.100", "--cmts-community", "public"]
+    )
+
+    assert args.cmts_hostname == "192.168.0.100"
+    assert args.cmts_community == "public"
+    assert args.text is False
+
+
+def test_fetch_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = [
+        DocsPnmBulkDataTransferCfgRecord(
+            index=7,
+            entry=DocsPnmBulkDataTransferCfgEntry(
+                docsPnmBulkDataTransferCfgDestHostname="pnm.example.net",
+                docsPnmBulkDataTransferCfgProtocol=DocsPnmBulkDataTransferProtocol.TFTP,
+                docsPnmBulkDataTransferCfgLocalStore=False,
+            ),
+        )
+    ]
+
+    class _DummyOperation:
+        async def getDocsPnmBulkDataTransferCfgRecord(self) -> list[DocsPnmBulkDataTransferCfgRecord]:
+            return expected
+
+    monkeypatch.setattr(
+        "pypnm_cmts.examples.cli.get_docs_pnm_bulk_data_transfer_cfg_record.CmtsOperation",
+        lambda inet, write_community: _DummyOperation(),
+    )
+
+    entries = asyncio.run(
+        DocsPnmBulkDataTransferCfgCli.fetch_records(Inet("192.168.0.100"), "public")
+    )
+    assert entries == expected
+
+
+def test_render_output_json() -> None:
+    records = [
+        DocsPnmBulkDataTransferCfgRecord(
+            index=7,
+            entry=DocsPnmBulkDataTransferCfgEntry(
+                docsPnmBulkDataTransferCfgDestHostname="pnm.example.net",
+                docsPnmBulkDataTransferCfgProtocol=DocsPnmBulkDataTransferProtocol.HTTPS,
+                docsPnmBulkDataTransferCfgLocalStore=True,
+            ),
+        )
+    ]
+
+    output = DocsPnmBulkDataTransferCfgCli.render_output(records, False)
+    payload = json.loads(output)
+    assert payload["entries"][0]["index"] == 7
+    assert payload["entries"][0]["entry"]["docsPnmBulkDataTransferCfgDestHostname"] == "pnm.example.net"
+    assert payload["entries"][0]["entry"]["docsPnmBulkDataTransferCfgProtocol"] == 3

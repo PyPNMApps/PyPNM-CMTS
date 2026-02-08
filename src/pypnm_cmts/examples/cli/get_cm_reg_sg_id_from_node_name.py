@@ -52,6 +52,11 @@ class CmRegSgIdFromNodeNameCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -87,7 +92,11 @@ class CmRegSgIdFromNodeNameCli:
 
     @staticmethod
     def render_output(
-        node_name: str, exists: bool, sg_id: CmRegSgId, as_text: bool
+        node_name: str,
+        exists: bool,
+        sg_id: CmRegSgId,
+        as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for CM registration SG ID lookup.
@@ -100,7 +109,7 @@ class CmRegSgIdFromNodeNameCli:
             "exists": exists,
             "cm_reg_sg_id": int(sg_id),
         }
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -141,7 +150,7 @@ class CmRegSgIdFromNodeNameCli:
             CmRegSgIdFromNodeNameCli._emit_error(str(exc))
             return CmRegSgIdFromNodeNameCli.EXIT_FAILURE
 
-        print(CmRegSgIdFromNodeNameCli.render_output(node_name, exists, sg_id, args.text))
+        print(CmRegSgIdFromNodeNameCli.render_output(node_name, exists, sg_id, args.text, args.json_pretty))
 
         if not exists:
             return CmRegSgIdFromNodeNameCli.EXIT_FAILURE

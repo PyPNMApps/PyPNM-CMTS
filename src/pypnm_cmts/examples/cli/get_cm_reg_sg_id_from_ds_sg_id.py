@@ -53,6 +53,11 @@ class CmRegSgIdFromDsSgIdCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -88,7 +93,11 @@ class CmRegSgIdFromDsSgIdCli:
 
     @staticmethod
     def render_output(
-        ds_sg_id: MdCmSgId, exists: bool, sg_id: CmRegSgId, as_text: bool
+        ds_sg_id: MdCmSgId,
+        exists: bool,
+        sg_id: CmRegSgId,
+        as_text: bool,
+        json_pretty: bool = False,
     ) -> str:
         """
         Render output for CM registration SG ID lookup.
@@ -101,7 +110,7 @@ class CmRegSgIdFromDsSgIdCli:
             "exists": exists,
             "cm_reg_sg_id": int(sg_id),
         }
-        return json.dumps(payload)
+        return json.dumps(payload, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -139,7 +148,7 @@ class CmRegSgIdFromDsSgIdCli:
             CmRegSgIdFromDsSgIdCli._emit_error(str(exc))
             return CmRegSgIdFromDsSgIdCli.EXIT_FAILURE
 
-        print(CmRegSgIdFromDsSgIdCli.render_output(ds_sg_id, exists, sg_id, args.text))
+        print(CmRegSgIdFromDsSgIdCli.render_output(ds_sg_id, exists, sg_id, args.text, args.json_pretty))
 
         if not exists:
             return CmRegSgIdFromDsSgIdCli.EXIT_FAILURE

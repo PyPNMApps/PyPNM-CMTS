@@ -4,14 +4,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 
 from pydantic import BaseModel
 from pypnm.lib.mac_address import MacAddress
-from pypnm.lib.types import FileNameStr, MacAddressStr
+from pypnm.lib.types import FileNameStr, InterfaceIndex, MacAddressStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
+from pysnmp.proto.rfc1902 import Integer32, OctetString
 
-from pypnm_cmts.lib.types import IntList
+from pypnm_cmts.lib.types import (
+    IntList,
+    PnmDestinationIndex,
+    PnmUsOfdmaRxMerMeasStatus,
+    PnmUsOfdmaRxMerNumAvgs,
+)
+from pypnm_cmts.pnm.data_type.snmp_table_io import SnmpSetFieldSpec, SnmpTableIo
 
 
 class DocsPnmCmtsUsOfdmaRxMerEntry(BaseModel):
@@ -20,27 +26,75 @@ class DocsPnmCmtsUsOfdmaRxMerEntry(BaseModel):
     docsPnmCmtsUsOfdmaRxMerEnable: bool | None = None
     docsPnmCmtsUsOfdmaRxMerCmMac: MacAddressStr | None = None
     docsPnmCmtsUsOfdmaRxMerPreEq: bool | None = None
-    docsPnmCmtsUsOfdmaRxMerNumAvgs: int | None = None
-    docsPnmCmtsUsOfdmaRxMerMeasStatus: int | None = None
+    docsPnmCmtsUsOfdmaRxMerNumAvgs: PnmUsOfdmaRxMerNumAvgs | None = None
+    docsPnmCmtsUsOfdmaRxMerMeasStatus: PnmUsOfdmaRxMerMeasStatus | None = None
     docsPnmCmtsUsOfdmaRxMerFileName: FileNameStr | None = None
-    docsPnmCmtsUsOfdmaRxMerDestinationIndex: int | None = None
+    docsPnmCmtsUsOfdmaRxMerDestinationIndex: PnmDestinationIndex | None = None
 
 
 class DocsPnmCmtsUsOfdmaRxMerRecord(BaseModel):
     """Container for a single docsPnmCmtsUsOfdmaRxMer table row."""
 
-    index: int
+    index: InterfaceIndex
     entry: DocsPnmCmtsUsOfdmaRxMerEntry
+
+    @classmethod
+    async def set(
+        cls,
+        snmp: Snmp_v2c,
+        index: int,
+        entry: DocsPnmCmtsUsOfdmaRxMerEntry,
+    ) -> bool:
+        """
+        Persist non-null writable docsPnmCmtsUsOfdmaRxMer fields for a single row index.
+
+        Returns:
+            bool: True when all requested sets succeed, else False.
+        """
+        logger = logging.getLogger(cls.__name__)
+
+        updates_raw = entry.model_dump(exclude_none=True)
+        if not updates_raw:
+            logger.warning("No docsPnmCmtsUsOfdmaRxMer fields provided for set.")
+            return True
+
+        updates = [
+            (field, value)
+            for field, value in updates_raw.items()
+            if field != "docsPnmCmtsUsOfdmaRxMerMeasStatus"
+        ]
+        if not updates:
+            logger.warning("No writable docsPnmCmtsUsOfdmaRxMer fields provided for set.")
+            return True
+
+        field_specs = [
+            SnmpSetFieldSpec(
+                "docsPnmCmtsUsOfdmaRxMerEnable",
+                Integer32,
+                encoder=lambda value: SnmpTableIo.encode_truth_value(bool(value)),
+            ),
+            SnmpSetFieldSpec("docsPnmCmtsUsOfdmaRxMerCmMac", OctetString),
+            SnmpSetFieldSpec(
+                "docsPnmCmtsUsOfdmaRxMerPreEq",
+                Integer32,
+                encoder=lambda value: SnmpTableIo.encode_truth_value(bool(value)),
+            ),
+            SnmpSetFieldSpec("docsPnmCmtsUsOfdmaRxMerNumAvgs", Integer32),
+            SnmpSetFieldSpec("docsPnmCmtsUsOfdmaRxMerFileName", OctetString),
+            SnmpSetFieldSpec("docsPnmCmtsUsOfdmaRxMerDestinationIndex", Integer32),
+        ]
+
+        return await SnmpTableIo.set_fields(
+            snmp=snmp,
+            index=index,
+            updates=updates,
+            field_specs=field_specs,
+            logger=logger,
+        )
 
     @classmethod
     async def from_snmp(cls, index: int, snmp: Snmp_v2c) -> DocsPnmCmtsUsOfdmaRxMerRecord | None:
         logger = logging.getLogger(cls.__name__)
-
-        def safe_cast(value: str, cast: Callable) -> int | float | str | bool | None:
-            try:
-                return cast(value)
-            except Exception:
-                return None
 
         def cast_mac(value: str) -> MacAddressStr | None:
             try:
@@ -48,38 +102,59 @@ class DocsPnmCmtsUsOfdmaRxMerRecord(BaseModel):
             except (TypeError, ValueError):
                 return None
 
-        async def fetch(field: str, cast: Callable | None = None) -> None | int | float | str | bool:
-            try:
-                raw = await snmp.get(f"{field}.{index}")
-                val = Snmp_v2c.get_result_value(raw)
-                if val is None or val == "":
-                    return None
-                if cast is not None:
-                    return safe_cast(str(val), cast)
-                s = str(val).strip()
-                if s.isdigit():
-                    return int(s)
-                if s.lower() in ("true", "false"):
-                    return s.lower() == "true"
-                try:
-                    return float(s)
-                except ValueError:
-                    return s
-            except Exception as exc:
-                logger.warning(f"Failed to fetch {field}.{index}: {exc}")
-                return None
-
         entry = DocsPnmCmtsUsOfdmaRxMerEntry(
-            docsPnmCmtsUsOfdmaRxMerEnable=await fetch("docsPnmCmtsUsOfdmaRxMerEnable", Snmp_v2c.truth_value),
-            docsPnmCmtsUsOfdmaRxMerCmMac=await fetch("docsPnmCmtsUsOfdmaRxMerCmMac", cast_mac),
-            docsPnmCmtsUsOfdmaRxMerPreEq=await fetch("docsPnmCmtsUsOfdmaRxMerPreEq", Snmp_v2c.truth_value),
-            docsPnmCmtsUsOfdmaRxMerNumAvgs=await fetch("docsPnmCmtsUsOfdmaRxMerNumAvgs", int),
-            docsPnmCmtsUsOfdmaRxMerMeasStatus=await fetch("docsPnmCmtsUsOfdmaRxMerMeasStatus", int),
-            docsPnmCmtsUsOfdmaRxMerFileName=await fetch("docsPnmCmtsUsOfdmaRxMerFileName", FileNameStr),
-            docsPnmCmtsUsOfdmaRxMerDestinationIndex=await fetch("docsPnmCmtsUsOfdmaRxMerDestinationIndex", int),
+            docsPnmCmtsUsOfdmaRxMerEnable=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerEnable",
+                logger=logger,
+                cast=Snmp_v2c.truth_value,
+            ),
+            docsPnmCmtsUsOfdmaRxMerCmMac=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerCmMac",
+                logger=logger,
+                cast=cast_mac,
+            ),
+            docsPnmCmtsUsOfdmaRxMerPreEq=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerPreEq",
+                logger=logger,
+                cast=Snmp_v2c.truth_value,
+            ),
+            docsPnmCmtsUsOfdmaRxMerNumAvgs=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerNumAvgs",
+                logger=logger,
+                cast=PnmUsOfdmaRxMerNumAvgs,
+            ),
+            docsPnmCmtsUsOfdmaRxMerMeasStatus=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerMeasStatus",
+                logger=logger,
+                cast=PnmUsOfdmaRxMerMeasStatus,
+            ),
+            docsPnmCmtsUsOfdmaRxMerFileName=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerFileName",
+                logger=logger,
+                cast=FileNameStr,
+            ),
+            docsPnmCmtsUsOfdmaRxMerDestinationIndex=await SnmpTableIo.fetch_field(
+                snmp=snmp,
+                index=index,
+                field="docsPnmCmtsUsOfdmaRxMerDestinationIndex",
+                logger=logger,
+                cast=PnmDestinationIndex,
+            ),
         )
 
-        return cls(index=index, entry=entry)
+        return cls(index=InterfaceIndex(index), entry=entry)
 
     @classmethod
     async def get(cls, snmp: Snmp_v2c, indices: IntList) -> list[DocsPnmCmtsUsOfdmaRxMerRecord]:

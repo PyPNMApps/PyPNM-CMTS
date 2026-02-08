@@ -47,6 +47,11 @@ class MdDsSgIdCli:
             action="store_true",
             help="Output in text format instead of JSON.",
         )
+        parser.add_argument(
+            "--json-pretty",
+            action="store_true",
+            help="Pretty-print JSON output with indentation.",
+        )
         return parser
 
     @staticmethod
@@ -79,14 +84,14 @@ class MdDsSgIdCli:
             raise RuntimeError(f"SNMP request failed: {exc}") from exc
 
     @staticmethod
-    def render_output(entries: list[MdNodeStatus], as_text: bool) -> str:
+    def render_output(entries: list[MdNodeStatus], as_text: bool, json_pretty: bool = False) -> str:
         """
         Render the output for the DocsIf3MdNodeStatusMdDsSgId results.
         """
         if not entries:
             if as_text:
                 return "No entries found."
-            return json.dumps({"entries": []})
+            return json.dumps({"entries": []}, indent=2 if json_pretty else None)
 
         if as_text:
             lines: list[str] = []
@@ -105,7 +110,7 @@ class MdDsSgIdCli:
                     "md_cm_sg_id": int(sg_id),
                 }
             )
-        return json.dumps({"entries": payload})
+        return json.dumps({"entries": payload}, indent=2 if json_pretty else None)
 
     @staticmethod
     def _emit_error(message: str) -> None:
@@ -141,7 +146,7 @@ class MdDsSgIdCli:
             MdDsSgIdCli._emit_error(str(exc))
             return MdDsSgIdCli.EXIT_FAILURE
 
-        print(MdDsSgIdCli.render_output(entries, args.text))
+        print(MdDsSgIdCli.render_output(entries, args.text, args.json_pretty))
 
         if not entries:
             return MdDsSgIdCli.EXIT_FAILURE
