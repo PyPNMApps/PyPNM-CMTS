@@ -47,6 +47,7 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 - When a new SNMP table `get` or `set` entry method is added to `src/pypnm_cmts/docsis/cmts_operation.py`, add a corresponding CLI example under `src/pypnm_cmts/examples/cli` in the same change.
 - The CLI example must include JSON output support.
 - Any CLI example that supports JSON output must provide a `--json-pretty` flag to format JSON with indentation.
+- For set-operation CLI examples, use `--cmts-community-write` for the write community argument.
 
 ## Private Method Placement Rule
 

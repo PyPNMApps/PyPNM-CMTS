@@ -17,6 +17,8 @@
 - [Get CM registration SG ID by DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
 - [Get docsPnmBulkDataTransferCfg records (SNMPv2c)](#get-docspnmbulkdatatransfercfg-records-snmpv2c)
 - [Get docsPnmCmtsUsOfdmaRxMer records (SNMPv2c)](#get-docspnmcmtsusofdmarxmer-records-snmpv2c)
+- [Set docsPnmBulkDataTransferCfg record (SNMPv2c)](#set-docspnmbulkdatatransfercfg-record-snmpv2c)
+- [Set docsPnmCmtsUsOfdmaRxMer record (SNMPv2c)](#set-docspnmcmtsusofdmarxmer-record-snmpv2c)
 - [Next steps](#next-steps)
 - [Orchestrator run modes](#orchestrator-run-modes)
 
@@ -341,6 +343,43 @@ SNMP_COMMUNITY="public"
 clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_cmts_us_ofdma_rxmer_record.py \
   --cmts-hostname "${CMTS_HOST}" \
   --cmts-community "${SNMP_COMMUNITY}" \
+  --json-pretty
+```
+
+## Set docsPnmBulkDataTransferCfg record (SNMPv2c)
+
+Set writable fields for a single bulk data transfer config row.
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="private"
+INDEX=1
+
+clear && python src/pypnm_cmts/examples/cli/set_docs_pnm_bulk_data_transfer_cfg_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community-write "${SNMP_COMMUNITY}" \
+  --index "${INDEX}" \
+  --protocol tftp \
+  --local-store true \
+  --json-pretty
+```
+
+## Set docsPnmCmtsUsOfdmaRxMer record (SNMPv2c)
+
+Set writable fields for a single OFDMA RxMER control row.
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="private"
+IF_INDEX=2490368
+
+clear && python src/pypnm_cmts/examples/cli/set_docs_pnm_cmts_us_ofdma_rxmer_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community-write "${SNMP_COMMUNITY}" \
+  --if-index "${IF_INDEX}" \
+  --enable true \
+  --num-avgs 25 \
+  --pre-eq true \
   --json-pretty
 ```
 

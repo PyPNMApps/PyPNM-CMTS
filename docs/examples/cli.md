@@ -20,6 +20,8 @@ Use These Examples To Fetch CMTS Data Via SNMP.
 - [Get CM Registration SG ID By DS SG ID (SNMPv2c)](#get-cm-registration-sg-id-by-ds-sg-id-snmpv2c)
 - [Get docsPnmBulkDataTransferCfg Records (SNMPv2c)](#get-docspnmbulkdatatransfercfg-records-snmpv2c)
 - [Get docsPnmCmtsUsOfdmaRxMer Records (SNMPv2c)](#get-docspnmcmtsusofdmarxmer-records-snmpv2c)
+- [Set docsPnmBulkDataTransferCfg Record (SNMPv2c)](#set-docspnmbulkdatatransfercfg-record-snmpv2c)
+- [Set docsPnmCmtsUsOfdmaRxMer Record (SNMPv2c)](#set-docspnmcmtsusofdmarxmer-record-snmpv2c)
 - [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
 - [Orchestrator Run Modes](#orchestrator-run-modes)
 - [Next Steps](#next-steps)
@@ -348,6 +350,43 @@ SNMP_COMMUNITY="public"
 clear && python src/pypnm_cmts/examples/cli/get_docs_pnm_cmts_us_ofdma_rxmer_record.py \
   --cmts-hostname "${CMTS_HOST}" \
   --cmts-community "${SNMP_COMMUNITY}" \
+  --json-pretty
+```
+
+## Set docsPnmBulkDataTransferCfg Record (SNMPv2c)
+
+Set Writable Fields For A Single Bulk Data Transfer Config Row.
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="private"
+INDEX=1
+
+clear && python src/pypnm_cmts/examples/cli/set_docs_pnm_bulk_data_transfer_cfg_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community-write "${SNMP_COMMUNITY}" \
+  --index "${INDEX}" \
+  --protocol tftp \
+  --local-store true \
+  --json-pretty
+```
+
+## Set docsPnmCmtsUsOfdmaRxMer Record (SNMPv2c)
+
+Set Writable Fields For A Single OFDMA RxMER Control Row.
+
+```bash
+CMTS_HOST="192.168.0.100"
+SNMP_COMMUNITY="private"
+IF_INDEX=2490368
+
+clear && python src/pypnm_cmts/examples/cli/set_docs_pnm_cmts_us_ofdma_rxmer_record.py \
+  --cmts-hostname "${CMTS_HOST}" \
+  --cmts-community-write "${SNMP_COMMUNITY}" \
+  --if-index "${IF_INDEX}" \
+  --enable true \
+  --num-avgs 25 \
+  --pre-eq true \
   --json-pretty
 ```
 
