@@ -4,7 +4,16 @@
 """PNM orchestration router."""
 from __future__ import annotations
 
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.router import router
+from fastapi import APIRouter
+
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.channel_est_coeff.router import (
+    router as channel_est_coeff_router,
+)
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.router import router as rxmer_router
+
+router = APIRouter()
+router.include_router(rxmer_router)
+router.include_router(channel_est_coeff_router)
 
 __all__ = [
     "router",
