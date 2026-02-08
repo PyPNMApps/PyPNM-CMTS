@@ -40,14 +40,14 @@ from pypnm_cmts.orchestrator.models import (
 from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
 from pypnm_cmts.orchestrator.sg_shard_planner import ServiceGroupShardPlanner
 from pypnm_cmts.orchestrator.work_runner import WorkRunner
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.types.orchestrator_types import InventorySource, OrchestratorMode
 
 DEFAULT_STATE_DIR = str(CmtsSystemConfigSettings.coordination_state_dir())
 DEFAULT_ELECTION_PREFIX = "cmts"
 DEFAULT_ELECTION_LABEL = "primary"
-INVENTORY_SOURCE_CONFIG = "config"
-INVENTORY_SOURCE_DISCOVERY = "discovery"
-INVENTORY_SOURCE_WORKER = "worker"
+INVENTORY_SOURCE_CONFIG = InventorySource.CONFIG
+INVENTORY_SOURCE_DISCOVERY = InventorySource.DISCOVERY
+INVENTORY_SOURCE_WORKER = InventorySource.WORKER
 DEFAULT_CONFLICT_REASON = "Lease not acquired."
 
 
@@ -136,7 +136,7 @@ class CmtsOrchestratorLauncher:
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
         is_leader: bool,
-    ) -> tuple[list[ServiceGroupId], str, list[ServiceGroupId], int, int]:
+    ) -> tuple[list[ServiceGroupId], InventorySource, list[ServiceGroupId], int, int]:
         if self._is_controller_enabled():
             service_groups, source = self._build_controller_service_groups(
                 settings=settings,
@@ -545,7 +545,7 @@ class CmtsOrchestratorLauncher:
         self,
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         if self._mode == OrchestratorMode.WORKER:
             return self._build_worker_service_groups(settings, state_dir)
         return self._build_inventory_service_groups(settings, state_dir)
@@ -554,7 +554,7 @@ class CmtsOrchestratorLauncher:
         self,
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         if self._sg_id is None:
             snapshot = self._load_inventory_snapshot(state_dir)
             if snapshot is not None:
@@ -577,7 +577,7 @@ class CmtsOrchestratorLauncher:
         self,
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         if bool(settings.auto_discover):
             return self._build_discovered_service_groups(settings, state_dir)
         return self._build_config_service_groups(settings)
@@ -587,7 +587,7 @@ class CmtsOrchestratorLauncher:
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
         is_leader: bool,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         if is_leader and self._should_discover(settings):
             hostname_value = str(settings.adapter.hostname).strip()
             if hostname_value != "":
@@ -606,7 +606,7 @@ class CmtsOrchestratorLauncher:
         self,
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         result = CmtsInventoryDiscoveryService.run_discovery(
             cmts_hostname=settings.adapter.hostname,
             read_community=settings.adapter.community,
@@ -645,7 +645,10 @@ class CmtsOrchestratorLauncher:
         snapshot_path = inventory_dir / "discovery.json"
         snapshot_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
 
-    def _build_config_service_groups(self, settings: CmtsOrchestratorSettings) -> tuple[list[ServiceGroupId], str]:
+    def _build_config_service_groups(
+        self,
+        settings: CmtsOrchestratorSettings,
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         enabled_ids: list[ServiceGroupId] = []
         for entry in settings.service_groups:
             if not entry.enabled:

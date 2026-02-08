@@ -22,7 +22,7 @@ from pypnm_cmts.lib.types import (
 from pypnm_cmts.orchestrator.launcher import CmtsOrchestratorLauncher
 from pypnm_cmts.orchestrator.models import WorkResultModel
 from pypnm_cmts.orchestrator.runtime import CmtsOrchestratorRuntime
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.types.orchestrator_types import InventorySource, OrchestratorMode
 
 
 def _write_system_config(path: Path) -> None:
@@ -168,10 +168,10 @@ def test_run_forever_updates_service_groups_after_leader(
         settings: CmtsOrchestratorSettings,
         state_dir: Path,
         is_leader: bool,
-    ) -> tuple[list[ServiceGroupId], str]:
+    ) -> tuple[list[ServiceGroupId], InventorySource]:
         if is_leader:
-            return ([ServiceGroupId(2)], "config")
-        return ([ServiceGroupId(1)], "config")
+            return ([ServiceGroupId(2)], InventorySource.CONFIG)
+        return ([ServiceGroupId(1)], InventorySource.CONFIG)
 
     monkeypatch.setattr(
         "pypnm_cmts.orchestrator.launcher.CmtsOrchestratorLauncher._build_controller_service_groups",

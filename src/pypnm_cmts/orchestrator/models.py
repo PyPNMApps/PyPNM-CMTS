@@ -17,7 +17,7 @@ from pypnm_cmts.lib.types import (
     ServiceGroupId,
     TickIndex,
 )
-from pypnm_cmts.types.orchestrator_types import OrchestratorMode
+from pypnm_cmts.types.orchestrator_types import InventorySource, OrchestratorMode
 
 SGW_LAST_ERROR_MAX_LENGTH = 256
 
@@ -27,7 +27,10 @@ class ServiceGroupInventoryModel(BaseModel):
 
     sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service group identifiers included in the inventory.")
     count: int = Field(default=0, description="Total number of service groups in the inventory.")
-    source: str = Field(default="", description="Inventory source label (config or worker input).")
+    source: InventorySource = Field(
+        default=InventorySource.CONFIG,
+        description="Inventory source label: config, discovery, or worker.",
+    )
 
 
 class WorkStatus(str, Enum):

@@ -27,8 +27,17 @@ class ShardMode(str, Enum):
     SCORE = "score"
 
 
+class InventorySource(str, Enum):
+    """Inventory origin for orchestrator service-group lists."""
+
+    CONFIG = "config"
+    DISCOVERY = "discovery"
+    WORKER = "worker"
+
+
 __all__ = [
     "AdapterKind",
+    "InventorySource",
     "OrchestratorMode",
     "ShardMode",
 ]
