@@ -1,42 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 Maurice Garcia
+# Copyright (c) 2026 Maurice Garcia
 
-"""PyPNM-CMTS pnm/data_type package."""
+"""CMTS UTSC PNM table data types."""
 from __future__ import annotations
 
-from .bulk_data_transfer_cfg_entry import (
-    DocsPnmBulkDataTransferCfgEntry,
-    DocsPnmBulkDataTransferCfgRecord,
-)
-from .ofdma_rxmer_entry import (
-    DocsPnmCmtsUsOfdmaRxMerEntry,
-    DocsPnmCmtsUsOfdmaRxMerRecord,
-)
-from .utsc import (
+from pypnm_cmts.pnm.data_type.utsc.capab_entry import (
     DocsPnmCmtsUtscCapabEntry,
-    DocsPnmCmtsUtscCapabOutputFormatBit,
     DocsPnmCmtsUtscCapabRecord,
+)
+from pypnm_cmts.pnm.data_type.utsc.cfg_entry import (
+    DocsPnmCmtsUtscCfgEntry,
+    DocsPnmCmtsUtscCfgRecord,
+)
+from pypnm_cmts.pnm.data_type.utsc.ctrl_entry import (
+    DocsPnmCmtsUtscCtrlEntry,
+    DocsPnmCmtsUtscCtrlRecord,
+)
+from pypnm_cmts.pnm.data_type.utsc.enums import (
+    DocsPnmCmtsUtscCapabOutputFormatBit,
     DocsPnmCmtsUtscCapabTriggerModeBit,
     DocsPnmCmtsUtscCapabWindowBit,
     DocsPnmCmtsUtscCfgBurstIuc,
-    DocsPnmCmtsUtscCfgEntry,
     DocsPnmCmtsUtscCfgOutputFormat,
-    DocsPnmCmtsUtscCfgRecord,
     DocsPnmCmtsUtscCfgTriggerMode,
     DocsPnmCmtsUtscCfgWindow,
-    DocsPnmCmtsUtscCtrlEntry,
-    DocsPnmCmtsUtscCtrlRecord,
+)
+from pypnm_cmts.pnm.data_type.utsc.result_entry import (
     DocsPnmCmtsUtscResultEntry,
     DocsPnmCmtsUtscResultRecord,
+)
+from pypnm_cmts.pnm.data_type.utsc.status_entry import (
     DocsPnmCmtsUtscStatusEntry,
     DocsPnmCmtsUtscStatusRecord,
 )
 
 __all__ = [
-    "DocsPnmBulkDataTransferCfgEntry",
-    "DocsPnmBulkDataTransferCfgRecord",
-    "DocsPnmCmtsUsOfdmaRxMerEntry",
-    "DocsPnmCmtsUsOfdmaRxMerRecord",
     "DocsPnmCmtsUtscCapabEntry",
     "DocsPnmCmtsUtscCapabOutputFormatBit",
     "DocsPnmCmtsUtscCapabRecord",

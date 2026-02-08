@@ -54,3 +54,8 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 - Except Python special methods (for example `__init__`), place private methods at the bottom of the class.
 - This applies to methods prefixed with `_`, `__`, or more leading underscores.
 - Methods with three or more leading underscores (for example `___helper`) must include a docstring that states they are internal-only and must not be used outside the class.
+
+## Import Style Rule
+
+- Use absolute package imports in source files.
+- Do not use relative imports such as `from .module import ...`.
