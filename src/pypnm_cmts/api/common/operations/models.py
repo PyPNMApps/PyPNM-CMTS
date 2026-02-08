@@ -113,6 +113,14 @@ class OperationRequestContextModel(BaseModel):
         default=None,
         description="Optional SNMP write community override.",
     )
+    const_display_modulation_order_offset: int | None = Field(
+        default=None,
+        description="Optional modulation-order offset override for constellation display capture.",
+    )
+    const_display_number_sample_symbol: int | None = Field(
+        default=None,
+        description="Optional sample-symbol count override for constellation display capture.",
+    )
 
 
 class OperationErrorSummaryModel(BaseModel):

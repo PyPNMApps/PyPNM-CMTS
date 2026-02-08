@@ -19,6 +19,9 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.api.routes.docs.pnm.ds.ofdm.const_display.service import (
     CmDsOfdmConstDisplayService,
 )
+from pypnm.docsis.data_type.DsCmConstDisplay import (
+    CmDsConstellationDisplayConst as ConstDisplayConstant,
+)
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
@@ -76,7 +79,7 @@ from pypnm_cmts.sgw.store import SgwCacheStore
 
 # TODO: Define proper types for TFTP servers IPv4/IPv6 addresses
 CaptureExecutor = Callable[
-    [CableModem, DownstreamOfdmParameters | None, tuple[Inet, Inet], str],
+    [CableModem, DownstreamOfdmParameters | None, tuple[Inet, Inet], str, int, int],
     MessageResponse,
 ]
 
@@ -157,7 +160,20 @@ class ConstDisplayCaptureWorker(PnmCaptureWorkerBase):
             str(tftp_servers[1]),
             tftp_path,
         )
-        capture_response = self._capture_executor(cable_modem, interface_parameters, tftp_servers, tftp_path)
+        modulation_order_offset = ConstDisplayConstant.MODULATION_OFFSET.value
+        number_sample_symbol = ConstDisplayConstant.NUM_SAMPLE_SYMBOL.value
+        if request_context is not None and request_context.const_display_modulation_order_offset is not None:
+            modulation_order_offset = int(request_context.const_display_modulation_order_offset)
+        if request_context is not None and request_context.const_display_number_sample_symbol is not None:
+            number_sample_symbol = int(request_context.const_display_number_sample_symbol)
+        capture_response = self._capture_executor(
+            cable_modem,
+            interface_parameters,
+            tftp_servers,
+            tftp_path,
+            modulation_order_offset,
+            number_sample_symbol,
+        )
         status_code, transaction_id, filename, message = PnmCaptureHelper.parse_capture_response(
             response=capture_response,
             expected_message_type=MessageResponseType.PNM_FILE_TRANSACTION.name,
@@ -203,8 +219,16 @@ class ConstDisplayCaptureExecutor:
         interface_parameters: DownstreamOfdmParameters | None,
         tftp_servers: tuple[Inet, Inet],
         tftp_path: str,
+        modulation_order_offset: int,
+        number_sample_symbol: int,
     ) -> MessageResponse:
-        service = CmDsOfdmConstDisplayService(cable_modem, tftp_servers, tftp_path)
+        service = CmDsOfdmConstDisplayService(
+            cable_modem,
+            modulation_order_offset=modulation_order_offset,
+            number_sample_symbol=number_sample_symbol,
+            tftp_servers=tftp_servers,
+            tftp_path=tftp_path,
+        )
         return PnmAsyncioRunner.run_on_isolated_event_loop(
             service.set_and_go(interface_parameters=interface_parameters)
         )
@@ -257,10 +281,13 @@ class ConstDisplayServiceGroupOperationService(PnmServiceGroupOperationServiceBa
         tftp = pnm.tftp if pnm is not None else None
         snmp = cmts.cable_modem.snmp
         snmp_v2c = snmp.snmpV2C if snmp is not None else None
+        capture_settings = request.capture_settings
         return OperationRequestContextModel(
             tftp_ipv4=tftp.ipv4 if tftp is not None else None,
             tftp_ipv6=tftp.ipv6 if tftp is not None else None,
             snmp_write_community=snmp_v2c.community if snmp_v2c is not None else None,
+            const_display_modulation_order_offset=capture_settings.modulation_order_offset,
+            const_display_number_sample_symbol=capture_settings.number_sample_symbol,
         )
 
     @staticmethod

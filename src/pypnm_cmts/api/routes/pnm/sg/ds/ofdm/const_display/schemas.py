@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.docsis.data_type.DsCmConstDisplay import (
+    CmDsConstellationDisplayConst as ConstDisplayConstant,
+)
 
 from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
 from pypnm_cmts.api.common.operations.models import (
@@ -43,6 +46,19 @@ class ConstDisplayServiceGroupExecutionModel(BaseModel):
     )
 
 
+class ConstellationDisplaySettingsModel(BaseModel):
+    """Capture settings for downstream OFDM constellation display."""
+
+    modulation_order_offset: int = Field(
+        default=ConstDisplayConstant.MODULATION_OFFSET.value,
+        description="Modulation-order offset override for constellation display capture.",
+    )
+    number_sample_symbol: int = Field(
+        default=ConstDisplayConstant.NUM_SAMPLE_SYMBOL.value,
+        description="Number of symbols to sample during constellation display capture.",
+    )
+
+
 class ConstDisplayServiceGroupStartCaptureRequest(BaseModel):
     """Request payload for SG-level ConstDisplay startCapture."""
 
@@ -52,6 +68,10 @@ class ConstDisplayServiceGroupStartCaptureRequest(BaseModel):
     execution: ConstDisplayServiceGroupExecutionModel = Field(
         default_factory=ConstDisplayServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
+    )
+    capture_settings: ConstellationDisplaySettingsModel = Field(
+        default_factory=ConstellationDisplaySettingsModel,
+        description="Constellation display capture settings.",
     )
 
 
@@ -101,6 +121,7 @@ class ConstDisplayServiceGroupResultsResponse(BaseModel):
 
 
 __all__ = [
+    "ConstellationDisplaySettingsModel",
     "ConstDisplayServiceGroupCancelResponse",
     "ConstDisplayServiceGroupExecutionModel",
     "ConstDisplayServiceGroupOperationRequest",
