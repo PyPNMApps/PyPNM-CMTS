@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 
 from pypnm.api.routes.common.classes.operation.cable_modem_precheck import (
@@ -41,14 +40,16 @@ from pypnm_cmts.api.common.operations.models import (
 )
 from pypnm_cmts.api.common.operations.runner import (
     OperationRunner,
-    OperationWorkerResultModel,
     OperationWorkItemModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
 from pypnm_cmts.api.common.service.pnm.asyncio_runner import PnmAsyncioRunner
 from pypnm_cmts.api.common.service.pnm.capture import PnmCaptureHelper
+from pypnm_cmts.api.common.service.pnm.capture_worker import (
+    PnmCaptureWorkerBase,
+    PrecheckExecutor,
+)
 from pypnm_cmts.api.common.service.pnm.constants import (
-    MISSING_IP_MESSAGE,
     MISSING_TRANSACTION_MESSAGE,
     NO_MESSAGE_RESPONSE,
     PRECHECK_FAILURE_MESSAGE,
@@ -71,14 +72,14 @@ from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 from pypnm_cmts.sgw.runtime_state import get_sgw_store
 from pypnm_cmts.sgw.store import SgwCacheStore
 
+# TODO: Define proper types for TFTP servers IPv4/IPv6 addresses
 CaptureExecutor = Callable[
     [CableModem, DownstreamOfdmParameters | None, tuple[Inet, Inet], str],
     MessageResponse,
 ]
-PrecheckExecutor = Callable[[CableModem], tuple[ServiceStatusCode, str]]
 
 
-class RxMerCaptureWorker:
+class RxMerCaptureWorker(PnmCaptureWorkerBase):
     """Execute eligibility, precheck, and capture stages for a single modem."""
 
     def __init__(
@@ -88,115 +89,29 @@ class RxMerCaptureWorker:
         precheck_executor: PrecheckExecutor,
         sgw_store: SgwCacheStore | None,
     ) -> None:
-        self._store = store
+        super().__init__(store=store, precheck_executor=precheck_executor)
         self._capture_executor = capture_executor
-        self._precheck_executor = precheck_executor
         self._sgw_store = sgw_store
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
 
-    def __call__(self, item: OperationWorkItemModel) -> OperationWorkerResultModel:
-        """Run eligibility, precheck, and capture for a modem work item."""
-        self.logger.info(
-            "RxMER-Worker [START] operation_id=%s, sg_id=%s, mac=%s, attempt=%s",
-            item.operation_id,
-            item.sg_id,
-            item.mac_address,
-            item.attempt,
-        )
-        state = self._store.load_state(item.operation_id)
-        request_summary = state.request_summary
-        request_context = self._store.load_request_context(item.operation_id)
-        ip_address = self._resolve_modem_ip(item.sg_id, item.mac_address)
-        now_epoch = PnmCaptureHelper.now_epoch()
-        stages: list[OperationStageResultModel] = []
-        eligibility_result = OperationStageResultModel(
-            stage=OperationStage.ELIGIBILITY,
-            status_code=ServiceStatusCode.SUCCESS if ip_address is not None else ServiceStatusCode.INVALID_CAPTURE_PARAMETERS,
-            transaction_ids=[],
-            filenames=[],
-            message="" if ip_address is not None else MISSING_IP_MESSAGE,
-            started_epoch=now_epoch,
-            finished_epoch=now_epoch,
-        )
-        stages.append(eligibility_result)
-        if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
-            self.logger.info(
-                "RxMER-Worker [ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                item.operation_id,
-                item.sg_id,
-                item.mac_address,
-                eligibility_result.status_code.value,
-                eligibility_result.message,
-            )
-            return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
+    @property
+    def _worker_log_prefix(self) -> str:
+        return "RxMER-Worker"
 
-        write_community = PnmModemResolver.resolve_write_community(request_context)
-        community_source = "request_override"
-        if request_context is None or request_context.snmp_write_community is None:
-            community_source = "system_default"
-        precheck_cm = PnmModemResolver.build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
-            write_community=write_community,
-        )
-        self.logger.info(
-            "RxMER-Worker [PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s community=%s",
-            item.operation_id,
-            item.sg_id,
-            item.mac_address,
-            ip_address,
-            community_source,
-            write_community,
-        )
-        precheck_status, precheck_message = self._precheck_executor(precheck_cm)
-        precheck_result = OperationStageResultModel(
-            stage=OperationStage.PRECHECK,
-            status_code=precheck_status,
-            transaction_ids=[],
-            filenames=[],
-            message=precheck_message,
-            started_epoch=now_epoch,
-            finished_epoch=now_epoch,
-        )
-        stages.append(precheck_result)
-        if precheck_status != ServiceStatusCode.SUCCESS:
-            self.logger.info(
-                "RxMER-Worker [PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                item.operation_id,
-                item.sg_id,
-                item.mac_address,
-                precheck_status.value,
-                precheck_message,
-            )
-            return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
-
-        # Use a fresh CableModem instance for capture. The precheck executes in a
-        # separate asyncio lifecycle and may close loop-bound SNMP transports.
-        capture_cm = PnmModemResolver.build_cable_modem(
-            mac_address=item.mac_address,
-            ip_address=ip_address,
-            write_community=write_community,
-        )
-        capture_result = self._run_capture(
+    def _run_capture_stage(
+        self,
+        item: OperationWorkItemModel,
+        request_summary: OperationRequestSummaryModel,
+        request_context: OperationRequestContextModel | None,
+        cable_modem: CableModem,
+    ) -> OperationStageResultModel:
+        return self._run_capture(
             operation_id=item.operation_id,
             sg_id=item.sg_id,
             mac_address=item.mac_address,
-            cable_modem=capture_cm,
+            cable_modem=cable_modem,
             channel_ids=list(request_summary.channel_ids),
             request_context=request_context,
         )
-        stages.append(capture_result)
-        self.logger.info(
-            "RxMER-Worker [COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
-            item.operation_id,
-            item.sg_id,
-            item.mac_address,
-            capture_result.status_code.value,
-            capture_result.message,
-            len(capture_result.transaction_ids),
-            len(capture_result.filenames),
-        )
-        return OperationWorkerResultModel(ip_address=ip_address, stages=stages)
 
     def _resolve_modem_ip(
         self,
@@ -209,7 +124,7 @@ class RxMerCaptureWorker:
             sg_id=sg_id,
             mac_address=mac_address,
             logger=self.logger,
-            log_prefix="RxMER-Worker",
+            log_prefix=self._worker_log_prefix,
         )
         if self._sgw_store is None and store is not None:
             self._sgw_store = store
