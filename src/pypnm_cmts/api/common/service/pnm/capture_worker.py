@@ -45,8 +45,7 @@ class PnmCaptureWorkerBase(ABC):
     def __call__(self, item: OperationWorkItemModel) -> OperationWorkerResultModel:
         """Execute eligibility, precheck, and capture stages for a modem work item."""
         self.logger.info(
-            "%s [START] operation_id=%s, sg_id=%s, mac=%s, attempt=%s",
-            self._worker_log_prefix,
+            "[START] operation_id=%s, sg_id=%s, mac=%s, attempt=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -71,8 +70,7 @@ class PnmCaptureWorkerBase(ABC):
         stages.append(eligibility_result)
         if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "%s [ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                self._worker_log_prefix,
+                "[ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -91,8 +89,7 @@ class PnmCaptureWorkerBase(ABC):
             write_community=write_community,
         )
         self.logger.info(
-            "%s [PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s community=%s",
-            self._worker_log_prefix,
+            "[PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s community=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -113,8 +110,7 @@ class PnmCaptureWorkerBase(ABC):
         stages.append(precheck_result)
         if precheck_status != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "%s [PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                self._worker_log_prefix,
+                "[PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
                 item.operation_id,
                 item.sg_id,
                 item.mac_address,
@@ -137,8 +133,7 @@ class PnmCaptureWorkerBase(ABC):
         )
         stages.append(capture_result)
         self.logger.info(
-            "%s [COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
-            self._worker_log_prefix,
+            "[COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
@@ -177,4 +172,3 @@ __all__ = [
     "PnmCaptureWorkerBase",
     "PrecheckExecutor",
 ]
-
