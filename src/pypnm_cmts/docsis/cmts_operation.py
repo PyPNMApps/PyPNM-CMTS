@@ -54,6 +54,10 @@ from pypnm_cmts.lib.types import (
     RegisterCmInetAddress,
     RegisterCmMacInetAddress,
 )
+from pypnm_cmts.pnm.data_type.bulk_data_transfer_cfg_entry import (
+    DocsPnmBulkDataTransferCfgEntry,
+    DocsPnmBulkDataTransferCfgRecord,
+)
 
 DEFAULT_MD_CM_SG_ID: MdCmSgId = MdCmSgId(0)
 DEFAULT_CM_REG_SG_ID: CmRegSgId = CmRegSgId(0)
@@ -111,61 +115,6 @@ class CmtsOperation:
         self._community: str = write_community
         self._port: int = port
         self._snmp = self.__load_snmp_version() if snmp is None else snmp
-
-    def __load_snmp_version(self) -> Snmp_v2c:
-        return Snmp_v2c(host=self._inet, community=self._community, port=self._port)
-
-    @staticmethod
-    def __oid0(oid: str) -> str:
-        if oid.endswith(".0"):
-            return oid
-        return f"{oid}.0"
-
-    @staticmethod
-    def __get_result_value(result: object) -> str | None:
-        if isinstance(result, list):
-            if not result:
-                return None
-            return Snmp_v2c.get_result_value(result[0])
-        return Snmp_v2c.get_result_value(result)  # type: ignore[arg-type]
-
-    @staticmethod
-    def __get_varbind_value(varbind: object) -> str | None:
-        if isinstance(varbind, tuple) and len(varbind) >= 2:
-            value = varbind[1]
-            pretty = getattr(value, "prettyPrint", None)
-            if callable(pretty):
-                return pretty()
-            if isinstance(value, (bytes, bytearray)):
-                return value.decode("ascii", errors="ignore")
-            return str(value)
-        return Snmp_v2c.get_result_value(varbind)  # type: ignore[arg-type]
-
-    async def __snmp_get_str(self, oid: str) -> str:
-        oid0 = self.__oid0(oid)
-        try:
-            result = await self._snmp.get(oid0)
-        except Exception as exc:
-            self.logger.error(f"SNMP get failed for {oid0}: {exc}")
-            return ""
-
-        if not result:
-            return ""
-
-        raw_value = self.__get_result_value(result)
-        if not raw_value:
-            return ""
-
-        return str(raw_value)
-
-    async def __snmp_get_int(self, oid: str) -> int:
-        raw_value = await self.__snmp_get_str(oid)
-        if raw_value == "":
-            return 0
-        try:
-            return int(raw_value)
-        except (TypeError, ValueError):
-            return 0
 
     async def getSysDescr(self) -> CmtsSysDescrModel:
         """
@@ -378,223 +327,6 @@ class CmtsOperation:
 
         return (False, DEFAULT_CM_REG_SG_ID)
 
-    async def __collect_md_node_status(self, oid_base: str) -> list[MdNodeStatus]:
-        """
-        Collect node status entries from the provided OID base.
-        """
-        results: list[MdNodeStatus] = []
-        try:
-            result = await self._snmp.walk(oid_base)
-        except Exception as exc:
-            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
-            return results
-        if not result:
-            return results
-
-        values = Snmp_v2c.snmp_get_result_value(result)
-
-        if not values:
-            return results
-
-        limit = len(result)
-        if len(values) < limit:
-            limit = len(values)
-
-        for idx in range(limit):
-            parsed = self.__parse_md_node_status_oid(oid_base, result[idx][0])
-            if parsed is None:
-                continue
-            interface_index, node_name = parsed
-            try:
-                sg_id_value = int(values[idx])
-            except (TypeError, ValueError):
-                continue
-
-            results.append((interface_index, node_name, MdCmSgId(sg_id_value)))
-
-        return results
-
-    def __parse_md_node_status_oid(
-        self, oid_base: str, oid_value: object
-    ) -> tuple[InterfaceIndex, NodeName] | None:
-        """
-        Parse the OID suffix for docsIf3MdNodeStatus entries.
-        """
-        try:
-            base_str = Snmp_v2c.resolve_oid(oid_base)
-            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
-            oid_tuple = tuple(oid_value)
-        except (TypeError, ValueError) as exc:
-            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
-            return None
-
-        if len(oid_tuple) <= len(base_tuple) + 2:
-            return None
-
-        suffix = oid_tuple[len(base_tuple):]
-        if len(suffix) < 3:
-            return None
-
-        interface_index = suffix[0]
-        name_len = suffix[1]
-        if not isinstance(interface_index, int) or not isinstance(name_len, int):
-            return None
-
-        if name_len < 0:
-            return None
-
-        if len(suffix) < 2 + name_len + 1:
-            return None
-
-        name_bytes = bytes(suffix[2:2 + name_len])
-        try:
-            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
-        except Exception as exc:
-            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
-            return None
-
-        return (InterfaceIndex(int(interface_index)), node_name)
-
-    def __parse_md_node_status_oid_with_sg_id(
-        self, oid_base: str, oid_value: object
-    ) -> tuple[InterfaceIndex, NodeName, CmRegSgId] | None:
-        """
-        Parse the OID suffix and return the CM registration SG ID.
-        """
-        try:
-            base_str = Snmp_v2c.resolve_oid(oid_base)
-            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
-            oid_tuple = tuple(oid_value)
-        except (TypeError, ValueError) as exc:
-            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
-            return None
-
-        if len(oid_tuple) <= len(base_tuple) + 2:
-            return None
-
-        suffix = oid_tuple[len(base_tuple):]
-        if len(suffix) < 3:
-            return None
-
-        interface_index = suffix[0]
-        name_len = suffix[1]
-        if not isinstance(interface_index, int) or not isinstance(name_len, int):
-            return None
-
-        if name_len < 0:
-            return None
-
-        if len(suffix) < 2 + name_len + 1:
-            return None
-
-        name_bytes = bytes(suffix[2:2 + name_len])
-        try:
-            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
-        except Exception as exc:
-            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
-            return None
-
-        cm_reg_sg_id = suffix[2 + name_len]
-        if not isinstance(cm_reg_sg_id, int):
-            return None
-
-        return (InterfaceIndex(int(interface_index)), node_name, CmRegSgId(cm_reg_sg_id))
-
-    def __parse_md_node_status_key(
-        self, oid_base: str, oid_value: object
-    ) -> MdNodeStatus | None:
-        """
-        Parse the OID suffix for docsIf3MdNodeStatus entries.
-
-        Index:
-            ifIndex,
-            docsIf3MdNodeStatusNodeName (OCTET STRING),
-            docsIf3MdNodeStatusMdCmSgId (Unsigned32)
-        """
-        try:
-            base_str = Snmp_v2c.resolve_oid(oid_base)
-            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
-            oid_tuple = tuple(oid_value)
-        except (TypeError, ValueError) as exc:
-            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
-            return None
-
-        if len(oid_tuple) <= len(base_tuple) + 2:
-            return None
-
-        suffix = oid_tuple[len(base_tuple):]
-        if len(suffix) < 4:
-            return None
-
-        interface_index = suffix[0]
-        name_len = suffix[1]
-        if not isinstance(interface_index, int) or not isinstance(name_len, int):
-            return None
-
-        if name_len < 0:
-            return None
-
-        name_end = 2 + name_len
-        if len(suffix) <= name_end:
-            return None
-
-        name_bytes = bytes(suffix[2:name_end])
-        try:
-            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
-        except Exception as exc:
-            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
-            return None
-
-        md_cm_sg_id_raw = suffix[name_end]
-        if not isinstance(md_cm_sg_id_raw, int):
-            return None
-
-        return (
-            InterfaceIndex(int(interface_index)),
-            node_name,
-            MdCmSgId(int(md_cm_sg_id_raw)),
-        )
-
-    async def __collect_md_node_status_value(
-        self, oid_base: str
-    ) -> list[tuple[MdNodeStatus, int]]:
-        """
-        Collect MD node status (key, value) for the provided OID base.
-
-        The value is the walked column value (MD-DS-SG-ID or MD-US-SG-ID).
-        """
-        results: list[tuple[MdNodeStatus, int]] = []
-        try:
-            walk_results = await self._snmp.walk(oid_base)
-        except Exception as exc:
-            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
-            return results
-
-        if not walk_results:
-            return results
-
-        values = Snmp_v2c.snmp_get_result_value(walk_results)
-        if not values:
-            return results
-
-        limit = len(walk_results)
-        if len(values) < limit:
-            limit = len(values)
-
-        for idx in range(limit):
-            parsed_key = self.__parse_md_node_status_key(oid_base, walk_results[idx][0])
-            if parsed_key is None:
-                continue
-            if not isinstance(values[idx], (int, str)):
-                continue
-            try:
-                col_value = int(values[idx])
-            except (TypeError, ValueError):
-                continue
-            results.append((parsed_key, col_value))
-
-        return results
-
     async def listServiceGroups(self) -> list[CmtsServiceGroupModel]:
         """
         Enumerate service groups using DOCS-IF3 MD Node Status.
@@ -650,114 +382,6 @@ class CmtsOperation:
             key=lambda key: (key.if_index, key.node_name, key.md_cm_sg_id),
         )
         return [merged[k] for k in sorted_keys]
-
-    @staticmethod
-    def __parse_channel_list(raw_value: str) -> list[ChannelId]:
-        text = raw_value
-        if isinstance(raw_value, (bytes, bytearray)):
-            text = raw_value.decode("ascii", errors="ignore")
-        else:
-            text = str(raw_value)
-
-        if text.startswith("0x"):
-            hex_str = text[2:]
-            if len(hex_str) % 2 == 0:
-                try:
-                    raw_bytes = bytes.fromhex(hex_str)
-                    return [ChannelId(byte) for byte in raw_bytes]
-                except ValueError:
-                    pass
-
-        numbers = re.findall(r"\d+", text)
-        return [ChannelId(int(value)) for value in numbers]
-
-    async def __collect_ch_set_id_map(
-        self, oid_base: str
-    ) -> dict[_ServiceGroupChSetKey, ChSetId]:
-        ch_set_map: dict[_ServiceGroupChSetKey, ChSetId] = {}
-        try:
-            walk_results = await self._snmp.walk(oid_base)
-        except Exception as exc:
-            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
-            return ch_set_map
-
-        if not walk_results:
-            return ch_set_map
-
-        base_str = Snmp_v2c.resolve_oid(oid_base)
-        base_prefix = f"{base_str}."
-        for idx in range(len(walk_results)):
-            oid_value = walk_results[idx][0]
-            oid_str = str(oid_value).lstrip(".")
-            if not oid_str.startswith(base_prefix):
-                continue
-
-            suffix_str = oid_str[len(base_prefix):]
-            parts = suffix_str.split(".")
-            if len(parts) < 2:
-                continue
-
-            try:
-                if_index = int(parts[0])
-                sg_id = int(parts[1])
-            except (TypeError, ValueError):
-                continue
-
-            try:
-                raw_value = self.__get_varbind_value(walk_results[idx])
-                if raw_value is None:
-                    continue
-                ch_set_id = int(str(raw_value))
-            except (TypeError, ValueError):
-                continue
-
-            ch_set_map[_ServiceGroupChSetKey(int(if_index), int(sg_id))] = ChSetId(
-                ch_set_id
-            )
-
-        return ch_set_map
-
-    async def __collect_channel_list_map(
-        self, oid_base: str
-    ) -> dict[_ServiceGroupChSetKey, list[ChannelId]]:
-        channel_map: dict[_ServiceGroupChSetKey, list[ChannelId]] = {}
-        try:
-            walk_results = await self._snmp.walk(oid_base)
-        except Exception as exc:
-            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
-            return channel_map
-
-        if not walk_results:
-            return channel_map
-
-        base_str = Snmp_v2c.resolve_oid(oid_base)
-        base_prefix = f"{base_str}."
-        for idx in range(len(walk_results)):
-            oid_value = walk_results[idx][0]
-            oid_str = str(oid_value).lstrip(".")
-            if not oid_str.startswith(base_prefix):
-                continue
-
-            suffix_str = oid_str[len(base_prefix):]
-            parts = suffix_str.split(".")
-            if len(parts) < 2:
-                continue
-
-            try:
-                if_index = int(parts[0])
-                ch_set_id = int(parts[1])
-            except (TypeError, ValueError):
-                continue
-
-            raw_value = self.__get_varbind_value(walk_results[idx])
-            if raw_value is None:
-                continue
-
-            channels = self.__parse_channel_list(str(raw_value))
-
-            channel_map[_ServiceGroupChSetKey(int(if_index), int(ch_set_id))] = channels
-
-        return channel_map
 
     async def getDocsIf3MdDsSgStatusChSetId(
         self,
@@ -1075,6 +699,36 @@ class CmtsOperation:
         except Exception as exc:
             self.logger.error(f"Failed to retrieve upstream OFDMA channel entries: {exc}")
             return []
+
+    async def getDocsPnmBulkDataTransferCfgRecord(self) -> list[DocsPnmBulkDataTransferCfgRecord]:
+        """
+        Fetch docsPnmBulkDataTransferCfg table records.
+        """
+        try:
+            return await DocsPnmBulkDataTransferCfgRecord.get_all(self._snmp)
+        except Exception as exc:
+            self.logger.error(f"Failed to retrieve docsPnmBulkDataTransferCfg records: {exc}")
+            return []
+
+    async def setDocsPnmBulkDataTransferCfgRecord(
+        self,
+        index: int,
+        entry: DocsPnmBulkDataTransferCfgEntry,
+    ) -> bool:
+        """
+        Set writable docsPnmBulkDataTransferCfg fields for a table row.
+        """
+        try:
+            return await DocsPnmBulkDataTransferCfgRecord.set(
+                snmp=self._snmp,
+                index=index,
+                entry=entry,
+            )
+        except Exception as exc:
+            self.logger.error(
+                f"Failed to set docsPnmBulkDataTransferCfg record at index {index}: {exc}"
+            )
+            return False
 
     async def getdocsIf3CmtsCmRegStatusMdCmSgIdViaMacAddress(self, mac: MacAddress) -> tuple[MacAddressExist, MdCmSgId]:
         """
@@ -1477,6 +1131,386 @@ class CmtsOperation:
             MacAddressExist(True),
             (ipv4_value, ipv6_value, ipv6_ll_value),
         )
+
+    def __load_snmp_version(self) -> Snmp_v2c:
+        return Snmp_v2c(host=self._inet, community=self._community, port=self._port)
+
+    @staticmethod
+    def __oid0(oid: str) -> str:
+        if oid.endswith(".0"):
+            return oid
+        return f"{oid}.0"
+
+    @staticmethod
+    def __get_result_value(result: object) -> str | None:
+        if isinstance(result, list):
+            if not result:
+                return None
+            return Snmp_v2c.get_result_value(result[0])
+        return Snmp_v2c.get_result_value(result)  # type: ignore[arg-type]
+
+    @staticmethod
+    def __get_varbind_value(varbind: object) -> str | None:
+        if isinstance(varbind, tuple) and len(varbind) >= 2:
+            value = varbind[1]
+            pretty = getattr(value, "prettyPrint", None)
+            if callable(pretty):
+                return pretty()
+            if isinstance(value, (bytes, bytearray)):
+                return value.decode("ascii", errors="ignore")
+            return str(value)
+        return Snmp_v2c.get_result_value(varbind)  # type: ignore[arg-type]
+
+    async def __snmp_get_str(self, oid: str) -> str:
+        oid0 = self.__oid0(oid)
+        try:
+            result = await self._snmp.get(oid0)
+        except Exception as exc:
+            self.logger.error(f"SNMP get failed for {oid0}: {exc}")
+            return ""
+
+        if not result:
+            return ""
+
+        raw_value = self.__get_result_value(result)
+        if not raw_value:
+            return ""
+
+        return str(raw_value)
+
+    async def __snmp_get_int(self, oid: str) -> int:
+        raw_value = await self.__snmp_get_str(oid)
+        if raw_value == "":
+            return 0
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return 0
+
+    async def __collect_md_node_status(self, oid_base: str) -> list[MdNodeStatus]:
+        """
+        Collect node status entries from the provided OID base.
+        """
+        results: list[MdNodeStatus] = []
+        try:
+            result = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+        if not result:
+            return results
+
+        values = Snmp_v2c.snmp_get_result_value(result)
+
+        if not values:
+            return results
+
+        limit = len(result)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            parsed = self.__parse_md_node_status_oid(oid_base, result[idx][0])
+            if parsed is None:
+                continue
+            interface_index, node_name = parsed
+            try:
+                sg_id_value = int(values[idx])
+            except (TypeError, ValueError):
+                continue
+
+            results.append((interface_index, node_name, MdCmSgId(sg_id_value)))
+
+        return results
+
+    def __parse_md_node_status_oid(
+        self, oid_base: str, oid_value: object
+    ) -> tuple[InterfaceIndex, NodeName] | None:
+        """
+        Parse the OID suffix for docsIf3MdNodeStatus entries.
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 3:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        if len(suffix) < 2 + name_len + 1:
+            return None
+
+        name_bytes = bytes(suffix[2:2 + name_len])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        return (InterfaceIndex(int(interface_index)), node_name)
+
+    def __parse_md_node_status_oid_with_sg_id(
+        self, oid_base: str, oid_value: object
+    ) -> tuple[InterfaceIndex, NodeName, CmRegSgId] | None:
+        """
+        Parse the OID suffix and return the CM registration SG ID.
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 3:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        if len(suffix) < 2 + name_len + 1:
+            return None
+
+        name_bytes = bytes(suffix[2:2 + name_len])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        cm_reg_sg_id = suffix[2 + name_len]
+        if not isinstance(cm_reg_sg_id, int):
+            return None
+
+        return (InterfaceIndex(int(interface_index)), node_name, CmRegSgId(cm_reg_sg_id))
+
+    def __parse_md_node_status_key(
+        self, oid_base: str, oid_value: object
+    ) -> MdNodeStatus | None:
+        """
+        Parse the OID suffix for docsIf3MdNodeStatus entries.
+
+        Index:
+            ifIndex,
+            docsIf3MdNodeStatusNodeName (OCTET STRING),
+            docsIf3MdNodeStatusMdCmSgId (Unsigned32)
+        """
+        try:
+            base_str = Snmp_v2c.resolve_oid(oid_base)
+            base_tuple = tuple(int(part) for part in base_str.strip(".").split("."))
+            oid_tuple = tuple(oid_value)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(f"Failed to parse OID tuple for {oid_base}: {exc}")
+            return None
+
+        if len(oid_tuple) <= len(base_tuple) + 2:
+            return None
+
+        suffix = oid_tuple[len(base_tuple):]
+        if len(suffix) < 4:
+            return None
+
+        interface_index = suffix[0]
+        name_len = suffix[1]
+        if not isinstance(interface_index, int) or not isinstance(name_len, int):
+            return None
+
+        if name_len < 0:
+            return None
+
+        name_end = 2 + name_len
+        if len(suffix) <= name_end:
+            return None
+
+        name_bytes = bytes(suffix[2:name_end])
+        try:
+            node_name = NodeName(name_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.logger.error(f"Failed to decode node name for {oid_base}: {exc}")
+            return None
+
+        md_cm_sg_id_raw = suffix[name_end]
+        if not isinstance(md_cm_sg_id_raw, int):
+            return None
+
+        return (
+            InterfaceIndex(int(interface_index)),
+            node_name,
+            MdCmSgId(int(md_cm_sg_id_raw)),
+        )
+
+    async def __collect_md_node_status_value(
+        self, oid_base: str
+    ) -> list[tuple[MdNodeStatus, int]]:
+        """
+        Collect MD node status (key, value) for the provided OID base.
+
+        The value is the walked column value (MD-DS-SG-ID or MD-US-SG-ID).
+        """
+        results: list[tuple[MdNodeStatus, int]] = []
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return results
+
+        if not walk_results:
+            return results
+
+        values = Snmp_v2c.snmp_get_result_value(walk_results)
+        if not values:
+            return results
+
+        limit = len(walk_results)
+        if len(values) < limit:
+            limit = len(values)
+
+        for idx in range(limit):
+            parsed_key = self.__parse_md_node_status_key(oid_base, walk_results[idx][0])
+            if parsed_key is None:
+                continue
+            if not isinstance(values[idx], (int, str)):
+                continue
+            try:
+                col_value = int(values[idx])
+            except (TypeError, ValueError):
+                continue
+            results.append((parsed_key, col_value))
+
+        return results
+
+    @staticmethod
+    def __parse_channel_list(raw_value: str) -> list[ChannelId]:
+        text = raw_value
+        if isinstance(raw_value, (bytes, bytearray)):
+            text = raw_value.decode("ascii", errors="ignore")
+        else:
+            text = str(raw_value)
+
+        if text.startswith("0x"):
+            hex_str = text[2:]
+            if len(hex_str) % 2 == 0:
+                try:
+                    raw_bytes = bytes.fromhex(hex_str)
+                    return [ChannelId(byte) for byte in raw_bytes]
+                except ValueError:
+                    pass
+
+        numbers = re.findall(r"\d+", text)
+        return [ChannelId(int(value)) for value in numbers]
+
+    async def __collect_ch_set_id_map(
+        self, oid_base: str
+    ) -> dict[_ServiceGroupChSetKey, ChSetId]:
+        ch_set_map: dict[_ServiceGroupChSetKey, ChSetId] = {}
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return ch_set_map
+
+        if not walk_results:
+            return ch_set_map
+
+        base_str = Snmp_v2c.resolve_oid(oid_base)
+        base_prefix = f"{base_str}."
+        for idx in range(len(walk_results)):
+            oid_value = walk_results[idx][0]
+            oid_str = str(oid_value).lstrip(".")
+            if not oid_str.startswith(base_prefix):
+                continue
+
+            suffix_str = oid_str[len(base_prefix):]
+            parts = suffix_str.split(".")
+            if len(parts) < 2:
+                continue
+
+            try:
+                if_index = int(parts[0])
+                sg_id = int(parts[1])
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                raw_value = self.__get_varbind_value(walk_results[idx])
+                if raw_value is None:
+                    continue
+                ch_set_id = int(str(raw_value))
+            except (TypeError, ValueError):
+                continue
+
+            ch_set_map[_ServiceGroupChSetKey(int(if_index), int(sg_id))] = ChSetId(
+                ch_set_id
+            )
+
+        return ch_set_map
+
+    async def __collect_channel_list_map(
+        self, oid_base: str
+    ) -> dict[_ServiceGroupChSetKey, list[ChannelId]]:
+        channel_map: dict[_ServiceGroupChSetKey, list[ChannelId]] = {}
+        try:
+            walk_results = await self._snmp.walk(oid_base)
+        except Exception as exc:
+            self.logger.error(f"SNMP walk failed for {oid_base}: {exc}")
+            return channel_map
+
+        if not walk_results:
+            return channel_map
+
+        base_str = Snmp_v2c.resolve_oid(oid_base)
+        base_prefix = f"{base_str}."
+        for idx in range(len(walk_results)):
+            oid_value = walk_results[idx][0]
+            oid_str = str(oid_value).lstrip(".")
+            if not oid_str.startswith(base_prefix):
+                continue
+
+            suffix_str = oid_str[len(base_prefix):]
+            parts = suffix_str.split(".")
+            if len(parts) < 2:
+                continue
+
+            try:
+                if_index = int(parts[0])
+                ch_set_id = int(parts[1])
+            except (TypeError, ValueError):
+                continue
+
+            raw_value = self.__get_varbind_value(walk_results[idx])
+            if raw_value is None:
+                continue
+
+            channels = self.__parse_channel_list(str(raw_value))
+
+            channel_map[_ServiceGroupChSetKey(int(if_index), int(ch_set_id))] = channels
+
+        return channel_map
 
 __all__ = [
     "CmtsOperation",

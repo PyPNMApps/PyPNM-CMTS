@@ -41,3 +41,9 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 
 - Place all PNM SNMP table data type models under `src/pypnm_cmts/pnm/data_type`.
 - Do not place PNM SNMP table data type models under `src/pypnm_cmts/docsis/data_type`.
+
+## Private Method Placement Rule
+
+- Except Python special methods (for example `__init__`), place private methods at the bottom of the class.
+- This applies to methods prefixed with `_`, `__`, or more leading underscores.
+- Methods with three or more leading underscores (for example `___helper`) must include a docstring that states they are internal-only and must not be used outside the class.

@@ -26,6 +26,10 @@ from pypnm_cmts.lib.types import (
     MdUsSgId,
     RegisterCmMacInetAddress,
 )
+from pypnm_cmts.pnm.data_type.bulk_data_transfer_cfg_entry import (
+    DocsPnmBulkDataTransferCfgEntry,
+    DocsPnmBulkDataTransferCfgRecord,
+)
 
 
 class _DummySnmp:
@@ -741,3 +745,65 @@ def test_get_cm_inet_address_requires_mac() -> None:
 
     with pytest.raises(TypeError, match=r"mac must be MacAddress"):
         asyncio.run(operation.getCmInetAddress("aa:bb:cc:dd:ee:ff"))  # type: ignore[arg-type]
+
+
+def test_get_docs_pnm_bulk_data_transfer_cfg_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = [
+        DocsPnmBulkDataTransferCfgRecord(
+            index=7,
+            entry=DocsPnmBulkDataTransferCfgEntry(
+                docsPnmBulkDataTransferCfgDestHostname="pnm.example.net",
+            ),
+        )
+    ]
+
+    async def _get_all(_: object) -> list[DocsPnmBulkDataTransferCfgRecord]:
+        return expected
+
+    monkeypatch.setattr(DocsPnmBulkDataTransferCfgRecord, "get_all", _get_all)
+
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmp(object(), object()),
+    )
+
+    records = asyncio.run(operation.getDocsPnmBulkDataTransferCfgRecord())
+    assert records == expected
+
+
+def test_set_docs_pnm_bulk_data_transfer_cfg_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    entry = DocsPnmBulkDataTransferCfgEntry(
+        docsPnmBulkDataTransferCfgDestHostname="pnm.example.net",
+    )
+
+    async def _set(
+        *,
+        snmp: object,
+        index: int,
+        entry: DocsPnmBulkDataTransferCfgEntry,
+    ) -> bool:
+        captured["snmp"] = snmp
+        captured["index"] = index
+        captured["entry"] = entry
+        return True
+
+    monkeypatch.setattr(DocsPnmBulkDataTransferCfgRecord, "set", _set)
+
+    snmp = _DummySnmp(object(), object())
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=snmp,
+    )
+
+    ok = asyncio.run(operation.setDocsPnmBulkDataTransferCfgRecord(7, entry))
+    assert ok is True
+    assert captured["snmp"] is snmp
+    assert captured["index"] == 7
+    assert captured["entry"] == entry
