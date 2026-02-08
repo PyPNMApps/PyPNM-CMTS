@@ -42,6 +42,26 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/status` - Get serving group RxMER operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/results` - Get serving group RxMER operation results.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel` - Cancel serving group RxMER operation.
+- `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/startCapture` - Start serving group ChannelEstCoeff operation.
+- `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/status` - Get serving group ChannelEstCoeff operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/results` - Get serving group ChannelEstCoeff operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/cancel` - Cancel serving group ChannelEstCoeff operation.
+- `POST /cmts/pnm/sg/ds/ofdm/fecSummary/startCapture` - Start serving group FecSummary operation.
+- `POST /cmts/pnm/sg/ds/ofdm/fecSummary/status` - Get serving group FecSummary operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/fecSummary/results` - Get serving group FecSummary operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/fecSummary/cancel` - Cancel serving group FecSummary operation.
+- `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/startCapture` - Start serving group ConstellationDisplay operation.
+- `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/status` - Get serving group ConstellationDisplay operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/results` - Get serving group ConstellationDisplay operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/cancel` - Cancel serving group ConstellationDisplay operation.
+- `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/startCapture` - Start serving group ModulationProfile operation.
+- `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/status` - Get serving group ModulationProfile operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/results` - Get serving group ModulationProfile operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/cancel` - Cancel serving group ModulationProfile operation.
+- `POST /cmts/pnm/sg/us/ofdma/preEqualization/startCapture` - Start serving group PreEqualization operation.
+- `POST /cmts/pnm/sg/us/ofdma/preEqualization/status` - Get serving group PreEqualization operation status.
+- `POST /cmts/pnm/sg/us/ofdma/preEqualization/results` - Get serving group PreEqualization operation results.
+- `POST /cmts/pnm/sg/us/ofdma/preEqualization/cancel` - Cancel serving group PreEqualization operation.
 - `GET /ops/health` - Liveness probe.
 - `GET /ops/ready` - Readiness probe.
 - `GET /ops/version` - Service identity and version.
@@ -54,7 +74,8 @@ may request a refresh, but they do not execute SNMP in the request thread.
 ## Endpoint Documentation
 
 - [Operational endpoints](operational.md)
-- [RxMER orchestration](pnm-rxmer.md)
+- [SG PNM operations](pnm-sg-operations.md)
+- [RxMER deep dive](pnm-rxmer.md)
 - [Serving group endpoints](serving-group.md)
 
 ## GET /cmts/system/sysDescr

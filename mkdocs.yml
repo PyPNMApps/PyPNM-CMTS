@@ -48,6 +48,7 @@ nav:
       - FastAPI:
           - Overview: api/fast-api/index.md
           - Operational: api/fast-api/operational.md
+          - SG PNM Operations: api/fast-api/pnm-sg-operations.md
           - Serving Group: api/fast-api/serving-group.md
       - Python: api/python/index.md
   - Tests:
