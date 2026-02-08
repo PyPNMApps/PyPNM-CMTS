@@ -19,11 +19,11 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.api.routes.docs.pnm.ds.ofdm.const_display.service import (
     CmDsOfdmConstDisplayService,
 )
+from pypnm.config.pnm_config_manager import PnmConfigManager
+from pypnm.docsis.cable_modem import CableModem
 from pypnm.docsis.data_type.DsCmConstDisplay import (
     CmDsConstellationDisplayConst as ConstDisplayConstant,
 )
-from pypnm.config.pnm_config_manager import PnmConfigManager
-from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
 from pypnm.lib.types import (
     ChannelId,
