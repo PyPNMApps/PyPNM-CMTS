@@ -16,7 +16,9 @@ from pypnm.api.routes.common.extended.common_messaging_service import (
     MessageResponseType,
 )
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.api.routes.docs.pnm.ds.ofdm.chan_est_coeff.service import CmDsOfdmChanEstCoefService
+from pypnm.api.routes.docs.pnm.ds.ofdm.chan_est_coeff.service import (
+    CmDsOfdmChanEstCoefService,
+)
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
