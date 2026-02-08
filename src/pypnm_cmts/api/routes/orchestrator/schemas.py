@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
@@ -21,7 +21,12 @@ class OrchestratorRunRequest(BaseModel):
     config_path: CoordinationPath | None = Field(default=None, description="Optional path to system.json configuration file.")
     sg_id: ServiceGroupId | None = Field(default=None, description="Service group id (required for worker mode).")
     owner_id: OwnerId | None = Field(default=None, description="Optional owner id override for coordination.")
-    target_service_groups: int | None = Field(default=None, description="Optional target service groups override.")
+    target_service_group_count: int | None = Field(
+        default=None,
+        description="Optional target service group count override.",
+        validation_alias=AliasChoices("target_service_group_count", "target_service_groups"),
+        serialization_alias="target_service_group_count",
+    )
     shard_mode: str | None = Field(default=None, description="Optional shard mode override.")
     tick_interval_seconds: float | None = Field(default=None, description="Optional tick interval override (seconds).")
     leader_ttl_seconds: int | None = Field(default=None, description="Optional leader TTL override (seconds).")

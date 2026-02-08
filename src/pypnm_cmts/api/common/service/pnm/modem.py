@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 
 from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
+from pypnm.lib.inet_utils import InetGenerate
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import InetAddressStr, MacAddressStr
 
@@ -113,21 +113,10 @@ class PnmModemResolver:
             return ""
         if not value.startswith("0x"):
             return value
-        return PnmModemResolver.decode_hex_ip(value)
-
-    @staticmethod
-    def decode_hex_ip(value: str) -> str:
-        encoded = value[2:]
-        if encoded == "":
-            return ""
         try:
-            if len(encoded) == 8:
-                return str(ipaddress.IPv4Address(int(encoded, 16)))
-            if len(encoded) == 32:
-                return str(ipaddress.IPv6Address(int(encoded, 16)))
+            return InetGenerate.hex_to_inet(value[2:])
         except Exception:
             return value
-        return value
 
     @staticmethod
     def resolve_write_community(context: OperationRequestContextModel | None) -> str:
@@ -151,4 +140,3 @@ class PnmModemResolver:
 __all__ = [
     "PnmModemResolver",
 ]
-

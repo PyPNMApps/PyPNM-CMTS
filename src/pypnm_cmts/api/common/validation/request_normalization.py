@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pypnm.lib.types import ChannelId, MacAddressStr
 
-from pypnm_cmts.lib.types import ServiceGroupId
+from pypnm_cmts.lib.types import OptionalIntList, ServiceGroupId
 
 
 class RequestListNormalizer:
@@ -14,7 +14,7 @@ class RequestListNormalizer:
     """
 
     @staticmethod
-    def dedupe_int_preserve_order(values: list[int] | None) -> list[int] | None:
+    def dedupe_int_preserve_order(values: OptionalIntList) -> OptionalIntList:
         """
         De-duplicate integer lists while preserving first-seen order.
         """
@@ -32,7 +32,7 @@ class RequestListNormalizer:
         return ordered
 
     @staticmethod
-    def assert_unique_int_preserve_order(values: list[int] | None, label: str) -> list[int] | None:
+    def assert_unique_int_preserve_order(values: OptionalIntList, label: str) -> OptionalIntList:
         """
         Reject duplicate integers while preserving first-seen order.
         """

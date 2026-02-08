@@ -23,3 +23,16 @@ Fix RxMER SNMP transport lifecycle between precheck and capture
 - CaptureWorker classes should focus on the PNM operation flow only.
 - Move shared back-and-forth behavior to common utilities or base services.
 - Do not embed generic transport, parsing, and cross-operation lifecycle mechanics directly in endpoint-specific CaptureWorker classes.
+
+## PyPNM Reuse Rule
+
+- Reuse existing PyPNM constants before adding new local constants.
+- Reuse PyPNM MacAddress, Inet, and shared PyPNM types before defining CMTS-local equivalents.
+- Prefer PyPNM utility functions for shared parsing, normalization, and conversion behavior.
+- Introduce CMTS-local constants or types only when no PyPNM equivalent exists, and record the rationale in the change notes.
+
+## Typed Collections Rule
+
+- Do not introduce raw generic integer collections like list[int] in production source.
+- Use named aliases from pypnm_cmts lib types for integer collections and optional integer collections.
+- When a needed alias does not exist in pypnm_cmts lib types, add it there first, then use the alias.

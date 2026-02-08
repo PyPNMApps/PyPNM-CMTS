@@ -6,12 +6,12 @@ from __future__ import annotations
 import logging
 
 from pypnm.config.pnm_config_manager import PnmConfigManager
-from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr
 
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
+from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
 
 
 class Cmts(CmtsOperation):
@@ -43,15 +43,10 @@ class Cmts(CmtsOperation):
 
         hostname_value: HostNameStr = hostname.strip()
         if hostname_value != "":
-            endpoint = HostEndpoint(hostname_value)
-            addresses = endpoint.resolve()
-            if addresses:
-                try:
-                    resolved_inet = Inet(addresses[0])
-                except ValueError as exc:
-                    raise ValueError(f"Resolved inet from hostname '{hostname_value}' is invalid: {exc}") from exc
-            else:
-                raise ValueError(f"Hostname resolution failed for '{hostname_value}'")
+            try:
+                resolved_inet, _resolved_ip = resolve_cmts_inet(hostname_value)
+            except ValueError as exc:
+                raise ValueError(f"Hostname resolution failed for '{hostname_value}'") from exc
 
         inet_candidate: Inet | None = None
         if resolved_inet is None and inet is not None:

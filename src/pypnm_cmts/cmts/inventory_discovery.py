@@ -7,8 +7,6 @@ import asyncio
 import logging
 from pathlib import Path
 
-from pypnm.lib.host_endpoint import HostEndpoint
-from pypnm.lib.inet import Inet
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import (
     HostNameStr,
@@ -30,6 +28,7 @@ from pypnm_cmts.docsis.data_type.cmts_cm_reg_status_entry import (
     DocsIf3CmtsCmRegStatusEntry,
 )
 from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
+from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
 from pypnm_cmts.lib.types import (
     ChSetId,
     CmtsCmRegState,
@@ -180,15 +179,9 @@ class CmtsInventoryDiscoveryService:
             raise ValueError("cmts_hostname must be non-empty.")
 
         try:
-            inet = Inet(hostname_value)
+            inet, _resolved_ip = resolve_cmts_inet(hostname_value)
         except ValueError as exc:
-            endpoint = HostEndpoint(hostname_value)
-            addresses = endpoint.resolve()
-            if not addresses:
-                raise ValueError(
-                    f"Failed to resolve CMTS hostname: {hostname_value}"
-                ) from exc
-            inet = Inet(addresses[0])
+            raise ValueError(f"Failed to resolve CMTS hostname: {hostname_value}") from exc
 
         effective_write = str(self._write_community).strip()
         if effective_write == "":

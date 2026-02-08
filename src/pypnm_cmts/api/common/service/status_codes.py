@@ -24,9 +24,9 @@ class CmtsStatusCode(IntEnum):
     Do not renumber or reuse PyPNM codes.
     """
 
-    CMTS_UNKNOWN = CMTS_STATUS_CODE_BASE
-    CMTS_NOT_READY = CMTS_STATUS_CODE_BASE + 1
-    CMTS_TOPOLOGY_UNAVAILABLE = CMTS_STATUS_CODE_BASE + 2
+    CMTS_UNKNOWN              = 10000
+    CMTS_NOT_READY            = 10001
+    CMTS_TOPOLOGY_UNAVAILABLE = 10002
 
 
 __all__ = [

@@ -11,8 +11,10 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
+
+from pypnm.lib.types import TimeStamp
+from pypnm.lib.utils import Generate, TimeUnit
 
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
@@ -508,8 +510,8 @@ class OperationalService:
             self.logger.debug("state_dir not readable: %s (%s)", state_dir, exc)
             return False
 
-    def _utc_now(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+    def _utc_now(self) -> TimeStamp:
+        return TimeStamp(Generate.time_stamp(unit=TimeUnit.SECONDS))
 
     def _now_epoch(self) -> float:
         return float(time.time())

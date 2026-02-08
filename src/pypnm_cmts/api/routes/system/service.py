@@ -6,9 +6,7 @@ from __future__ import annotations
 import logging
 
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.host_endpoint import HostEndpoint
-from pypnm.lib.inet import Inet
-from pypnm.lib.types import HostNameStr, InetAddressStr
+from pypnm.lib.types import InetAddressStr
 
 from pypnm_cmts.api.routes.system.schemas import (
     CmtsSysDescrRequest,
@@ -16,6 +14,7 @@ from pypnm_cmts.api.routes.system.schemas import (
 )
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
+from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
 
 logger = logging.getLogger(__name__)
 
@@ -41,30 +40,16 @@ class SystemCmtsSnmpService:
             )
 
         resolved_ip = InetAddressStr("")
-        inet: Inet
         try:
-            inet = Inet(hostname_value)
-            resolved_ip = InetAddressStr(hostname_value)
-        except ValueError:
-            resolved_ip = SystemCmtsSnmpService._resolve_hostname(hostname_value)
-            if resolved_ip == "":
-                return CmtsSysDescrResponse(
-                    hostname=hostname_value,
-                    ip_address=resolved_ip,
-                    status=ServiceStatusCode.FAILURE,
-                    message=f"Failed to resolve hostname: {hostname_value}",
-                    results=CmtsSysDescrModel.empty(),
-                )
-            try:
-                inet = Inet(resolved_ip)
-            except ValueError as exc:
-                return CmtsSysDescrResponse(
-                    hostname=hostname_value,
-                    ip_address=resolved_ip,
-                    status=ServiceStatusCode.FAILURE,
-                    message=f"Invalid CMTS IP address: {exc}",
-                    results=CmtsSysDescrModel.empty(),
-                )
+            inet, resolved_ip = resolve_cmts_inet(hostname_value)
+        except ValueError as exc:
+            return CmtsSysDescrResponse(
+                hostname=hostname_value,
+                ip_address=resolved_ip,
+                status=ServiceStatusCode.FAILURE,
+                message=str(exc),
+                results=CmtsSysDescrModel.empty(),
+            )
 
         try:
             operation = CmtsOperation(
@@ -99,14 +84,3 @@ class SystemCmtsSnmpService:
             message="",
             results=system_description,
         )
-
-    @staticmethod
-    def _resolve_hostname(hostname: HostNameStr) -> InetAddressStr:
-        """
-        Resolve a hostname to an IP address.
-        """
-        endpoint = HostEndpoint(hostname)
-        addresses = endpoint.resolve()
-        if not addresses:
-            return InetAddressStr("")
-        return InetAddressStr(addresses[0])

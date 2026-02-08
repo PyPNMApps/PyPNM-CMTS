@@ -15,6 +15,8 @@ from pypnm.lib.types import (
     SnmpIndex,
 )
 
+IntList                = list[int]
+OptionalIntList        = IntList | None
 IPv6LinkLocalStr        = NewType("IPv6LinkLocalStr", IPv6Str)
 CableModemIndex         = NewType("CableModemIndex", SnmpIndex)
 CmRegSgId               = NewType("CmRegSgId", int)
@@ -47,11 +49,14 @@ RcpId                   = NewType("RcpId", str)
 ChSetId                 = NewType("ChSetId", int)
 DocsisQosVersion        = NewType("DocsisQosVersion", int)
 DateAndTime             = NewType("DateAndTime", str)
+Iso8601TimestampStr     = NewType("Iso8601TimestampStr", str)
 EnergyMgtBits           = NewType("EnergyMgtBits", int)
 InetAddressIPv4         = IPv4Str
 InetAddressIPv6         = IPv6Str
 
 __all__ = [
+    "IntList",
+    "OptionalIntList",
     "MacAddressExist",
     "IPv6LinkLocalStr",
     "CableModemIndex",
@@ -78,6 +83,7 @@ __all__ = [
     "ChSetId",
     "DocsisQosVersion",
     "DateAndTime",
+    "Iso8601TimestampStr",
     "EnergyMgtBits",
     "InetAddressIPv4",
     "InetAddressIPv6",

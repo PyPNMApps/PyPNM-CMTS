@@ -6,13 +6,13 @@ from __future__ import annotations
 import logging
 
 from pydantic import BaseModel, Field
-from pypnm.lib.host_endpoint import HostEndpoint
 from pypnm.lib.inet import Inet, InetAddressStr
 from pypnm.lib.ping import Ping
 from pypnm.lib.types import HostNameStr
 
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
+from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
 
 
 class CmtsStartupPrecheckResult(BaseModel):
@@ -47,14 +47,15 @@ class CmtsStartupPrecheck:
             return CmtsStartupPrecheckResult(error_message="adapter.community must be set for CMTS precheck")
         port_value = int(settings.adapter.port)
 
-        inet = self._resolve_inet(hostname_value)
-        if inet is None:
+        try:
+            inet, resolved_inet = resolve_cmts_inet(hostname_value)
+        except ValueError:
             return CmtsStartupPrecheckResult(
                 hostname=HostNameStr(hostname_value),
                 error_message="cmts hostname resolution failed",
             )
 
-        inet_address = InetAddressStr(str(inet))
+        inet_address = InetAddressStr(str(resolved_inet))
         ping_ok = self._ping_check(inet_address)
         snmp_ok = await self._snmp_check(inet, community_value, port_value)
         error_message = ""
@@ -70,17 +71,6 @@ class CmtsStartupPrecheck:
             inet=inet_address,
             error_message=error_message,
         )
-
-    @staticmethod
-    def _resolve_inet(hostname: str) -> Inet | None:
-        endpoint = HostEndpoint(HostNameStr(hostname))
-        addresses = endpoint.resolve()
-        if not addresses:
-            return None
-        try:
-            return Inet(addresses[0])
-        except ValueError:
-            return None
 
     @staticmethod
     def _ping_check(inet_address: InetAddressStr) -> bool:

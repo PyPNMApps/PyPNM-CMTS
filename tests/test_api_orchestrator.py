@@ -104,6 +104,21 @@ def test_orchestrator_run_worker_requires_sg_id(tmp_path: Path) -> None:
     assert "sg_id is required" in str(exc_info.value)
 
 
+def test_orchestrator_request_accepts_new_and_legacy_target_count_keys(tmp_path: Path) -> None:
+    _load_app(tmp_path)
+    from pypnm_cmts.api.routes.orchestrator.schemas import OrchestratorRunRequest
+
+    new_key = OrchestratorRunRequest.model_validate(
+        {"mode": "standalone", "target_service_group_count": 2}
+    )
+    legacy_key = OrchestratorRunRequest.model_validate(
+        {"mode": "standalone", "target_service_groups": 3}
+    )
+
+    assert new_key.target_service_group_count == 2
+    assert legacy_key.target_service_group_count == 3
+
+
 def test_orchestrator_status_does_not_persist_results(tmp_path: Path) -> None:
     app = _load_app(tmp_path)
     config_path = tmp_path / "system.json"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from pypnm.lib.types import TimeStamp
 
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import (
@@ -31,7 +32,7 @@ class HealthResponseModel(BaseModel):
     """Health endpoint response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="Health status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
 
 
@@ -39,7 +40,7 @@ class ReadyResponseModel(BaseModel):
     """Readiness endpoint response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="Readiness status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     failed_check: ReadinessCheck | None = Field(default=None, description="Name of the first failing readiness check.")
     message: str = Field(default="", description="Human-readable readiness message.")
@@ -63,7 +64,7 @@ class OperationalStatusResponseModel(BaseModel):
     """Operational status endpoint response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="Operational status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     controller: OperationalProcessInfoModel = Field(default_factory=OperationalProcessInfoModel, description="Controller process snapshot.")
     workers: list[OperationalProcessInfoModel] = Field(default_factory=list, description="Worker process snapshots.")
@@ -79,7 +80,7 @@ class VersionResponseModel(BaseModel):
     version: str = Field(default="", description="Package version string.")
     python_version: str = Field(default="", description="Python interpreter version.")
     build_metadata: str = Field(default="", description="Optional build metadata string.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
 
 
@@ -87,7 +88,7 @@ class SgwProcessResponseModel(BaseModel):
     """SGW worker process debug response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW debug status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     workers: list[SgwWorkerProcessDebugModel] = Field(default_factory=list, description="SGW worker process snapshots.")
     message: str = Field(default="", description="Optional error message when unavailable.")
@@ -97,7 +98,7 @@ class SgwPollIntervalResponseModel(BaseModel):
     """SGW poll interval debug response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW debug status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     workers: list[SgwWorkerPollIntervalDebugModel] = Field(default_factory=list, description="SGW poll interval snapshots.")
     message: str = Field(default="", description="Optional error message when unavailable.")
@@ -113,7 +114,7 @@ class SgwRestartResponseModel(BaseModel):
     """SGW restart response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW restart status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     sg_id: ServiceGroupId | None = Field(default=None, description="Parsed service group identifier when available.")
     message: str = Field(default="", description="Restart status message.")
@@ -129,7 +130,7 @@ class SgwResetResponseModel(BaseModel):
     """SGW refresh counter reset response."""
 
     status: OperationalStatus = Field(default=OperationalStatus.OK, description="SGW reset status indicator.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
     meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
     sg_id: ServiceGroupId | None = Field(default=None, description="Parsed service group identifier when available.")
     message: str = Field(default="", description="Reset status message.")

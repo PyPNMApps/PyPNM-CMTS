@@ -4,7 +4,7 @@
 """Service-level route utilities."""
 from __future__ import annotations
 
-from pypnm_cmts.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 
 __all__ = [
     "ServiceStatusCode",

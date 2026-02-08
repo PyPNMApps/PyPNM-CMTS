@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 
 from pypnm.lib.inet import Inet, InetAddressStr
+from pypnm.lib.inet_utils import InetGenerate
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import ChannelId, HostNameStr, InterfaceIndex, MacAddressStr
 from pypnm.snmp.snmp_v2c import Snmp_v2c
@@ -1452,22 +1453,10 @@ class CmtsOperation:
         def normalize_hex_inet(value: str) -> str:
             if not value.startswith("0x"):
                 return value
-            hex_str = value[2:]
-            if len(hex_str) % 2 != 0:
-                return value
             try:
-                raw_bytes = bytes.fromhex(hex_str)
+                return InetGenerate.hex_to_inet(value[2:])
             except ValueError:
                 return value
-            if len(raw_bytes) == 4:
-                return ".".join(str(byte) for byte in raw_bytes)
-            if len(raw_bytes) == 16:
-                parts = [
-                    f"{raw_bytes[i] << 8 | raw_bytes[i + 1]:x}"
-                    for i in range(0, 16, 2)
-                ]
-                return ":".join(parts)
-            return value
 
         def validate_inet(value: str) -> IPv4Str | IPv6Str | IPv6LinkLocalStr:
             if value == "":

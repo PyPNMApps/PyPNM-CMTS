@@ -697,6 +697,41 @@ def test_get_cm_inet_address_by_mac(monkeypatch: pytest.MonkeyPatch) -> None:
     assert inet_tuple == ("192.168.0.10", "2001:db8::1", "fe80::1")
 
 
+def test_get_cm_inet_address_by_mac_hex_inets(monkeypatch: pytest.MonkeyPatch) -> None:
+    mac_result = object()
+    indices = [1001]
+    mac_values = ["aa:bb:cc:dd:ee:ff"]
+    get_map = {
+        "docsIf3CmtsCmRegStatusIPv4Addr.1001": "0xc0a8000a",
+        "docsIf3CmtsCmRegStatusIPv6Addr.1001": "0x20010db8000000000000000000000001",
+        "docsIf3CmtsCmRegStatusIPv6LinkLocal.1001": "0xfe800000000000000000000000000001",
+    }
+
+    def _extract_last_oid_index(_: object) -> list[int]:
+        return indices
+
+    def _snmp_get_result_bytes(_: object) -> list[bytes]:
+        return [bytes.fromhex(mac_values[0].replace(":", ""))]
+
+    monkeypatch.setattr(Snmp_v2c, "extract_last_oid_index", _extract_last_oid_index)
+    monkeypatch.setattr(Snmp_v2c, "snmp_get_result_bytes", _snmp_get_result_bytes)
+    monkeypatch.setattr(Snmp_v2c, "get_result_value", lambda raw: raw)
+
+    operation = CmtsOperation(
+        inet=Inet("192.168.0.100"),
+        write_community="public",
+        snmp=_DummySnmpMacInetByMac(mac_result, get_map),
+    )
+
+    exists, inet_tuple = asyncio.run(
+        operation.getCmInetAddress(MacAddress(mac_values[0]))
+    )
+
+    assert bool(exists) is True
+    assert isinstance(inet_tuple, tuple)
+    assert inet_tuple == ("192.168.0.10", "2001:db8::1", "fe80::1")
+
+
 def test_get_cm_inet_address_requires_mac() -> None:
     operation = CmtsOperation(
         inet=Inet("192.168.0.100"),

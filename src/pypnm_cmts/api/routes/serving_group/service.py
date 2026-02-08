@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import time
 
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.types import ChannelId, MacAddressStr
+from pypnm.lib.types import ChannelId, MacAddressStr, TimeStamp
+from pypnm.lib.utils import Generate, TimeUnit
 
 from pypnm_cmts.api.common.cmts_reg_status import CmtsCmRegStateModel
 from pypnm_cmts.api.routes.serving_group.schemas import (
@@ -604,12 +605,12 @@ class ServingGroupCacheService:
         return (int(total_items) + int(page_size) - 1) // int(page_size)
 
     @staticmethod
-    def _utc_now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+    def _utc_now() -> TimeStamp:
+        return TimeStamp(Generate.time_stamp(unit=TimeUnit.SECONDS))
 
     @staticmethod
     def _now_epoch() -> float:
-        return datetime.now(timezone.utc).timestamp()
+        return float(time.time())
 
     @staticmethod
     def _build_error_metadata(message: str) -> SgwCacheMetadataModel:

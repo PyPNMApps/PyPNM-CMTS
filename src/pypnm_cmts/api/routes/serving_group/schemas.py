@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.types import ChannelId, IPv4Str, IPv6Str, MacAddressStr
+from pypnm.lib.types import ChannelId, IPv4Str, IPv6Str, MacAddressStr, TimeStamp
 
 from pypnm_cmts.api.common.cmts_reg_status import CmtsCmRegStateModel
 from pypnm_cmts.api.common.cmts_request import (
@@ -30,7 +30,7 @@ class CacheResponseBase(BaseModel):
 
     status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
     message: str = Field(default="", description="Informational or error message.")
-    timestamp: str = Field(default="", description="ISO-8601 timestamp for the response.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
 
 
 class GetServingGroupIdsRequest(BaseModel):
