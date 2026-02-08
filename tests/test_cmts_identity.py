@@ -24,10 +24,10 @@ def test_cmts_operation_invalid_inet_raises() -> None:
 
 
 def test_cmts_hostname_resolution_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _resolve(_: object) -> list[str]:
-        return []
+    def _resolve(_: object) -> tuple[object, object]:
+        raise ValueError("Failed to resolve hostname: cmts-bad")
 
-    monkeypatch.setattr("pypnm_cmts.docsis.cmts.HostEndpoint.resolve", _resolve)
+    monkeypatch.setattr("pypnm_cmts.docsis.cmts.resolve_cmts_inet", _resolve)
 
     with pytest.raises(ValueError, match=r"Hostname resolution failed"):
         Cmts(hostname="cmts-bad", inet=None)  # type: ignore[arg-type]
