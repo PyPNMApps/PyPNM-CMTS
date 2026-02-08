@@ -97,7 +97,7 @@ class ModulationProfileCaptureWorker(PnmCaptureWorkerBase):
 
     @property
     def _worker_log_prefix(self) -> str:
-        return "ModulationProfile-Worker"
+        return "ModulationProfile"
 
     def _run_capture_stage(
         self,
@@ -147,7 +147,7 @@ class ModulationProfileCaptureWorker(PnmCaptureWorkerBase):
         tftp_servers = PnmCaptureHelper.resolve_tftp_servers(request_context)
         tftp_path = PnmConfigManager.get_tftp_path()
         self.logger.info(
-            "ModulationProfile-Worker [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
+            "ModulationProfile [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
             operation_id,
             sg_id,
             mac_address,
@@ -174,7 +174,7 @@ class ModulationProfileCaptureWorker(PnmCaptureWorkerBase):
         else:
             final_message = message or MISSING_TRANSACTION_MESSAGE
         self.logger.info(
-            "ModulationProfile-Worker [CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
+            "ModulationProfile [CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
             operation_id,
             sg_id,
             mac_address,

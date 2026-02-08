@@ -98,7 +98,7 @@ class PreEqualizationCaptureWorker(PnmCaptureWorkerBase):
 
     @property
     def _worker_log_prefix(self) -> str:
-        return "PreEqualization-Worker"
+        return "PreEqualization"
 
     def _run_capture_stage(
         self,
@@ -148,7 +148,7 @@ class PreEqualizationCaptureWorker(PnmCaptureWorkerBase):
         tftp_servers = PnmCaptureHelper.resolve_tftp_servers(request_context)
         tftp_path = PnmConfigManager.get_tftp_path()
         self.logger.info(
-            "PreEqualization-Worker [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
+            "PreEqualization [CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
             operation_id,
             sg_id,
             mac_address,
@@ -194,7 +194,7 @@ class PreEqualizationCaptureWorker(PnmCaptureWorkerBase):
                     final_message = MISSING_TRANSACTION_MESSAGE
 
         self.logger.info(
-            "PreEqualization-Worker [CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
+            "PreEqualization [CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
             operation_id,
             sg_id,
             mac_address,
