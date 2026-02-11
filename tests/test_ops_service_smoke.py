@@ -12,6 +12,12 @@ from pathlib import Path
 
 import httpx
 
+from pypnm_cmts.config.runtime_flags import (
+    ENV_MUTE_PYPNM_ENDPOINTS,
+    ENV_MUTE_TAGS,
+    ENV_MUTE_TAGS_HARD,
+)
+
 CLI_SMOKE_TIMEOUT_SECONDS = 30.0
 ENV_ADAPTER_HOSTNAME = "PYPNM_CMTS_ADAPTER_HOSTNAME"
 ENV_ADAPTER_READ_COMMUNITY = "PYPNM_CMTS_ADAPTER_READ_COMMUNITY"
@@ -59,12 +65,20 @@ def _wait_for_status(base_url: str, timeout_seconds: float) -> dict[str, object]
     return None
 
 
-def test_ops_version_smoke_starts_service() -> None:
-    port = _get_free_port()
-    base_url = f"http://127.0.0.1:{port}"
+def _smoke_env() -> dict[str, str]:
     env = dict(os.environ)
     env[ENV_ADAPTER_HOSTNAME] = DEFAULT_CMTS_HOSTNAME
     env[ENV_ADAPTER_READ_COMMUNITY] = DEFAULT_CMTS_READ_COMMUNITY
+    env.pop(ENV_MUTE_PYPNM_ENDPOINTS, None)
+    env.pop(ENV_MUTE_TAGS, None)
+    env.pop(ENV_MUTE_TAGS_HARD, None)
+    return env
+
+
+def test_ops_version_smoke_starts_service() -> None:
+    port = _get_free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    env = _smoke_env()
 
     process = subprocess.Popen(
         [
@@ -105,9 +119,7 @@ def test_ops_version_smoke_starts_service() -> None:
 def test_ops_status_combined_mode_runner_available() -> None:
     port = _get_free_port()
     base_url = f"http://127.0.0.1:{port}"
-    env = dict(os.environ)
-    env[ENV_ADAPTER_HOSTNAME] = DEFAULT_CMTS_HOSTNAME
-    env[ENV_ADAPTER_READ_COMMUNITY] = DEFAULT_CMTS_READ_COMMUNITY
+    env = _smoke_env()
 
     process = subprocess.Popen(
         [
