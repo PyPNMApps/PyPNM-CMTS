@@ -19,6 +19,15 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.modulation_profile.router import (
     router as modulation_profile_router,
 )
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.router import router as rxmer_router
+from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.spectrum_analyzer.router import (
+    router as ofdm_spectrum_analyzer_router,
+)
+from pypnm_cmts.api.routes.pnm.sg.ds.scqam.spectrum_analyzer.router import (
+    router as scqam_spectrum_analyzer_router,
+)
+from pypnm_cmts.api.routes.pnm.sg.spectrum_analyzer.router import (
+    router as spectrum_analyzer_router,
+)
 from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.router import (
     router as pre_equalization_router,
 )
@@ -29,6 +38,9 @@ router.include_router(channel_est_coeff_router)
 router.include_router(fec_summary_router)
 router.include_router(const_display_router)
 router.include_router(modulation_profile_router)
+router.include_router(spectrum_analyzer_router)
+router.include_router(ofdm_spectrum_analyzer_router)
+router.include_router(scqam_spectrum_analyzer_router)
 router.include_router(pre_equalization_router)
 
 __all__ = [

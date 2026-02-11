@@ -92,6 +92,68 @@ Constellation display also accepts optional capture settings on `startCapture`:
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/results`
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/cancel`
 
+### Full Bandwidth SpectrumAnalyzer
+
+- `POST /cmts/pnm/sg/spectrumAnalyzer/startCapture`
+- `POST /cmts/pnm/sg/spectrumAnalyzer/status`
+- `POST /cmts/pnm/sg/spectrumAnalyzer/results`
+- `POST /cmts/pnm/sg/spectrumAnalyzer/cancel`
+
+Full bandwidth spectrum analyzer accepts optional capture settings on `startCapture`:
+
+```json
+{
+  "capture_settings": {
+    "inactivity_timeout": 60,
+    "first_segment_center_freq": 300000000,
+    "last_segment_center_freq": 900000000,
+    "resolution_bw": 30000,
+    "noise_bw": 150,
+    "window_function": 2,
+    "num_averages": 1,
+    "spectrum_retrieval_type": 1
+  }
+}
+```
+
+### DS OFDM SpectrumAnalyzer
+
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/startCapture`
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/status`
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/results`
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/cancel`
+
+DS OFDM spectrum analyzer accepts optional capture settings on `startCapture`:
+
+```json
+{
+  "capture_settings": {
+    "number_of_averages": 10,
+    "resolution_bandwidth_hz": 25000,
+    "spectrum_retrieval_type": 1
+  }
+}
+```
+
+### DS SCQAM SpectrumAnalyzer
+
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/startCapture`
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/status`
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/results`
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/cancel`
+
+DS SCQAM spectrum analyzer accepts optional capture settings on `startCapture`:
+
+```json
+{
+  "capture_settings": {
+    "number_of_averages": 10,
+    "resolution_bandwidth_hz": 25000,
+    "spectrum_retrieval_type": 1
+  }
+}
+```
+
 ### US OFDMA PreEqualization
 
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/startCapture`
@@ -133,6 +195,14 @@ Cancel any operation:
 curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/ds/ofdm/modulationProfile/cancel \
   -H "content-type: application/json" \
   -d '{"pnm_capture_operation_id":"<operation_id>"}'
+```
+
+Start full bandwidth spectrum analyzer operation:
+
+```bash
+curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/spectrumAnalyzer/startCapture \
+  -H "content-type: application/json" \
+  -d '{"capture_settings":{"first_segment_center_freq":300000000,"last_segment_center_freq":900000000,"resolution_bw":30000}}'
 ```
 
 For a full response walkthrough, see `docs/api/fast-api/pnm-rxmer.md`.

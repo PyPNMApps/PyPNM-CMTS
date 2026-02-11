@@ -58,6 +58,18 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/status` - Get serving group ModulationProfile operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/results` - Get serving group ModulationProfile operation results.
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/cancel` - Cancel serving group ModulationProfile operation.
+- `POST /cmts/pnm/sg/spectrumAnalyzer/startCapture` - Start serving group full bandwidth SpectrumAnalyzer operation.
+- `POST /cmts/pnm/sg/spectrumAnalyzer/status` - Get serving group full bandwidth SpectrumAnalyzer operation status.
+- `POST /cmts/pnm/sg/spectrumAnalyzer/results` - Get serving group full bandwidth SpectrumAnalyzer operation results.
+- `POST /cmts/pnm/sg/spectrumAnalyzer/cancel` - Cancel serving group full bandwidth SpectrumAnalyzer operation.
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/startCapture` - Start serving group downstream OFDM SpectrumAnalyzer operation.
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/status` - Get serving group downstream OFDM SpectrumAnalyzer operation status.
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/results` - Get serving group downstream OFDM SpectrumAnalyzer operation results.
+- `POST /cmts/pnm/sg/ds/ofdm/spectrumAnalyzer/cancel` - Cancel serving group downstream OFDM SpectrumAnalyzer operation.
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/startCapture` - Start serving group downstream SCQAM SpectrumAnalyzer operation.
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/status` - Get serving group downstream SCQAM SpectrumAnalyzer operation status.
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/results` - Get serving group downstream SCQAM SpectrumAnalyzer operation results.
+- `POST /cmts/pnm/sg/ds/scqam/spectrumAnalyzer/cancel` - Cancel serving group downstream SCQAM SpectrumAnalyzer operation.
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/startCapture` - Start serving group PreEqualization operation.
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/status` - Get serving group PreEqualization operation status.
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/results` - Get serving group PreEqualization operation results.

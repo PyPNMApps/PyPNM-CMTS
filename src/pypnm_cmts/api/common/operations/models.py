@@ -121,6 +121,38 @@ class OperationRequestContextModel(BaseModel):
         default=None,
         description="Optional sample-symbol count override for constellation display capture.",
     )
+    spectrum_analyzer_inactivity_timeout: int | None = Field(
+        default=None,
+        description="Optional inactivity-timeout override for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_first_segment_center_freq: int | None = Field(
+        default=None,
+        description="Optional first-segment center frequency override in Hz for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_last_segment_center_freq: int | None = Field(
+        default=None,
+        description="Optional last-segment center frequency override in Hz for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_resolution_bw: int | None = Field(
+        default=None,
+        description="Optional resolution-bandwidth override in Hz for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_noise_bw: int | None = Field(
+        default=None,
+        description="Optional equivalent noise-bandwidth override in kHz for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_window_function: int | None = Field(
+        default=None,
+        description="Optional window-function selector override for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_num_averages: int | None = Field(
+        default=None,
+        description="Optional number-of-averages override for spectrum analyzer capture.",
+    )
+    spectrum_analyzer_retrieval_type: int | None = Field(
+        default=None,
+        description="Optional spectrum retrieval type override for spectrum analyzer capture.",
+    )
 
 
 class OperationErrorSummaryModel(BaseModel):
