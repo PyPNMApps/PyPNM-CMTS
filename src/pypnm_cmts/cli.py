@@ -19,6 +19,7 @@ from pypnm_cmts.config.request_defaults import (
     ENV_CM_TFTP_IPV4,
     ENV_CM_TFTP_IPV6,
 )
+from pypnm_cmts.config.runtime_flags import ENV_MUTE_PYPNM_ENDPOINTS
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     OwnerId,
@@ -301,6 +302,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--with-runner",
         action="store_true",
         help="Start the orchestrator runner in-process (combined mode).",
+    )
+    serve_parser.add_argument(
+        "--mute-pypnm-endpoints",
+        action="store_true",
+        help="Suppress legacy PyPNM routes under /cm at startup.",
     )
 
     serve_parser.add_argument(
@@ -686,6 +692,8 @@ def _run_cli() -> int:
             os.environ[ENV_CM_TFTP_IPV4] = str(args.cm_tftp_ipv4).strip()
         if str(args.cm_tftp_ipv6).strip() != "":
             os.environ[ENV_CM_TFTP_IPV6] = str(args.cm_tftp_ipv6).strip()
+        if bool(args.mute_pypnm_endpoints):
+            os.environ[ENV_MUTE_PYPNM_ENDPOINTS] = "1"
 
         try:
             CmtsOrchestratorSettings.from_system_config()

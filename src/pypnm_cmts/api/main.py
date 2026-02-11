@@ -17,6 +17,10 @@ from pypnm.version import __version__ as pypnm_version
 
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
 from pypnm_cmts.combined_mode import CombinedModeRunner, combined_mode_enabled
+from pypnm_cmts.config.runtime_flags import (
+    ENV_MUTE_PYPNM_ENDPOINTS,
+    is_env_flag_enabled,
+)
 from pypnm_cmts.sgw.runtime_state import (
     start_sgw_background_refresh,
     stop_sgw_background_refresh,
@@ -99,7 +103,8 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-app.include_router(pypnm_app.router, prefix="/cm")
+if not is_env_flag_enabled(ENV_MUTE_PYPNM_ENDPOINTS):
+    app.include_router(pypnm_app.router, prefix="/cm")
 
 
 @app.get("/health", tags=["Health"])

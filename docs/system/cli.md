@@ -39,6 +39,12 @@ settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname` and `--read-community`
 as overrides.
 
+To suppress legacy PyPNM endpoints mounted under `/cm`:
+
+```bash
+pypnm-cmts serve --mute-pypnm-endpoints
+```
+
 ### Custom host/port
 
 ```bash
@@ -247,7 +253,10 @@ These options apply to `pypnm-cmts serve`.
 --reload-dir Directory to watch for changes (repeatable)
 --reload-include Glob pattern(s) to include (repeatable; default: *.py)
 --reload-exclude Glob pattern(s) to exclude (repeatable)
+--mute-pypnm-endpoints Suppress legacy PyPNM routes under /cm at startup
 ```
+
+For full command and option coverage across all CLI commands, see [CLI option reference](cli-options.md).
 
 ## Security Tools
 

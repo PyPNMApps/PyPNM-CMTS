@@ -20,10 +20,22 @@ curl http://127.0.0.1:8000/ops/health
 curl http://127.0.0.1:8000/ops/ready
 ```
 
-PyPNM endpoints from `pypnm-docsis` are mounted under the `/cm` prefix. Example:
+PyPNM endpoints from `pypnm-docsis` are mounted under the `/cm` prefix by default. Example:
 
 ```bash
 curl http://127.0.0.1:8000/cm/health
+```
+
+To suppress those legacy PyPNM endpoints at startup, run:
+
+```bash
+pypnm-cmts serve --mute-pypnm-endpoints
+```
+
+Equivalent environment override:
+
+```bash
+export PYPNM_CMTS_MUTE_PYPNM_ENDPOINTS=1
 ```
 
 CMTS endpoints document JSON-only responses; binary or archive responses are advertised only for PyPNM endpoints that return files.

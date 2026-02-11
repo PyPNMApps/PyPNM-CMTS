@@ -20,6 +20,7 @@ Key fields:
 ## Service launcher
 
 - [CLI service launcher](cli.md)
+- [CLI option reference](cli-options.md)
 
 ## PyPNM-CMTS config menu
 

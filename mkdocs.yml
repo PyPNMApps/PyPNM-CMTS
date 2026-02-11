@@ -30,6 +30,7 @@ nav:
   - Install: install/index.md
   - System:
       - Overview: system/index.md
+      - CLI option reference: system/cli-options.md
       - Config workflow: system/config.md
       - Manpage: system/pypnm-cmts-manpage.md
   - CLI: system/cli.md

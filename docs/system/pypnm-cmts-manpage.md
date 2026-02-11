@@ -82,6 +82,9 @@ pypnm-cmts config-menu [options]
 - `--lease-ttl-seconds`: Override service group lease TTL (seconds).
 - `--state-dir`: Override coordination state directory.
 - `--election-name`: Override leader election namespace.
+- `--cm-snmpv2c-write-community`: Override CM SNMPv2c write community request default.
+- `--cm-tftp-ipv4`: Override CM TFTP IPv4 request default.
+- `--cm-tftp-ipv6`: Override CM TFTP IPv6 request default.
 
 ## run-forever Options
 
@@ -108,7 +111,11 @@ pypnm-cmts config-menu [options]
 - `--cmts-hostname`: Override `adapter.hostname` for SGW startup discovery.
 - `--read-community`: Override `adapter.community` for SGW startup discovery.
 - `--write-community`: Override `adapter.write_community` for SGW startup discovery.
+- `--cm-snmpv2c-write-community`: Override CM SNMPv2c write community request default.
+- `--cm-tftp-ipv4`: Override CM TFTP IPv4 request default.
+- `--cm-tftp-ipv6`: Override CM TFTP IPv6 request default.
 - `--with-runner`: Start the orchestrator runner in-process (combined mode).
+- `--mute-pypnm-endpoints`: Suppress legacy PyPNM routes mounted under `/cm`.
 - `--log-level`: Uvicorn log level (default: `info`).
 - `--workers`: Number of Uvicorn worker processes (default: `1`).
 - `--no-access-log`: Disable Uvicorn access logging.
