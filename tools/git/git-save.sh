@@ -101,7 +101,10 @@ if [[ "${skip_ruff}" != "true" ]]; then
 fi
 
 echo "Staging changes..."
-git add -A -- ':!.env' ':!.test'
+git add -u
+while IFS= read -r -d '' untracked_path; do
+  git add -- "${untracked_path}"
+done < <(git ls-files --others --exclude-standard -z)
 
 echo "Creating commit..."
 git commit -m "${final_msg}"
