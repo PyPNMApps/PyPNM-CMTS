@@ -42,6 +42,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/status` - Get serving group RxMER operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/results` - Get serving group RxMER operation results.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel` - Cancel serving group RxMER operation.
+- `POST /cmts/pnm/sg/ds/histogram/startCapture` - Start serving group downstream Histogram operation.
+- `POST /cmts/pnm/sg/ds/histogram/status` - Get serving group downstream Histogram operation status.
+- `POST /cmts/pnm/sg/ds/histogram/results` - Get serving group downstream Histogram operation results.
+- `POST /cmts/pnm/sg/ds/histogram/cancel` - Cancel serving group downstream Histogram operation.
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/startCapture` - Start serving group ChannelEstCoeff operation.
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/status` - Get serving group ChannelEstCoeff operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/results` - Get serving group ChannelEstCoeff operation results.

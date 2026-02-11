@@ -53,6 +53,23 @@ All SG PNM endpoints are JSON-only and use numeric `ServiceStatusCode`.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/results`
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel`
 
+### DS Histogram
+
+- `POST /cmts/pnm/sg/ds/histogram/startCapture`
+- `POST /cmts/pnm/sg/ds/histogram/status`
+- `POST /cmts/pnm/sg/ds/histogram/results`
+- `POST /cmts/pnm/sg/ds/histogram/cancel`
+
+Downstream histogram accepts optional capture settings on `startCapture`:
+
+```json
+{
+  "capture_settings": {
+    "sample_duration": 10
+  }
+}
+```
+
 ### DS OFDM ChannelEstCoeff
 
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/startCapture`
@@ -171,6 +188,14 @@ Start a constellation display operation:
 curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/ds/ofdm/constellationDisplay/startCapture \
   -H "content-type: application/json" \
   -d '{"capture_settings":{"modulation_order_offset":12,"number_sample_symbol":8192}}'
+```
+
+Start a downstream histogram operation:
+
+```bash
+curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/ds/histogram/startCapture \
+  -H "content-type: application/json" \
+  -d '{"capture_settings":{"sample_duration":10}}'
 ```
 
 Fetch status for any operation:

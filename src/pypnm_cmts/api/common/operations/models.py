@@ -153,6 +153,10 @@ class OperationRequestContextModel(BaseModel):
         default=None,
         description="Optional spectrum retrieval type override for spectrum analyzer capture.",
     )
+    histogram_sample_duration: int | None = Field(
+        default=None,
+        description="Optional sample-duration override in seconds for downstream histogram capture.",
+    )
 
 
 class OperationErrorSummaryModel(BaseModel):

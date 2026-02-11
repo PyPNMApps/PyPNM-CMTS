@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from pypnm_cmts.api.routes.pnm.sg.ds.histogram.router import (
+    router as ds_histogram_router,
+)
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.channel_est_coeff.router import (
     router as channel_est_coeff_router,
 )
@@ -38,6 +41,7 @@ router.include_router(channel_est_coeff_router)
 router.include_router(fec_summary_router)
 router.include_router(const_display_router)
 router.include_router(modulation_profile_router)
+router.include_router(ds_histogram_router)
 router.include_router(spectrum_analyzer_router)
 router.include_router(ofdm_spectrum_analyzer_router)
 router.include_router(scqam_spectrum_analyzer_router)
