@@ -6,20 +6,27 @@ from __future__ import annotations
 import os
 import pathlib
 import sys
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from inspect import isawaitable
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.routing import APIRoute
 from pypnm.api.main import app as pypnm_app
 from pypnm.version import __version__ as pypnm_version
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
 from pypnm_cmts.combined_mode import CombinedModeRunner, combined_mode_enabled
 from pypnm_cmts.config.runtime_flags import (
     ENV_MUTE_PYPNM_ENDPOINTS,
+    ENV_MUTE_TAGS,
+    ENV_MUTE_TAGS_HARD,
     is_env_flag_enabled,
+    read_env_csv_set,
 )
 from pypnm_cmts.sgw.runtime_state import (
     start_sgw_background_refresh,
@@ -65,10 +72,33 @@ validate configuration state, and drive PNM workflows across fleets.
 
 _combined_runner: CombinedModeRunner | None = None
 _sgw_startup_service = SgwStartupService()
+_hard_muted_routes: list[APIRoute] = []
 
 
 def _pytest_running() -> bool:
     return os.getenv("PYTEST_CURRENT_TEST") is not None
+
+
+def _route_tag_set(route: APIRoute) -> set[str]:
+    tags = route.tags or []
+    return {str(tag).strip().lower() for tag in tags if str(tag).strip() != ""}
+
+
+def _apply_muted_tag_policy(app_instance: FastAPI) -> None:
+    _hard_muted_routes.clear()
+    muted_tags = read_env_csv_set(ENV_MUTE_TAGS)
+    if not muted_tags:
+        return
+
+    hard_mute = is_env_flag_enabled(ENV_MUTE_TAGS_HARD)
+    for route in app_instance.router.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if not (_route_tag_set(route) & muted_tags):
+            continue
+        route.include_in_schema = False
+        if hard_mute:
+            _hard_muted_routes.append(route)
 
 
 @asynccontextmanager
@@ -122,3 +152,24 @@ app.add_middleware(
 )
 
 RouterRegistrar().register(app)
+_apply_muted_tag_policy(app)
+
+
+@app.middleware("http")
+async def _deny_hard_muted_tag_routes(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[object]],
+) -> JSONResponse | object:
+    if _hard_muted_routes:
+        for route in _hard_muted_routes:
+            methods = route.methods or set()
+            if request.method.upper() not in methods:
+                continue
+            if route.path_regex.fullmatch(request.scope["path"]) is None:
+                continue
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Endpoint disabled by policy"},
+                headers={"X-Endpoint-Policy": "muted-tag"},
+            )
+    return await call_next(request)

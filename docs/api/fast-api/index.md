@@ -38,6 +38,18 @@ Equivalent environment override:
 export PYPNM_CMTS_MUTE_PYPNM_ENDPOINTS=1
 ```
 
+To mute routes by FastAPI tag:
+
+```bash
+pypnm-cmts serve --mute-tags "Orchestrator,Operational"
+```
+
+Hard policy mode returns `403 Forbidden` for matched tags:
+
+```bash
+pypnm-cmts serve --mute-tags "Orchestrator,Operational" --mute-tags-hard
+```
+
 CMTS endpoints document JSON-only responses; binary or archive responses are advertised only for PyPNM endpoints that return files.
 
 SGW refresh runs in a background loop after startup prime. Cache-first endpoints

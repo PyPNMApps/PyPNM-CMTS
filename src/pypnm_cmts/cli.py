@@ -19,7 +19,11 @@ from pypnm_cmts.config.request_defaults import (
     ENV_CM_TFTP_IPV4,
     ENV_CM_TFTP_IPV6,
 )
-from pypnm_cmts.config.runtime_flags import ENV_MUTE_PYPNM_ENDPOINTS
+from pypnm_cmts.config.runtime_flags import (
+    ENV_MUTE_PYPNM_ENDPOINTS,
+    ENV_MUTE_TAGS,
+    ENV_MUTE_TAGS_HARD,
+)
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     OwnerId,
@@ -307,6 +311,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mute-pypnm-endpoints",
         action="store_true",
         help="Suppress legacy PyPNM routes under /cm at startup.",
+    )
+    serve_parser.add_argument(
+        "--mute-tags",
+        default="",
+        help="Comma-separated route tags to mute at startup (example: Orchestrator,Operational).",
+    )
+    serve_parser.add_argument(
+        "--mute-tags-hard",
+        action="store_true",
+        help="When used with --mute-tags, enforce 403 for matching tagged routes.",
     )
 
     serve_parser.add_argument(
@@ -694,6 +708,10 @@ def _run_cli() -> int:
             os.environ[ENV_CM_TFTP_IPV6] = str(args.cm_tftp_ipv6).strip()
         if bool(args.mute_pypnm_endpoints):
             os.environ[ENV_MUTE_PYPNM_ENDPOINTS] = "1"
+        if str(args.mute_tags).strip() != "":
+            os.environ[ENV_MUTE_TAGS] = str(args.mute_tags).strip()
+        if bool(args.mute_tags_hard):
+            os.environ[ENV_MUTE_TAGS_HARD] = "1"
 
         try:
             CmtsOrchestratorSettings.from_system_config()

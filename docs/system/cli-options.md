@@ -100,6 +100,8 @@ Options:
 - `--cm-tftp-ipv6` Override CM request default.
 - `--with-runner` Enable in-process combined mode runner.
 - `--mute-pypnm-endpoints` Suppress legacy PyPNM endpoints under `/cm`.
+- `--mute-tags` Comma-separated route tags to mute.
+- `--mute-tags-hard` Return `403` for routes matched by `--mute-tags`.
 - `--log-level` Uvicorn log level.
 - `--workers` Uvicorn worker count.
 - `--no-access-log` Disable access log.
@@ -111,6 +113,8 @@ Options:
 Environment equivalent for endpoint muting:
 
 - `PYPNM_CMTS_MUTE_PYPNM_ENDPOINTS=1`
+- `PYPNM_CMTS_MUTE_TAGS=Orchestrator,Operational`
+- `PYPNM_CMTS_MUTE_TAGS_HARD=1`
 
 ## config-menu
 

@@ -45,6 +45,18 @@ To suppress legacy PyPNM endpoints mounted under `/cm`:
 pypnm-cmts serve --mute-pypnm-endpoints
 ```
 
+To mute endpoint groups by FastAPI tag:
+
+```bash
+pypnm-cmts serve --mute-tags "Orchestrator,Operational"
+```
+
+To enforce policy blocking with HTTP 403 for matched tags:
+
+```bash
+pypnm-cmts serve --mute-tags "Orchestrator,Operational" --mute-tags-hard
+```
+
 ### Custom host/port
 
 ```bash
@@ -254,6 +266,8 @@ These options apply to `pypnm-cmts serve`.
 --reload-include Glob pattern(s) to include (repeatable; default: *.py)
 --reload-exclude Glob pattern(s) to exclude (repeatable)
 --mute-pypnm-endpoints Suppress legacy PyPNM routes under /cm at startup
+--mute-tags Comma-separated route tags to mute at startup
+--mute-tags-hard Enforce 403 for routes matched by --mute-tags
 ```
 
 For full command and option coverage across all CLI commands, see [CLI option reference](cli-options.md).
