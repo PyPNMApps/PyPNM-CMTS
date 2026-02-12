@@ -25,10 +25,7 @@ from typing import Iterable, List, Set, Tuple
 #   "00:11:22:33:44:55"  - alternate generic example, if ever needed in docs.
 #
 APPROVED_MACS: Set[str] = {
-    "aa:bb:cc:dd:ee:ff",
-    "aa:bb:cc:dd:ee:01",
-    "aa:bb:cc:dd:ee:02",
-    "aa:bb:cc:dd:ee:03",
+    "aa:bb:cc:dd:ee:*",
     "00:11:22:33:44:55",
     "00:00:00:00:00:01",
     "00:00:00:00:00:00",
@@ -79,13 +76,22 @@ def _normalize_mac(mac: str) -> str:
 
 # Precompute normalized allowlist once
 APPROVED_MACS_NORMALIZED: Set[str] = {_normalize_mac(m) for m in APPROVED_MACS}
+APPROVED_MAC_PREFIXES: Set[str] = {
+    mac[:-1] for mac in APPROVED_MACS_NORMALIZED if mac.endswith(":*")
+}
+APPROVED_MACS_EXACT: Set[str] = {
+    mac for mac in APPROVED_MACS_NORMALIZED if not mac.endswith(":*")
+}
 
 
 def _is_approved(mac: str) -> bool:
     """
     Return True If The MAC Address Is In The Approved Allowlist.
     """
-    return _normalize_mac(mac) in APPROVED_MACS_NORMALIZED
+    normalized = _normalize_mac(mac)
+    if normalized in APPROVED_MACS_EXACT:
+        return True
+    return any(normalized.startswith(prefix) for prefix in APPROVED_MAC_PREFIXES)
 
 
 def _load_gitignore_dirs(root: str) -> Set[str]:
