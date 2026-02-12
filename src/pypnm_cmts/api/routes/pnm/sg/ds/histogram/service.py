@@ -18,14 +18,12 @@ from pypnm.config.pnm_config_manager import PnmConfigManager
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.inet import Inet
 from pypnm.lib.types import (
-    ChannelId,
     FileNameStr,
     InetAddressStr,
     MacAddressStr,
     TransactionId,
 )
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
 from pypnm_cmts.api.common.operations.models import (
     OperationExecutionModel,
     OperationRequestContextModel,
@@ -327,23 +325,21 @@ class DsHistogramServiceGroupOperationService(PnmServiceGroupOperationServiceBas
         request: DsHistogramServiceGroupStartCaptureRequest,
     ) -> OperationRequestSummaryModel:
         cmts = request.cmts
-        channel_ids = DsHistogramServiceGroupOperationService._resolve_channel_ids(cmts)
         requested_sg_ids = list(cmts.serving_group.id)
         requested_mac_addresses = list(cmts.cable_modem.mac_address)
         serving_group_ids, mac_addresses = self._resolve_modem_scope(requested_sg_ids, requested_mac_addresses)
         self.logger.info(
-            "ds_histogram request scope requested_sg=%s requested_macs=%s resolved_sg=%s resolved_macs=%s channel_count=%s",
+            "ds_histogram request scope requested_sg=%s requested_macs=%s resolved_sg=%s resolved_macs=%s",
             len(requested_sg_ids),
             len(requested_mac_addresses),
             len(serving_group_ids),
             len(mac_addresses),
-            len(channel_ids),
         )
         execution = request.execution
         return OperationRequestSummaryModel(
             serving_group_ids=serving_group_ids,
             mac_addresses=mac_addresses,
-            channel_ids=channel_ids,
+            channel_ids=[],
             execution=OperationExecutionModel(
                 max_workers=execution.max_workers,
                 retry_count=execution.retry_count,
@@ -352,15 +348,6 @@ class DsHistogramServiceGroupOperationService(PnmServiceGroupOperationServiceBas
                 overall_timeout_seconds=execution.overall_timeout_seconds,
             ),
         )
-
-    @staticmethod
-    def _resolve_channel_ids(cmts: CmtsRequestEnvelopeModel) -> list[ChannelId]:
-        pnm = cmts.cable_modem.pnm_parameters
-        capture = pnm.capture if pnm is not None else None
-        channel_ids = capture.channel_ids if capture is not None else None
-        if not channel_ids:
-            return []
-        return list(channel_ids)
 
 
 __all__ = [

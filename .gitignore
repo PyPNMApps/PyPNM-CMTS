@@ -32,8 +32,11 @@ logs/*
 backup/*
 issues/*
 deploy/docker/compose/.env
+
+# AI AGENTS
 AGENTS.md
 release-reports/
+tools/agent-review/
 .state/*
 .state
 

@@ -6,7 +6,12 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.api.common.cmts_request import (
+    CmtsCableModemFilterModel,
+    CmtsServingGroupFilterModel,
+    CmtsSnmpModel,
+    CmtsTftpParametersModel,
+)
 from pypnm_cmts.api.common.operations.models import (
     OperationResultsSummaryModel,
     OperationStateModel,
@@ -49,12 +54,44 @@ class DsHistogramCaptureSettingsModel(BaseModel):
     sample_duration: int = Field(default=10, gt=0, description="Histogram sample duration in seconds.")
 
 
+class DsHistogramCmtsPnmParametersModel(BaseModel):
+    """Histogram-specific PNM override parameters."""
+
+    tftp: CmtsTftpParametersModel | None = Field(default=None, description="Optional TFTP override parameters.")
+
+
+class DsHistogramCmtsCableModemFilterModel(CmtsCableModemFilterModel):
+    """Histogram-specific cable modem filter and overrides."""
+
+    pnm_parameters: DsHistogramCmtsPnmParametersModel | None = Field(
+        default=None,
+        description="Optional PNM override parameters.",
+    )
+    snmp: CmtsSnmpModel | None = Field(default=None, description="Optional SNMP override parameters.")
+
+
+class DsHistogramCmtsRequestEnvelopeModel(BaseModel):
+    """Histogram-specific CMTS request envelope."""
+
+    serving_group: CmtsServingGroupFilterModel = Field(
+        default_factory=CmtsServingGroupFilterModel,
+        description="Serving group selection.",
+    )
+    cable_modem: DsHistogramCmtsCableModemFilterModel = Field(
+        default_factory=DsHistogramCmtsCableModemFilterModel,
+        description="Cable modem selection and overrides.",
+    )
+
+
 class DsHistogramServiceGroupStartCaptureRequest(BaseModel):
     """Request payload for SG-level downstream Histogram startCapture."""
 
     model_config = ConfigDict(extra="ignore")
 
-    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
+    cmts: DsHistogramCmtsRequestEnvelopeModel = Field(
+        default_factory=DsHistogramCmtsRequestEnvelopeModel,
+        description="CMTS request envelope.",
+    )
     execution: DsHistogramServiceGroupExecutionModel = Field(
         default_factory=DsHistogramServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
@@ -112,6 +149,9 @@ class DsHistogramServiceGroupResultsResponse(BaseModel):
 
 __all__ = [
     "DsHistogramCaptureSettingsModel",
+    "DsHistogramCmtsCableModemFilterModel",
+    "DsHistogramCmtsPnmParametersModel",
+    "DsHistogramCmtsRequestEnvelopeModel",
     "DsHistogramServiceGroupCancelResponse",
     "DsHistogramServiceGroupExecutionModel",
     "DsHistogramServiceGroupOperationRequest",
