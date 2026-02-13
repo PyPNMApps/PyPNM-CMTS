@@ -14,6 +14,8 @@ from pypnm_cmts.api.routes.serving_group.schemas import (
     GetServingGroupIdsResponse,
     GetServingGroupTopologyRequest,
     GetServingGroupTopologyResponse,
+    ServingGroupDocsDevResetNowRequest,
+    ServingGroupDocsDevResetNowResponse,
     ServingGroupStatusResponse,
 )
 from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
@@ -101,6 +103,23 @@ class ServingGroupRouter:
             Returns cached topology summary for the specified service group.
             """
             return self._service.get_topology(request)
+
+        @self.router.post(
+            "/cableModem/docsDevResetNow",
+            response_model=ServingGroupDocsDevResetNowResponse,
+            summary="Issue docsDevResetNow for serving-group cable modems",
+            description="Resolves serving-group and cable-modem scope, then sends docsDevResetNow SNMP commands.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
+        )
+        def docs_dev_reset_now(
+            request: ServingGroupDocsDevResetNowRequest,
+        ) -> ServingGroupDocsDevResetNowResponse:
+            """
+            **Serving Group docsDevResetNow**
+
+            Sends docsDevResetNow reset commands for resolved cable modems in scope.
+            """
+            return self._service.docs_dev_reset_now(request)
 
 
 router = ServingGroupRouter().router

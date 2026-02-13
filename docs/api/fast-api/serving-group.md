@@ -198,6 +198,65 @@ Request body:
 }
 ```
 
+## POST /cmts/servingGroup/cableModem/docsDevResetNow
+
+Issue `docsDevResetNow` to cable modems resolved from serving-group and MAC scope.
+This endpoint is cache-backed for scope resolution and then sends per-modem SNMP reset commands.
+
+Request body:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": []
+    },
+    "cable_modem": {
+      "mac_address": [],
+      "snmp": {
+        "snmpV2C": {
+          "community": "private"
+        }
+      }
+    }
+  }
+}
+```
+
+Semantics:
+- `cmts.serving_group.id: []` means all discovered service groups.
+- `cmts.cable_modem.mac_address: []` means all cable modems in resolved service groups.
+- `cmts.cable_modem.snmp.snmpV2C.community` is optional; system default write community is used when omitted or null.
+- `pnm_parameters` is not part of this endpoint request.
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-02-13T20:15:30+00:00",
+  "requested_sg_ids": [3147266],
+  "requested_mac_addresses": ["aa:bb:cc:dd:ee:02"],
+  "resolved_sg_ids": [3147266],
+  "resolved_mac_addresses": ["aa:bb:cc:dd:ee:02"],
+  "missing_sg_ids": [],
+  "missing_mac_addresses": [],
+  "attempted_count": 1,
+  "success_count": 1,
+  "failure_count": 0,
+  "results": [
+    {
+      "sg_id": 3147266,
+      "mac_address": "aa:bb:cc:dd:ee:02",
+      "ip_address": "192.168.0.102",
+      "status": 0,
+      "message": "docsDevResetNow command sent"
+    }
+  ]
+}
+```
+
 Single service group request:
 
 ```json
