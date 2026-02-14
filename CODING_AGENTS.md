@@ -98,6 +98,9 @@ Before introducing new types, constants, validators, or storage patterns:
 - For Markdown-only changes, run `mkdocs build -s`.
 - Add focused tests for new behavior and keep tests hermetic when possible.
 - Reuse existing test patterns from similar modules before introducing new structures.
+- Use `monkeypatch` only in tests.
+- Do not use `monkeypatch` in production modules, runtime code paths, tools, or scripts.
+- This applies to both `PyPNM-CMTS` and `PyPNM`.
 
 ## Repo Hygiene
 

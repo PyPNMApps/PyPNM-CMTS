@@ -7,12 +7,14 @@ import threading
 from queue import SimpleQueue
 
 import pytest
-from pypnm_cmts.api.routes.serving_group.schemas import (
+
+from pypnm_cmts.api.routes.serving_group.operations.schemas import (
     GetServingGroupCableModemsRequest,
     ServingGroupCableModemEntryModel,
 )
-from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
-
+from pypnm_cmts.api.routes.serving_group.operations.service import (
+    ServingGroupCacheService,
+)
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel

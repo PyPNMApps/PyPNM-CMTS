@@ -6,11 +6,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm_cmts.api.routes.serving_group.schemas import (
-    ServingGroupDocsDevResetNowRequest,
-)
 
 from pypnm_cmts.api.main import app
+from pypnm_cmts.api.routes.serving_group.cm.operations.schemas import (
+    ServingGroupDocsDevResetNowRequest,
+)
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import RfChannelType
 from pypnm_cmts.lib.types import ChSetId, CmtsCmRegState, ServiceGroupId
@@ -146,7 +146,7 @@ def test_serving_group_ids_missing_store_returns_error_metadata(monkeypatch: pyt
     _seed_store(store, SG_ID_ONE, [])
     _configure_runtime_state(store, [SG_ID_ONE])
 
-    monkeypatch.setattr("pypnm_cmts.api.routes.serving_group.service.get_sgw_store", lambda: None)
+    monkeypatch.setattr("pypnm_cmts.api.routes.serving_group.operations.service.get_sgw_store", lambda: None)
 
     with TestClient(app) as client:
         response = client.get("/cmts/servingGroup/get/ids")
@@ -530,7 +530,7 @@ def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: pytes
     _configure_runtime_state(store, [sg_id])
 
     monkeypatch.setattr(
-        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._now_epoch",
+        "pypnm_cmts.api.routes.serving_group.operations.service.ServingGroupCacheService._now_epoch",
         staticmethod(lambda: now_epoch),
     )
 
@@ -572,13 +572,13 @@ def test_serving_group_docs_dev_reset_now_scoped_success(monkeypatch: pytest.Mon
         return (ServiceStatusCode.SUCCESS, "docsDevResetNow command sent")
 
     monkeypatch.setattr(
-        "pypnm_cmts.api.routes.serving_group.service.ServingGroupCacheService._send_docs_dev_reset_now",
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._send_docs_dev_reset_now",
         staticmethod(_fake_reset),
     )
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/cableModem/docsDevResetNow",
+            "/cmts/servingGroup/cableModem/operations/docsDevResetNow",
             json={
                 "cmts": {
                     "serving_group": {"id": [int(SG_ID_ONE)]},
@@ -615,7 +615,7 @@ def test_serving_group_docs_dev_reset_now_missing_mac_returns_failure(monkeypatc
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/cableModem/docsDevResetNow",
+            "/cmts/servingGroup/cableModem/operations/docsDevResetNow",
             json={
                 "cmts": {
                     "serving_group": {"id": [int(SG_ID_ONE)]},
