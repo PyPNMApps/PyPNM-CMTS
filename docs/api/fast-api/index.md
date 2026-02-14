@@ -62,7 +62,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `GET /cmts/servingGroup/status` - SGW startup status and cache readiness.
 - `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
 - `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
-- `POST /cmts/servingGroup/cableModem/docsDevResetNow` - Issue docsDevResetNow for scoped cable modems.
+- `POST /cmts/servingGroup/cableModem/operations/docsDevResetNow` - Issue docsDevResetNow for scoped cable modems.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/startCapture` - Start serving group RxMER operation.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/status` - Get serving group RxMER operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/results` - Get serving group RxMER operation results.

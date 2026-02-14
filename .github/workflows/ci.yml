@@ -41,7 +41,7 @@ jobs:
 
       - name: Ruff
         run: |
-          python -m ruff check src
+          python -m ruff check src tools
 
       - name: Run tests
         run: |

@@ -35,7 +35,7 @@ def _tracked_files() -> list[str]:
 def _scan_file(path: str, patterns: list[tuple[re.Pattern[str], str]]) -> list[ScanFinding]:
     findings: list[ScanFinding] = []
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             for idx, line in enumerate(handle, start=1):
                 for pattern, message in patterns:
                     if pattern.search(line):

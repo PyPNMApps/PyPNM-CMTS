@@ -198,10 +198,11 @@ Request body:
 }
 ```
 
-## POST /cmts/servingGroup/cableModem/docsDevResetNow
+## POST /cmts/servingGroup/cableModem/operations/docsDevResetNow
 
 Issue `docsDevResetNow` to cable modems resolved from serving-group and MAC scope.
 This endpoint is cache-backed for scope resolution and then sends per-modem SNMP reset commands.
+OpenAPI tag: `CMTS Serving Group CableModem Operations`.
 
 Request body:
 

@@ -3,14 +3,12 @@ from __future__ import annotations
 
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Maurice Garcia
-
 import argparse
 import json
 import re
 import sys
 from pathlib import Path
-from typing import Final, List
-
+from typing import Final
 
 VERSION_FILE_PATH: Final[Path]               = Path("src/pypnm_cmts/version.py")
 PYPROJECT_FILE_PATH: Final[Path]             = Path("pyproject.toml")
@@ -79,8 +77,8 @@ def _read_current_version(version_file: Path) -> str:
 def _write_new_version(version_file: Path, new_version: str) -> None:
     """Write the new version into the version file, replacing the existing assignment line."""
     text = version_file.read_text(encoding="utf-8")
-    lines: List[str] = text.splitlines()
-    updated_lines: List[str] = []
+    lines: list[str] = text.splitlines()
+    updated_lines: list[str] = []
     replaced = False
 
     for line in lines:
@@ -120,8 +118,8 @@ def _write_new_pyproject_version(pyproject_file: Path, new_version: str) -> None
         sys.exit(1)
 
     text = pyproject_file.read_text(encoding="utf-8")
-    lines: List[str] = text.splitlines()
-    updated_lines: List[str] = []
+    lines: list[str] = text.splitlines()
+    updated_lines: list[str] = []
     replaced = False
 
     for line in lines:

@@ -6,11 +6,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-
-from pypnm_cmts.api.main import app
 from pypnm_cmts.api.routes.serving_group.schemas import (
     ServingGroupDocsDevResetNowRequest,
 )
+
+from pypnm_cmts.api.main import app
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import RfChannelType
 from pypnm_cmts.lib.types import ChSetId, CmtsCmRegState, ServiceGroupId

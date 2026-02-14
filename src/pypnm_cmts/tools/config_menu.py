@@ -11,7 +11,6 @@ from enum import Enum
 from pathlib import Path
 
 import pypnm
-
 from pydantic import BaseModel, Field, field_validator
 from pypnm.lib.inet import Inet
 

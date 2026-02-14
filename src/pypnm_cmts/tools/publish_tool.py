@@ -13,7 +13,6 @@ import urllib.request
 from getpass import getpass
 from pathlib import Path
 
-
 DIST_DIR = Path("dist")
 PYPI_JSON_URL = "https://pypi.org/pypi/pypnm-docsis-cmts/json"
 PYPI_UPLOAD_URL = "https://upload.pypi.org/legacy/"

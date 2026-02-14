@@ -8,17 +8,17 @@ from enum import Enum
 
 from fastapi import APIRouter
 
-from pypnm_cmts.api.routes.serving_group.schemas import (
+from pypnm_cmts.api.routes.serving_group.operations.schemas import (
     GetServingGroupCableModemsRequest,
     GetServingGroupCableModemsResponse,
     GetServingGroupIdsResponse,
     GetServingGroupTopologyRequest,
     GetServingGroupTopologyResponse,
-    ServingGroupDocsDevResetNowRequest,
-    ServingGroupDocsDevResetNowResponse,
     ServingGroupStatusResponse,
 )
-from pypnm_cmts.api.routes.serving_group.service import ServingGroupCacheService
+from pypnm_cmts.api.routes.serving_group.operations.service import (
+    ServingGroupCacheService,
+)
 from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 
 
@@ -33,7 +33,7 @@ class ServingGroupRouter:
         tags: list[str | Enum] | None = None,
     ) -> None:
         if tags is None:
-            tags = ["CMTS Serving Group"]
+            tags = ["CMTS Serving Group Operations"]
         self.router = APIRouter(prefix=prefix, tags=tags)
         self.logger = logging.getLogger(__name__)
         self._service = ServingGroupCacheService()
@@ -103,23 +103,6 @@ class ServingGroupRouter:
             Returns cached topology summary for the specified service group.
             """
             return self._service.get_topology(request)
-
-        @self.router.post(
-            "/cableModem/docsDevResetNow",
-            response_model=ServingGroupDocsDevResetNowResponse,
-            summary="Issue docsDevResetNow for serving-group cable modems",
-            description="Resolves serving-group and cable-modem scope, then sends docsDevResetNow SNMP commands.",
-            responses=JSON_ONLY_FAST_API_RESPONSE,
-        )
-        def docs_dev_reset_now(
-            request: ServingGroupDocsDevResetNowRequest,
-        ) -> ServingGroupDocsDevResetNowResponse:
-            """
-            **Serving Group docsDevResetNow**
-
-            Sends docsDevResetNow reset commands for resolved cable modems in scope.
-            """
-            return self._service.docs_dev_reset_now(request)
 
 
 router = ServingGroupRouter().router

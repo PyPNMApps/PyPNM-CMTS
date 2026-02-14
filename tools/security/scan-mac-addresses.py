@@ -10,8 +10,7 @@ import argparse
 import os
 import re
 import sys
-from typing import Iterable, List, Set, Tuple
-
+from collections.abc import Iterable
 
 # -----------------------------------------------------------------------------
 # Configuration: Approved MAC Address Allowlist
@@ -24,7 +23,7 @@ from typing import Iterable, List, Set, Tuple
 #   "aa:bb:cc:dd:ee:ff"  - generic example MAC (preferred default).
 #   "00:11:22:33:44:55"  - alternate generic example, if ever needed in docs.
 #
-APPROVED_MACS: Set[str] = {
+APPROVED_MACS: set[str] = {
     "aa:bb:cc:dd:ee:*",
     "00:11:22:33:44:55",
     "00:00:00:00:00:01",
@@ -45,7 +44,7 @@ APPROVED_MACS: Set[str] = {
 # -----------------------------------------------------------------------------
 # Configuration: Directory Ignore List
 # -----------------------------------------------------------------------------
-IGNORE_DIRS: Set[str] = {
+IGNORE_DIRS: set[str] = {
     ".git",
     ".env",
     ".venv",
@@ -61,7 +60,7 @@ IGNORE_DIRS: Set[str] = {
 
 MAC_REGEX = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")
 
-MACMatch = Tuple[str, int, int, str]  # (path, line_no, col, mac)
+MACMatch = tuple[str, int, int, str]  # (path, line_no, col, mac)
 
 
 def _normalize_mac(mac: str) -> str:
@@ -75,11 +74,11 @@ def _normalize_mac(mac: str) -> str:
 
 
 # Precompute normalized allowlist once
-APPROVED_MACS_NORMALIZED: Set[str] = {_normalize_mac(m) for m in APPROVED_MACS}
-APPROVED_MAC_PREFIXES: Set[str] = {
+APPROVED_MACS_NORMALIZED: set[str] = {_normalize_mac(m) for m in APPROVED_MACS}
+APPROVED_MAC_PREFIXES: set[str] = {
     mac[:-1] for mac in APPROVED_MACS_NORMALIZED if mac.endswith(":*")
 }
-APPROVED_MACS_EXACT: Set[str] = {
+APPROVED_MACS_EXACT: set[str] = {
     mac for mac in APPROVED_MACS_NORMALIZED if not mac.endswith(":*")
 }
 
@@ -94,12 +93,12 @@ def _is_approved(mac: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in APPROVED_MAC_PREFIXES)
 
 
-def _load_gitignore_dirs(root: str) -> Set[str]:
+def _load_gitignore_dirs(root: str) -> set[str]:
     gitignore_path = os.path.join(root, ".gitignore")
-    ignore_dirs: Set[str] = set()
+    ignore_dirs: set[str] = set()
 
     try:
-        with open(gitignore_path, "r", encoding="utf-8", errors="ignore") as fh:
+        with open(gitignore_path, encoding="utf-8", errors="ignore") as fh:
             for raw_line in fh:
                 line = raw_line.strip()
                 if not line or line.startswith("#"):
@@ -119,7 +118,7 @@ def _load_gitignore_dirs(root: str) -> Set[str]:
     return ignore_dirs
 
 
-def _should_ignore_dir(root: str, dirpath: str, dirname: str, ignore_dirs: Set[str]) -> bool:
+def _should_ignore_dir(root: str, dirpath: str, dirname: str, ignore_dirs: set[str]) -> bool:
     if dirname in ignore_dirs:
         return True
     candidate = os.path.relpath(os.path.join(dirpath, dirname), root)
@@ -129,7 +128,7 @@ def _should_ignore_dir(root: str, dirpath: str, dirname: str, ignore_dirs: Set[s
     return False
 
 
-def _iter_files(root: str, ignore_dirs: Set[str]) -> Iterable[str]:
+def _iter_files(root: str, ignore_dirs: set[str]) -> Iterable[str]:
     """
     Yield Text File Candidates Under The Given Root Directory.
 
@@ -145,7 +144,7 @@ def _iter_files(root: str, ignore_dirs: Set[str]) -> Iterable[str]:
             yield path
 
 
-def _scan_file(path: str) -> List[MACMatch]:
+def _scan_file(path: str) -> list[MACMatch]:
     """
     Scan A Single File For Non-Approved MAC Addresses.
 
@@ -154,10 +153,10 @@ def _scan_file(path: str) -> List[MACMatch]:
     list[MACMatch]
         A list of (path, line_number, column, mac_string) tuples.
     """
-    matches: List[MACMatch] = []
+    matches: list[MACMatch] = []
 
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
             for line_no, line in enumerate(fh, start=1):
                 for match in MAC_REGEX.finditer(line):
                     mac = match.group(0)
@@ -171,7 +170,7 @@ def _scan_file(path: str) -> List[MACMatch]:
     return matches
 
 
-def _parse_args(argv: List[str]) -> argparse.Namespace:
+def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Scan the repository tree for non-approved MAC addresses."
     )
@@ -193,7 +192,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     """
     Scan Repository For Non-Approved MAC Addresses And Report Any Findings.
 
@@ -211,7 +210,7 @@ def main(argv: List[str] | None = None) -> None:
     print(f"Scanning for MAC addresses under: {root}")
     print(f"Approved MACs: {sorted(APPROVED_MACS_NORMALIZED)}")
 
-    all_matches: List[MACMatch] = []
+    all_matches: list[MACMatch] = []
 
     ignore_dirs = set(IGNORE_DIRS)
     if not args.skip_gitignore:

@@ -95,7 +95,7 @@ class HeaderUpdater:
                     print(f"❌ Error processing {full_path}: {exc}")
 
     def _ensure_header_and_future(self, path: str) -> None:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             lines = handle.readlines()
 
         original = lines[:]
@@ -245,9 +245,7 @@ class HeaderUpdater:
             return True
         if os.path.isfile(os.path.join(path, "bin", "activate")):
             return True
-        if os.path.isfile(os.path.join(path, "Scripts", "activate")):
-            return True
-        return False
+        return os.path.isfile(os.path.join(path, "Scripts", "activate"))
 
     def _is_site_packages_path(self, path: str) -> bool:
         return "site-packages" in set(path.split(os.sep))
@@ -260,9 +258,7 @@ class HeaderUpdater:
             return True
         if self._is_virtualenv_dir(path):
             return True
-        if self._is_site_packages_path(path):
-            return True
-        return False
+        return bool(self._is_site_packages_path(path))
 
 
 class HeaderCli:

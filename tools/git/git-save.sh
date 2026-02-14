@@ -12,7 +12,7 @@ Options:
   --commit-msg  Commit message prefix (default: "Update").
   --push        Push the current branch after commit.
   --skip-ruff   Skip ruff checks before committing.
-  --ruff-fix    Run ruff with --fix before committing.
+  --ruff-fix    Deprecated. Ruff now runs with --fix automatically.
   -h, --help    Show this help.
 EOF
 }
@@ -20,7 +20,6 @@ EOF
 commit_msg="Update"
 do_push="false"
 skip_ruff="false"
-ruff_fix="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,7 +41,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --ruff-fix)
-      ruff_fix="true"
+      echo "INFO: --ruff-fix is deprecated; ruff --fix runs automatically."
       shift
       ;;
     -h|--help)
@@ -93,11 +92,7 @@ if [[ "${skip_ruff}" != "true" ]]; then
     exit 1
   fi
   echo "Running ruff checks..."
-  if [[ "${ruff_fix}" == "true" ]]; then
-    ruff check . --fix
-  else
-    ruff check .
-  fi
+  ruff check . --fix
 fi
 
 echo "Staging changes..."

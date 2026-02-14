@@ -3,7 +3,6 @@ from __future__ import annotations
 
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Maurice Garcia
-
 import argparse
 import atexit
 import os
@@ -15,7 +14,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Final
-
 
 VERSION_FILE_PATH: Final[Path]           = Path("src/pypnm_cmts/version.py")
 BUMP_SCRIPT_PATH: Final[Path]            = Path("tools/support") / "bump_version.py"
@@ -390,11 +388,11 @@ def _collect_workflows() -> list[tuple[str, str]]:
     if not WORKFLOWS_DIR.exists():
         return []
 
-    workflows: list[tuple[str, str]] = []
-    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
-        workflows.append((_read_workflow_name(path), os.path.relpath(path, Path.cwd())))
-    for path in sorted(WORKFLOWS_DIR.glob("*.yaml")):
-        workflows.append((_read_workflow_name(path), os.path.relpath(path, Path.cwd())))
+    workflows: list[tuple[str, str]] = [
+        (_read_workflow_name(path), os.path.relpath(path, Path.cwd()))
+        for ext in ("*.yml", "*.yaml")
+        for path in sorted(WORKFLOWS_DIR.glob(ext))
+    ]
     return workflows
 
 
@@ -801,7 +799,7 @@ def main() -> None:
             print("  8) Run local docker preflight (tools/local/local_container_build.sh --smoke)")
         if not skip_k8s:
             print("  9) Run local Kubernetes smoke test (tools/local/local_kubernetes_smoke.sh)")
-        print(f" 10) Build docs with mkdocs --strict")
+        print(" 10) Build docs with mkdocs --strict")
         if test_release:
             print(" 11) Skip commit/tag/push (test-only)")
             print(f" 12) Restore version files back to {current_version}")

@@ -8,7 +8,12 @@ from fastapi import FastAPI
 from pypnm_cmts.api.routes.operational.router import router as operational_router
 from pypnm_cmts.api.routes.orchestrator.router import router as orchestrator_router
 from pypnm_cmts.api.routes.pnm.router import router as pnm_router
-from pypnm_cmts.api.routes.serving_group.router import router as serving_group_router
+from pypnm_cmts.api.routes.serving_group.cm.operations.router import (
+    router as serving_group_cm_operations_router,
+)
+from pypnm_cmts.api.routes.serving_group.operations.router import (
+    router as serving_group_router,
+)
 from pypnm_cmts.api.routes.system.router import router as system_router
 
 
@@ -21,5 +26,6 @@ class RouterRegistrar:
         app.include_router(orchestrator_router)
         app.include_router(pnm_router)
         app.include_router(serving_group_router)
+        app.include_router(serving_group_cm_operations_router)
         app.include_router(system_router)
         return app

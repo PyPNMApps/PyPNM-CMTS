@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
-
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 VERSION_FILE_PATH: Final[Path]           = REPO_ROOT / "src" / "pypnm_cmts" / "version.py"
 BUMP_SCRIPT_PATH: Final[Path]            = REPO_ROOT / "tools" / "support" / "bump_version.py"
@@ -367,11 +366,11 @@ def _collect_workflows() -> list[tuple[str, str]]:
     if not WORKFLOWS_DIR.exists():
         return []
 
-    workflows: list[tuple[str, str]] = []
-    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
-        workflows.append((_read_workflow_name(path), os.path.relpath(path, REPO_ROOT)))
-    for path in sorted(WORKFLOWS_DIR.glob("*.yaml")):
-        workflows.append((_read_workflow_name(path), os.path.relpath(path, REPO_ROOT)))
+    workflows: list[tuple[str, str]] = [
+        (_read_workflow_name(path), os.path.relpath(path, REPO_ROOT))
+        for ext in ("*.yml", "*.yaml")
+        for path in sorted(WORKFLOWS_DIR.glob(ext))
+    ]
     return workflows
 
 
