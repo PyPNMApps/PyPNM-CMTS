@@ -45,7 +45,7 @@ def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> No
         metrics=metrics,
     )
 
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     manager.refresh_once(1_000.0)
 
     records = [record for record in caplog.records if record.name == "SgwManager"]

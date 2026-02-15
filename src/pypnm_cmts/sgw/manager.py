@@ -577,8 +577,9 @@ class SgwManager:
                 },
             )
             return
-        self.logger.info(
-            "sgw refresh SGWorkerID: %s",
+        self.logger.debug(
+            "sgw refresh mode=%s SGWorkerID: %s",
+            refresh_mode,
             worker_id,
             extra={
                 "sg_id": int(sg_id),

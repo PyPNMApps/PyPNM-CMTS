@@ -48,7 +48,7 @@ from pypnm_cmts.sgw.models import (
 
 T = TypeVar("T")
 CM_SYSDESCR_TIMEOUT_SECONDS = 3
-CM_SYSDESCR_RETRIES = 3
+CM_SYSDESCR_RETRIES = 2
 
 
 def _run_asyncio(coro: Awaitable[T]) -> T:
@@ -183,7 +183,7 @@ class SnmpInventoryProvider:
         if not per_sg:
             return []
         modem_community = SnmpInventoryProvider._resolve_modem_community(settings)
-        logger.info(
+        logger.debug(
             "heavyPoll [CM_SYSDESCR_COMMUNITY] sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s",
             int(sg_id),
             str(settings.adapter.community),
@@ -244,14 +244,14 @@ class SnmpInventoryProvider:
         if ip_address.strip() == "":
             return SystemDescriptor.empty().to_model()
         if community.strip() == "":
-            logger.warning(
+            logger.debug(
                 "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=empty_community",
                 int(sg_id),
                 mac,
                 ip_address,
             )
             return SystemDescriptor.empty().to_model()
-        logger.info(
+        logger.debug(
             "heavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=%s mac=%s ip=%s community=%s",
             int(sg_id),
             mac,
@@ -264,7 +264,7 @@ class SnmpInventoryProvider:
             community=community,
         )
         if not bool(sysdescr_model.is_empty):
-            logger.info(
+            logger.debug(
                 "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=success",
                 int(sg_id),
                 mac,
@@ -272,7 +272,7 @@ class SnmpInventoryProvider:
                 community,
             )
             return sysdescr_model
-        logger.warning(
+        logger.debug(
             "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=empty",
             int(sg_id),
             mac,
