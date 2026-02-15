@@ -90,6 +90,13 @@ Before introducing new types, constants, validators, or storage patterns:
 
 - For Markdown documentation examples that include sysDescr payloads, use LANCity as the example vendor and model naming.
 
+## Logging Format Rule
+
+- Use class-name logger names in production classes.
+- Keep operation labels in CaseSnake inside brackets for all log operations, for example `[REFRESH_HEAVY]` and `[CM_SYSDESCR_RESULT]`.
+- Use clear operation names with consistent casing in log messages.
+- Log only required troubleshooting context fields (for example `sg_id`, `mac`, `ip`, `community`) and avoid redundant keys.
+
 ## PNM Data Type Placement Rule
 
 - Place all PNM SNMP table data type models under `src/pypnm_cmts/pnm/data_type`.

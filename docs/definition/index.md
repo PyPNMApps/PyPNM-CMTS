@@ -25,6 +25,7 @@ Table Of Contents in alphabetical order.
 - [Lease](#lease)
 - [Lease Held](#lease-held)
 - [Light Refresh](#light-refresh)
+- [Log Operation Label (CaseSnake)](#log-operation-label-casesnake)
 - [OFDM](#ofdm)
 - [OFDMA](#ofdma)
 - [Orchestrator](#orchestrator)
@@ -126,6 +127,10 @@ A boolean indicating whether the current worker instance holds the lease for its
 ### Light Refresh
 A serving-group worker refresh that updates only cheap state for known cable modems (for example, registration/online status) without rebuilding
 inventory. It runs more frequently than heavy refresh.
+
+### Log Operation Label (CaseSnake)
+A bracketed operation marker in log messages that uses uppercase snake case for quick scanning and filtering. Examples: `[REFRESH_HEAVY]`,
+`[REFRESH_LIGHT]`, and `[CM_SYSDESCR_RESULT]`.
 
 ### OFDM
 Orthogonal Frequency-Division Multiplexing downstream channels in DOCSIS 3.1. OFDM channels are represented by a channel id and a frequency range

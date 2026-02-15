@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Iterable
-from contextvars import ContextVar, Token
 from typing import Protocol, TypeVar
 
 from pypnm.docsis.cable_modem import CableModem
@@ -50,10 +49,6 @@ from pypnm_cmts.sgw.models import (
 T = TypeVar("T")
 CM_SYSDESCR_TIMEOUT_SECONDS = 3
 CM_SYSDESCR_RETRIES = 2
-_HEAVY_POLL_CYCLE_ID: ContextVar[str] = ContextVar(
-    "pypnm_cmts_sgw_heavy_poll_cycle_id",
-    default="",
-)
 
 
 def _run_asyncio(coro: Awaitable[T]) -> T:
@@ -188,10 +183,8 @@ class SnmpInventoryProvider:
         if not per_sg:
             return []
         modem_community = SnmpInventoryProvider._resolve_modem_community(settings)
-        cycle_id = _current_heavy_poll_cycle_id()
         logger.debug(
-            "heavyPoll [CM_SYSDESCR_COMMUNITY] cycle_id=%s sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s",
-            cycle_id,
+            "HeavyPoll [CM_SYSDESCR_COMMUNITY] sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s",
             int(sg_id),
             str(settings.adapter.community),
             str(settings.adapter.write_community),
@@ -252,16 +245,14 @@ class SnmpInventoryProvider:
             return SystemDescriptor.empty().to_model()
         if community.strip() == "":
             logger.debug(
-                "heavyPoll [CM_SYSDESCR_RESULT] cycle_id=%s sg_id=%s mac=%s ip=%s outcome=empty_community",
-                _current_heavy_poll_cycle_id(),
+                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=empty_community",
                 int(sg_id),
                 mac,
                 ip_address,
             )
             return SystemDescriptor.empty().to_model()
         logger.debug(
-            "heavyPoll [CM_SYSDESCR_ATTEMPT] cycle_id=%s sg_id=%s mac=%s ip=%s community=%s",
-            _current_heavy_poll_cycle_id(),
+            "HeavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=%s mac=%s ip=%s community=%s",
             int(sg_id),
             mac,
             ip_address,
@@ -275,8 +266,7 @@ class SnmpInventoryProvider:
             )
         except Exception as exc:
             logger.warning(
-                "heavyPoll [CM_SYSDESCR_RESULT] cycle_id=%s sg_id=%s mac=%s ip=%s community=%s outcome=exception error=%s",
-                _current_heavy_poll_cycle_id(),
+                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=exception error=%s",
                 int(sg_id),
                 mac,
                 ip_address,
@@ -286,8 +276,7 @@ class SnmpInventoryProvider:
             return SystemDescriptor.empty().to_model()
         if not bool(sysdescr_model.is_empty):
             logger.debug(
-                "heavyPoll [CM_SYSDESCR_RESULT] cycle_id=%s sg_id=%s mac=%s ip=%s community=%s outcome=success",
-                _current_heavy_poll_cycle_id(),
+                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=success",
                 int(sg_id),
                 mac,
                 ip_address,
@@ -295,8 +284,7 @@ class SnmpInventoryProvider:
             )
             return sysdescr_model
         logger.warning(
-            "heavyPoll [CM_SYSDESCR_RESULT] cycle_id=%s sg_id=%s mac=%s ip=%s community=%s outcome=empty",
-            _current_heavy_poll_cycle_id(),
+            "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=empty",
             int(sg_id),
             mac,
             ip_address,
@@ -325,20 +313,6 @@ class SnmpInventoryProvider:
 
 
 _DEFAULT_INVENTORY_PROVIDER = SnmpInventoryProvider()
-
-
-def set_heavy_poll_cycle_id(cycle_id: str) -> Token[str]:
-    """Set heavy-poll cycle id for correlated SGW logging."""
-    return _HEAVY_POLL_CYCLE_ID.set(cycle_id)
-
-
-def reset_heavy_poll_cycle_id(token: Token[str]) -> None:
-    """Reset heavy-poll cycle id context token."""
-    _HEAVY_POLL_CYCLE_ID.reset(token)
-
-
-def _current_heavy_poll_cycle_id() -> str:
-    return _HEAVY_POLL_CYCLE_ID.get()
 
 
 def sgw_heavy_poller(
@@ -591,7 +565,5 @@ def _calculate_ofdma_start_frequency(
 __all__ = [
     "HeavyInventoryProvider",
     "SnmpInventoryProvider",
-    "reset_heavy_poll_cycle_id",
     "sgw_heavy_poller",
-    "set_heavy_poll_cycle_id",
 ]

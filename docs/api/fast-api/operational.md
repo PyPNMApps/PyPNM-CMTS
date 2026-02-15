@@ -135,7 +135,7 @@ Notes:
 
 ## SGW Startup And Discovery Logs
 
-FastAPI startup runs SGW discovery and cache priming. The startup log sequence clarifies which discovery mode was used
+FastAPI startup runs SGW discovery and starts background refresh. The startup log sequence clarifies which discovery mode was used
 and whether the CMTS precheck succeeded (SNMP mode only).
 
 Expected log markers:
@@ -147,6 +147,20 @@ Expected log markers:
 
 If discovery returns an empty list, readiness is still reported as `ready` but endpoints that depend on SG cache will
 return empty results.
+
+## SGW Refresh And SysDescr Logs
+
+Expected refresh start markers:
+
+- `[REFRESH_HEAVY] worker=sgw-<sg_id>`
+- `[REFRESH_LIGHT] worker=sgw-<sg_id>`
+
+Heavy refresh modem sysDescr logs include modem context fields:
+
+- `HeavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=... mac=... ip=... community=...`
+- `HeavyPoll [CM_SYSDESCR_RESULT] sg_id=... mac=... ip=... community=... outcome=empty|exception|success`
+
+When SNMP timeouts occur overnight, use `sg_id`, `mac`, and `ip` from `HeavyPoll` result logs to identify failing modems.
 
 ### GET /ops/servingGroupWorker/process
 

@@ -7,7 +7,6 @@ import logging
 import random
 import threading
 import time
-import uuid
 from collections.abc import Callable
 from concurrent.futures import (
     ALL_COMPLETED,
@@ -37,10 +36,6 @@ from pypnm_cmts.sgw.models import (
     SgwSnapshotPayloadModel,
     SgwWorkerPollIntervalDebugModel,
     SgwWorkerProcessDebugModel,
-)
-from pypnm_cmts.sgw.pollers.heavy import (
-    reset_heavy_poll_cycle_id,
-    set_heavy_poll_cycle_id,
 )
 from pypnm_cmts.sgw.store import SgwCacheStore
 
@@ -385,7 +380,6 @@ class SgwManager:
             try:
                 with self._lock:
                     requested = self._refresh_requests.pop(sg_id, None)
-                cycle_id = self._build_refresh_cycle_id(sg_id)
                 heavy_due = False
                 light_due = False
                 if requested == CacheRefreshMode.HEAVY:
@@ -410,16 +404,10 @@ class SgwManager:
                     refresh_mode = REFRESH_MODE_HEAVY
                     worker_id = self._format_worker_id(sg_id)
                     self.logger.info(
-                        "sgw refresh start mode=%s cycle_id=%s SGWorkerID: %s",
-                        refresh_mode,
-                        cycle_id,
+                        "[REFRESH_HEAVY] worker=%s",
                         worker_id,
                     )
-                    cycle_token = set_heavy_poll_cycle_id(cycle_id)
-                    try:
-                        payload = self._heavy_poller(sg_id, self._settings)
-                    finally:
-                        reset_heavy_poll_cycle_id(cycle_token)
+                    payload = self._heavy_poller(sg_id, self._settings)
                     self._refresh_heavy(sg_id, now_epoch, payload)
                     heavy_refreshed.append(sg_id)
                     light_refreshed.append(sg_id)
@@ -428,9 +416,7 @@ class SgwManager:
                     refresh_mode = REFRESH_MODE_LIGHT
                     worker_id = self._format_worker_id(sg_id)
                     self.logger.info(
-                        "sgw refresh start mode=%s cycle_id=%s SGWorkerID: %s",
-                        refresh_mode,
-                        cycle_id,
+                        "[REFRESH_LIGHT] worker=%s",
                         worker_id,
                     )
                     updated_modems = self._light_poller(
@@ -489,7 +475,6 @@ class SgwManager:
                 self._log_refresh_event(
                     sg_id=sg_id,
                     refresh_mode=refresh_mode,
-                    cycle_id=cycle_id,
                     duration_ms=duration_ms,
                     result=result,
                     snapshot_time_epoch=float(metadata.snapshot_time_epoch),
@@ -577,7 +562,6 @@ class SgwManager:
         self,
         sg_id: ServiceGroupId,
         refresh_mode: str,
-        cycle_id: str,
         duration_ms: float,
         result: str,
         snapshot_time_epoch: float,
@@ -588,14 +572,12 @@ class SgwManager:
         worker_id = self._format_worker_id(sg_id)
         if error_message != "":
             self.logger.warning(
-                "sgw refresh error mode=%s cycle_id=%s SGWorkerID: %s",
+                "sgw refresh error mode=%s SGWorkerID: %s",
                 refresh_mode,
-                cycle_id,
                 worker_id,
                 extra={
                     "sg_id": int(sg_id),
                     "worker_id": worker_id,
-                    "cycle_id": cycle_id,
                     "refresh_mode": refresh_mode,
                     "duration_ms": duration_ms,
                     "result": result,
@@ -607,14 +589,12 @@ class SgwManager:
             )
             return
         self.logger.debug(
-            "sgw refresh mode=%s cycle_id=%s SGWorkerID: %s",
+            "sgw refresh mode=%s SGWorkerID: %s",
             refresh_mode,
-            cycle_id,
             worker_id,
             extra={
                 "sg_id": int(sg_id),
                 "worker_id": worker_id,
-                "cycle_id": cycle_id,
                 "refresh_mode": refresh_mode,
                 "duration_ms": duration_ms,
                 "result": result,
@@ -627,10 +607,6 @@ class SgwManager:
     @staticmethod
     def _format_worker_id(sg_id: ServiceGroupId) -> str:
         return f"sgw-{int(sg_id)}"
-
-    @staticmethod
-    def _build_refresh_cycle_id(sg_id: ServiceGroupId) -> str:
-        return f"sgw-{int(sg_id)}-{uuid.uuid4().hex[:8]}"
 
     @staticmethod
     def _normalize_error_message(message: str) -> str:

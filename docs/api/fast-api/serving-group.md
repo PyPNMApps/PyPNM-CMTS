@@ -116,6 +116,7 @@ Semantics:
 - Default response source is SGW heavy-poll cache snapshot data.
 - Heavy-poll `sysdescr` fetch uses the configured CM default write community (`cm_snmpv2c_write_community`) as a single selected value.
 - No SNMP community fallback/cycling is performed for heavy-poll `sysdescr` collection.
+- Heavy-poll modem `sysdescr` logs include modem context: `sg_id`, `mac`, `ip`, and `community`.
 - `refresh.mode` supports `none`, `light`, `heavy`.
 - `refresh.wait_for_cache` waits for SGW snapshot advance when refresh mode is not `none`.
 - `refresh.timeout_seconds` controls wait duration in seconds (default `8`).
