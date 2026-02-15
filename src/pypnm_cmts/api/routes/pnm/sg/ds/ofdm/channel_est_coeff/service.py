@@ -177,7 +177,7 @@ class ChannelEstCoeffCaptureWorker(PnmCaptureWorkerBase):
         else:
             final_message = message or MISSING_TRANSACTION_MESSAGE
         self.logger.info(
-            "[CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
+            "[CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=\"%s\" tx_id=%s filename=%s",
             short_op_id(operation_id),
             sg_id,
             mac_address,

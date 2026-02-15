@@ -71,7 +71,7 @@ class PnmCaptureWorkerBase(ABC):
         stages.append(eligibility_result)
         if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "[ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "[ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=\"%s\"",
                 short_op_id(item.operation_id),
                 item.sg_id,
                 item.mac_address,
@@ -111,7 +111,7 @@ class PnmCaptureWorkerBase(ABC):
         stages.append(precheck_result)
         if precheck_status != ServiceStatusCode.SUCCESS:
             self.logger.info(
-                "[PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
+                "[PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=\"%s\"",
                 short_op_id(item.operation_id),
                 item.sg_id,
                 item.mac_address,
@@ -134,7 +134,7 @@ class PnmCaptureWorkerBase(ABC):
         )
         stages.append(capture_result)
         self.logger.info(
-            "[COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
+            "[COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=\"%s\" tx_count=%s file_count=%s",
             short_op_id(item.operation_id),
             item.sg_id,
             item.mac_address,

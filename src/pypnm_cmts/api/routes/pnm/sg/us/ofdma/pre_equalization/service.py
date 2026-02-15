@@ -197,7 +197,7 @@ class PreEqualizationCaptureWorker(PnmCaptureWorkerBase):
                     final_message = MISSING_TRANSACTION_MESSAGE
 
         self.logger.info(
-            "[CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
+            "[CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=\"%s\" tx_count=%s file_count=%s",
             short_op_id(operation_id),
             sg_id,
             mac_address,
