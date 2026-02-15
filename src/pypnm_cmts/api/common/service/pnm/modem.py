@@ -53,20 +53,17 @@ class PnmModemResolver:
             if modem.mac != mac_address:
                 continue
             matched_modem = True
-            raw_ipv4 = str(modem.ipv4).strip()
-            raw_ipv6 = str(modem.ipv6).strip()
-            normalized_ipv4 = PnmModemResolver.normalize_ip_value(raw_ipv4)
-            normalized_ipv6 = PnmModemResolver.normalize_ip_value(raw_ipv6)
+            normalized_ipv4 = PnmModemResolver.normalize_ip_value(str(modem.ipv4).strip())
+            normalized_ipv6 = PnmModemResolver.normalize_ip_value(str(modem.ipv6).strip())
             ip_value = PnmModemResolver.select_ip(modem)
             logger.info(
-                "%s [MODEM_IP_CANDIDATES] sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
+                "%s [MODEM_IP_CANDIDATES] sg_id=%s mac=%s ipv4=%s ipv6=%s ip_selected=%s",
                 log_prefix,
                 sg_id,
                 mac_address,
-                raw_ipv4,
                 normalized_ipv4,
-                raw_ipv6,
                 normalized_ipv6,
+                "" if ip_value is None else ip_value,
             )
             if ip_value is None:
                 logger.info(
