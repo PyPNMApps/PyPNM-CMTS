@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pytest
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 from pypnm.lib.types import InetAddressStr, IPv4Str, IPv6Str, MacAddressStr
 
 from pypnm_cmts.cmts.discovery_models import (
@@ -11,6 +12,7 @@ from pypnm_cmts.cmts.discovery_models import (
     ServiceGroupCableModemInventoryModel,
 )
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.config.request_defaults import CmtsRequestDefaults
 from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
     CmtsServiceGroupTopologyModel,
 )
@@ -29,7 +31,7 @@ from pypnm_cmts.docsis.data_type.docs_if_upstream_channel_entry import (
 from pypnm_cmts.lib.types import MdCmSgId, MdDsSgId, MdUsSgId, ServiceGroupId
 from pypnm_cmts.orchestrator.models import SGW_LAST_ERROR_MAX_LENGTH, SgwRefreshState
 from pypnm_cmts.sgw.manager import SgwManager
-from pypnm_cmts.sgw.pollers.heavy import sgw_heavy_poller
+from pypnm_cmts.sgw.pollers.heavy import SnmpInventoryProvider, sgw_heavy_poller
 from pypnm_cmts.sgw.store import SgwCacheStore
 
 SG_ID = ServiceGroupId(1)
@@ -123,6 +125,10 @@ def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: pytest.MonkeyPat
         "pypnm_cmts.cmts.inventory_discovery.CmtsInventoryDiscoveryService.discover_registered_cms_by_sg",
         _fake_discover,
     )
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.pollers.heavy.SnmpInventoryProvider._fetch_modem_sysdescr",
+        staticmethod(lambda *args, **kwargs: SystemDescriptorModel(HW_REV="", VENDOR="", BOOTR="", SW_REV="", MODEL="", is_empty=True)),
+    )
 
     manager.refresh_once(SNAPSHOT_EPOCH)
 
@@ -135,6 +141,7 @@ def test_sgw_manager_heavy_refresh_populates_store(monkeypatch: pytest.MonkeyPat
         "00:11:22:33:44:55",
         "00:11:22:33:44:56",
     ]
+    assert entry.snapshot.cable_modems[0].sysdescr.is_empty is True
 
 
 def test_sgw_manager_heavy_refresh_error_marks_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,3 +165,18 @@ def test_sgw_manager_heavy_refresh_error_marks_cache(monkeypatch: pytest.MonkeyP
     assert entry.snapshot.metadata.refresh_state == SgwRefreshState.ERROR
     assert entry.snapshot.metadata.last_error is not None
     assert len(entry.snapshot.metadata.last_error) == SGW_LAST_ERROR_MAX_LENGTH
+
+
+def test_resolve_modem_community_uses_cm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _build_settings()
+
+    monkeypatch.setattr(
+        "pypnm_cmts.sgw.pollers.heavy.CmtsRequestDefaults.from_system_config",
+        classmethod(
+            lambda cls: CmtsRequestDefaults.model_validate(  # noqa: ARG005
+                {"cm_snmpv2c_write_community": "private"}
+            )
+        ),
+    )
+
+    assert SnmpInventoryProvider._resolve_modem_community(settings) == "private"

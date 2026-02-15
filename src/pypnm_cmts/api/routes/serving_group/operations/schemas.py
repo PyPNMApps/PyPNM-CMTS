@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 from pypnm.lib.types import (
     ChannelId,
     IPv4Str,
@@ -19,6 +20,7 @@ from pypnm_cmts.api.common.cmts_request import (
     CmtsServingGroupFilterModel,
 )
 from pypnm_cmts.docsis.data_type.cmts_cm_reg_state import CmtsCmRegStateText
+from pypnm_cmts.lib.constants import CacheRefreshMode
 from pypnm_cmts.lib.types import ChSetId, CmtsCmRegState, ServiceGroupId
 from pypnm_cmts.orchestrator.models import SgwCacheMetadataModel
 from pypnm_cmts.sgw.models import SgwRfChannelModel
@@ -27,6 +29,8 @@ from pypnm_cmts.sgw.runtime_state import SgwStartupStatusModel
 DEFAULT_PAGE_NUMBER = 1
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 1000
+DEFAULT_REFRESH_TIMEOUT_SECONDS = 8
+MAX_REFRESH_TIMEOUT_SECONDS = 30
 DEFAULT_CHANNEL_SET_ID = ChSetId(0)
 DEFAULT_REGISTRATION_STATUS = CmtsCmRegState(1)
 
@@ -76,6 +80,37 @@ class ServingGroupOnlyEnvelopeModel(BaseModel):
     serving_group: CmtsServingGroupFilterModel = Field(default_factory=CmtsServingGroupFilterModel, description="Serving group selection.")
 
 
+class ServingGroupCacheRefreshRequestModel(BaseModel):
+    """Optional refresh controls for cache-backed SG endpoints."""
+
+    mode: CacheRefreshMode = Field(default=CacheRefreshMode.NONE, description="Requested SGW refresh mode.")
+    wait_for_cache: bool = Field(default=False, description="Wait for cache snapshot advance before responding.")
+    timeout_seconds: int = Field(
+        default=DEFAULT_REFRESH_TIMEOUT_SECONDS,
+        ge=1,
+        le=MAX_REFRESH_TIMEOUT_SECONDS,
+        description="Maximum seconds to wait for cache advance when wait_for_cache is true.",
+    )
+
+    @model_validator(mode="after")
+    def _normalize_wait(self) -> ServingGroupCacheRefreshRequestModel:
+        if self.mode == CacheRefreshMode.NONE:
+            self.wait_for_cache = False
+        return self
+
+
+class ServingGroupCacheRefreshResultModel(BaseModel):
+    """Refresh execution summary for cache-backed SG responses."""
+
+    requested: bool = Field(default=False, description="Whether a refresh mode was requested.")
+    mode: CacheRefreshMode = Field(default=CacheRefreshMode.NONE, description="Requested refresh mode.")
+    applied: bool = Field(default=False, description="Whether SGW accepted at least one refresh request.")
+    wait_for_cache: bool = Field(default=False, description="Whether the endpoint waited for cache advance.")
+    advanced: bool = Field(default=False, description="Whether at least one target SG snapshot advanced.")
+    timeout_seconds: int = Field(default=DEFAULT_REFRESH_TIMEOUT_SECONDS, ge=1, le=MAX_REFRESH_TIMEOUT_SECONDS, description="Wait timeout used by refresh logic.")
+    message: str = Field(default="", description="Refresh informational message.")
+
+
 class GetServingGroupCableModemsRequest(BaseModel):
     """Request model for serving group cable modem retrieval."""
 
@@ -84,6 +119,7 @@ class GetServingGroupCableModemsRequest(BaseModel):
     cmts: ServingGroupOnlyEnvelopeModel = Field(default_factory=ServingGroupOnlyEnvelopeModel, description="Serving group request envelope.")
     page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
+    refresh: ServingGroupCacheRefreshRequestModel = Field(default_factory=ServingGroupCacheRefreshRequestModel, description="Optional refresh controls.")
 
     @model_validator(mode="after")
     def _validate_sg_id(self) -> GetServingGroupCableModemsRequest:
@@ -106,6 +142,7 @@ class ServingGroupCableModemEntryModel(BaseModel):
     mac_address: MacAddressStr = Field(default=MacAddressStr(""), description="Cable modem MAC address.")
     ipv4: IPv4Str = Field(default=IPv4Str(""), description="Cable modem IPv4 address.")
     ipv6: IPv6Str = Field(default=IPv6Str(""), description="Cable modem IPv6 address.")
+    sysdescr: SystemDescriptorModel = Field(default_factory=SystemDescriptorModel, description="Cable modem sysDescr model from SGW heavy snapshot.")
     ds_channel_ids: list[ChannelId] = Field(default_factory=list, description="Downstream channel identifiers.")
     us_channel_ids: list[ChannelId] = Field(default_factory=list, description="Upstream channel identifiers.")
     registration_status: CmtsCmRegStateModel = Field(default_factory=_default_registration_status, description="Cable modem registration status.")
@@ -129,6 +166,7 @@ class GetServingGroupCableModemsResponse(CacheResponseBase):
     requested_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers.")
     resolved_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Resolved service group identifiers.")
     missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers not found.")
+    refresh: ServingGroupCacheRefreshResultModel = Field(default_factory=ServingGroupCacheRefreshResultModel, description="Refresh execution summary.")
     groups: list[ServingGroupCableModemsGroupModel] = Field(default_factory=list, description="Grouped cable modem entries by service group.")
 
 
@@ -226,6 +264,8 @@ __all__ = [
     "ServingGroupOnlyEnvelopeModel",
     "GetServingGroupCableModemsRequest",
     "GetServingGroupCableModemsResponse",
+    "ServingGroupCacheRefreshRequestModel",
+    "ServingGroupCacheRefreshResultModel",
     "ServingGroupCableModemEntryModel",
     "ServingGroupCableModemsGroupModel",
     "GetServingGroupTopologyRequest",

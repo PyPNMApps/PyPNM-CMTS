@@ -183,12 +183,18 @@ def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: pytest.Monk
         assert payload["requested_sg_ids"] == []
         assert payload["resolved_sg_ids"] == [int(SG_ID_ONE), int(SG_ID_TWO)]
         assert payload["missing_sg_ids"] == []
+        assert payload["refresh"]["requested"] is False
+        assert payload["refresh"]["mode"] == "none"
+        assert payload["refresh"]["applied"] is False
+        assert payload["refresh"]["advanced"] is False
         groups = payload["groups"]
         assert [group["sg_id"] for group in groups] == [int(SG_ID_ONE), int(SG_ID_TWO)]
         assert [group["items"][0]["mac_address"] for group in groups] == [
             "aa:bb:cc:dd:ee:01",
             "aa:bb:cc:dd:ee:02",
         ]
+        assert "sysdescr" in groups[0]["items"][0]
+        assert groups[0]["items"][0]["sysdescr"]["is_empty"] is True
         assert groups[0]["items"][0]["registration_status"]["status"] == 1
         assert groups[0]["items"][0]["registration_status"]["text"] == "other"
 
@@ -300,7 +306,47 @@ def test_serving_group_cable_modems_missing_store_returns_error(monkeypatch: pyt
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["refresh"]["mode"] == "none"
         assert payload["groups"] == []
+
+
+def test_serving_group_cable_modems_refresh_heavy_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(store, SG_ID_ONE, [SgwCableModemModel(mac="aa:bb:cc:dd:ee:01")])
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.operations.service.ServingGroupCacheService._request_refresh",
+        lambda self, sg_ids, refresh, now_epoch: (True, ""),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.operations.service.ServingGroupCacheService._wait_for_refresh",
+        lambda self, sg_ids, store, baseline, timeout_seconds: (True, 0.0),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/get/cableModems",
+            json={
+                "cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}},
+                "refresh": {
+                    "mode": "heavy",
+                    "wait_for_cache": True,
+                    "timeout_seconds": 5,
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["refresh"]["requested"] is True
+        assert payload["refresh"]["mode"] == "heavy"
+        assert payload["refresh"]["applied"] is True
+        assert payload["refresh"]["wait_for_cache"] is True
+        assert payload["refresh"]["advanced"] is True
+        assert payload["refresh"]["timeout_seconds"] == 5
 
 
 def test_serving_group_topology_all_sgs_returns_groups(monkeypatch: pytest.MonkeyPatch) -> None:

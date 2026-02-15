@@ -40,11 +40,13 @@ if TYPE_CHECKING:
 SUCCESS_EXIT_CODE = 0
 EXIT_CODE_USAGE = 2
 EXIT_CODE_FAILURE = 1
+EXIT_CODE_SIGINT = 130
 HOST_DEFAULT = "127.0.0.1"
 PORT_DEFAULT = 8000
 LOG_LEVEL_DEFAULT = "info"
 DEFAULT_WORKERS = 1
 TIMEOUT_KEEP_ALIVE_SECONDS = 120
+TIMEOUT_GRACEFUL_SHUTDOWN_SECONDS = 5
 DEFAULT_SNMP_PORT = 161
 _DEPRECATED_CMTS_PORT_FLAG = "--cmts-port"
 _SNMP_PORT_FLAG = "--snmp-port"
@@ -729,6 +731,7 @@ def _run_cli() -> int:
             "host": args.host,
             "port": args.port,
             "timeout_keep_alive": TIMEOUT_KEEP_ALIVE_SECONDS,
+            "timeout_graceful_shutdown": TIMEOUT_GRACEFUL_SHUTDOWN_SECONDS,
             "log_level": args.log_level,
             "workers": args.workers,
             "access_log": not args.no_access_log,
@@ -768,7 +771,10 @@ def _run_cli() -> int:
                 }
             )
 
-        uvicorn.run(**uvicorn_args)
+        try:
+            uvicorn.run(**uvicorn_args)
+        except KeyboardInterrupt:
+            return EXIT_CODE_SIGINT
 
         return SUCCESS_EXIT_CODE
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from pydantic import BaseModel, Field, model_serializer
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 from pypnm.lib.types import IPv4Str, IPv6Str, MacAddressStr
 
 from pypnm_cmts.lib.constants import RfChannelType
@@ -77,6 +78,7 @@ class SgwCableModemModel(BaseModel):
     ds_channel_set: ChSetId = Field(default=ChSetId(0), description="Downstream channel set id.")
     us_channel_set: ChSetId = Field(default=ChSetId(0), description="Upstream channel set id.")
     registration_status: CmtsCmRegState = Field(default=CmtsCmRegState(1), description="Cable modem registration status.")
+    sysdescr: SystemDescriptorModel = Field(default_factory=SystemDescriptorModel, description="Cable modem sysDescr snapshot model.")
 
 
 class SgwSnapshotModel(BaseModel):

@@ -22,6 +22,7 @@ from pypnm_cmts.api.routes.serving_group.operations.schemas import (
     GetServingGroupTopologyResponse,
     ServingGroupCableModemEntryModel,
     ServingGroupCableModemsGroupModel,
+    ServingGroupCacheRefreshResultModel,
     ServingGroupCacheSummaryModel,
     ServingGroupStatusResponse,
     ServingGroupTopologyChannelCountModel,
@@ -115,12 +116,39 @@ class ServingGroupCacheService:
 
         discovered_sg_ids = list(status.discovered_sg_ids)
         requested_sg_ids = list(request.cmts.serving_group.id)
+        requested_refresh = request.refresh.mode != CacheRefreshMode.NONE
+        refresh_applied = False
+        refresh_advanced = False
+        refresh_message = ""
+        wait_timeout_seconds = int(request.refresh.timeout_seconds)
         if requested_sg_ids:
             resolved_sg_ids = [sg_id for sg_id in requested_sg_ids if sg_id in discovered_sg_ids]
             missing_sg_ids = [sg_id for sg_id in requested_sg_ids if sg_id not in discovered_sg_ids]
         else:
             resolved_sg_ids = list(discovered_sg_ids)
             missing_sg_ids = []
+
+        baseline: dict[ServiceGroupId, float] = {}
+        if requested_refresh and request.refresh.wait_for_cache:
+            baseline = self._snapshot_baseline(resolved_sg_ids, store)
+
+        if requested_refresh and resolved_sg_ids:
+            refresh_applied, refresh_message = self._request_refresh(
+                sg_ids=resolved_sg_ids,
+                refresh=request.refresh.mode,
+                now_epoch=self._now_epoch(),
+            )
+            if request.refresh.wait_for_cache and refresh_applied:
+                refresh_advanced, _waited_seconds = self._wait_for_refresh(
+                    sg_ids=resolved_sg_ids,
+                    store=store,
+                    baseline=baseline,
+                    timeout_seconds=wait_timeout_seconds,
+                )
+                if not refresh_advanced and refresh_message == "":
+                    refresh_message = "refresh wait timeout; returning cached snapshot"
+            elif request.refresh.wait_for_cache and not refresh_applied and refresh_message == "":
+                refresh_message = "refresh request not applied"
 
         if not resolved_sg_ids:
             message = self.NO_DISCOVERED_MESSAGE if not requested_sg_ids else self.SG_NOT_FOUND_TEMPLATE.format(
@@ -134,6 +162,15 @@ class ServingGroupCacheService:
                 requested_sg_ids=requested_sg_ids,
                 resolved_sg_ids=[],
                 missing_sg_ids=list(requested_sg_ids),
+                refresh=ServingGroupCacheRefreshResultModel(
+                    requested=requested_refresh,
+                    mode=request.refresh.mode,
+                    applied=refresh_applied,
+                    wait_for_cache=bool(request.refresh.wait_for_cache),
+                    advanced=refresh_advanced,
+                    timeout_seconds=wait_timeout_seconds,
+                    message=refresh_message,
+                ),
                 groups=[],
             )
 
@@ -155,6 +192,15 @@ class ServingGroupCacheService:
             requested_sg_ids=requested_sg_ids,
             resolved_sg_ids=sorted(resolved_sg_ids, key=lambda value: int(value)),
             missing_sg_ids=missing_sg_ids,
+            refresh=ServingGroupCacheRefreshResultModel(
+                requested=requested_refresh,
+                mode=request.refresh.mode,
+                applied=refresh_applied,
+                wait_for_cache=bool(request.refresh.wait_for_cache),
+                advanced=refresh_advanced,
+                timeout_seconds=wait_timeout_seconds,
+                message=refresh_message,
+            ),
             groups=groups,
         )
 
@@ -227,6 +273,7 @@ class ServingGroupCacheService:
             requested_sg_ids=[],
             resolved_sg_ids=[],
             missing_sg_ids=[],
+            refresh=ServingGroupCacheRefreshResultModel(),
             groups=[],
         )
 
@@ -412,14 +459,18 @@ class ServingGroupCacheService:
 
     def _wait_for_refresh(
         self,
-        request: GetServingGroupTopologyRequest,
         sg_ids: list[ServiceGroupId],
-        store: SgwCacheStore | None,
-        refresh_applied: bool,
-    ) -> float:
-        if not refresh_applied:
-            return 0.0
-        return 0.0
+        store: SgwCacheStore,
+        baseline: dict[ServiceGroupId, float],
+        timeout_seconds: int,
+    ) -> tuple[bool, float]:
+        start = time.monotonic()
+        deadline = start + float(timeout_seconds)
+        while time.monotonic() < deadline:
+            if self._snapshot_advanced(sg_ids, store, baseline):
+                return (True, float(time.monotonic() - start))
+            time.sleep(0.1)
+        return (self._snapshot_advanced(sg_ids, store, baseline), float(time.monotonic() - start))
 
     @staticmethod
     def _snapshot_baseline(
@@ -572,6 +623,7 @@ class ServingGroupCacheService:
             mac_address=str(modem.mac),
             ipv4=ipv4_value,
             ipv6=ipv6_value,
+            sysdescr=modem.sysdescr,
             ds_channel_ids=list(ds_channel_ids),
             us_channel_ids=list(us_channel_ids),
             registration_status=CmtsCmRegStateModel(

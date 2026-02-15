@@ -8,7 +8,11 @@ import pytest
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.models import SgwCableModemModel, SgwHeavyInventoryModel
-from pypnm_cmts.sgw.pollers.heavy import HeavyInventoryProvider, sgw_heavy_poller
+from pypnm_cmts.sgw.pollers.heavy import (
+    HeavyInventoryProvider,
+    SnmpInventoryProvider,
+    sgw_heavy_poller,
+)
 
 
 class FakeInventoryProvider:
@@ -54,3 +58,8 @@ def test_sgw_heavy_poller_orders_inventory() -> None:
         "aa:bb:cc:dd:ee:01",
         "aa:bb:cc:dd:ee:ff",
     ]
+
+
+@pytest.mark.unit
+def test_sgw_heavy_poller_normalizes_hex_ipv4() -> None:
+    assert SnmpInventoryProvider._normalize_ip_value("0xac13203e") == "172.19.32.62"

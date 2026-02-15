@@ -25,7 +25,6 @@ from pypnm_cmts.sgw.precheck import CmtsStartupPrecheck
 from pypnm_cmts.sgw.runtime_state import (
     compute_sgw_cache_ready,
     set_sgw_startup_failure,
-    set_sgw_startup_prime_failure,
     set_sgw_startup_success,
     start_sgw_background_refresh,
 )
@@ -41,7 +40,7 @@ class SgwStartupService:
 
     async def initialize(self) -> None:
         """
-        Discover SGs and prime SGW cache at startup.
+        Discover SGs and initialize SGW cache startup state.
         """
         settings = CmtsOrchestratorSettings.from_system_config()
         try:
@@ -98,13 +97,6 @@ class SgwStartupService:
                 light_poller=sgw_light_poller,
             )
             now_epoch = self._now_epoch()
-            try:
-                await asyncio.to_thread(manager.refresh_once, now_epoch)
-            except Exception as exc:
-                message = str(exc)
-                set_sgw_startup_prime_failure(discovered_sg_ids, message)
-                self.logger.exception("SGW priming failed: %s", message)
-                return
             set_sgw_startup_success(discovered_sg_ids, store, manager, now_epoch)
             if not self._pytest_running():
                 start_sgw_background_refresh()

@@ -8,12 +8,17 @@ import logging
 from collections.abc import Awaitable, Iterable
 from typing import Protocol, TypeVar
 
-from pypnm.lib.types import SnmpReadCommunity, SnmpWriteCommunity
+from pypnm.docsis.cable_modem import CableModem
+from pypnm.docsis.data_type.sysDescr import SystemDescriptor, SystemDescriptorModel
+from pypnm.lib.inet import Inet, InetGenerate
+from pypnm.lib.mac_address import MacAddress
+from pypnm.lib.types import SnmpCommunity, SnmpReadCommunity, SnmpWriteCommunity
 
 from pypnm_cmts.cmts.channel_inventory_collector import CmtsChannelInventoryCollector
 from pypnm_cmts.cmts.inventory_discovery import CmtsInventoryDiscoveryService
 from pypnm_cmts.cmts.service_group_topology_collector import CmtsTopologyCollector
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.config.request_defaults import CmtsRequestDefaults
 from pypnm_cmts.docsis.data_type.cmts_service_group_topology import (
     CmtsServiceGroupTopologyModel,
 )
@@ -42,6 +47,8 @@ from pypnm_cmts.sgw.models import (
 )
 
 T = TypeVar("T")
+CM_SYSDESCR_TIMEOUT_SECONDS = 3
+CM_SYSDESCR_RETRIES = 3
 
 
 def _run_asyncio(coro: Awaitable[T]) -> T:
@@ -162,6 +169,7 @@ class SnmpInventoryProvider:
         sg_id: ServiceGroupId,
         settings: CmtsOrchestratorSettings,
     ) -> list[SgwCableModemModel]:
+        logger = logging.getLogger(SnmpInventoryProvider.__name__)
         service = CmtsInventoryDiscoveryService(
             cmts_hostname=settings.adapter.hostname,
             read_community=SnmpReadCommunity(str(settings.adapter.community)),
@@ -174,17 +182,126 @@ class SnmpInventoryProvider:
             raise RuntimeError(f"Failed to collect cable modem membership: {exc}") from exc
         if not per_sg:
             return []
-        return [
-            SgwCableModemModel(
-                mac=cm.mac,
-                ipv4=cm.ipv4,
-                ipv6=cm.ipv6,
-                ds_channel_set=cm.ds_channel_set,
-                us_channel_set=cm.us_channel_set,
-                registration_status=cm.registration_status,
+        modem_community = SnmpInventoryProvider._resolve_modem_community(settings)
+        logger.info(
+            "heavyPoll [CM_SYSDESCR_COMMUNITY] sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s",
+            int(sg_id),
+            str(settings.adapter.community),
+            str(settings.adapter.write_community),
+            str(CmtsRequestDefaults.from_system_config().cm_snmpv2c_write_community or ""),
+            modem_community,
+        )
+        modems: list[SgwCableModemModel] = []
+        for cm in per_sg[0].cms:
+            normalized_ipv4 = SnmpInventoryProvider._normalize_ip_value(str(cm.ipv4))
+            modems.append(
+                SgwCableModemModel(
+                    mac=cm.mac,
+                    ipv4=normalized_ipv4,
+                    ipv6=cm.ipv6,
+                    ds_channel_set=cm.ds_channel_set,
+                    us_channel_set=cm.us_channel_set,
+                    registration_status=cm.registration_status,
+                    sysdescr=SnmpInventoryProvider._fetch_modem_sysdescr(
+                        sg_id=sg_id,
+                        mac=str(cm.mac),
+                        ip_address=normalized_ipv4,
+                        community=modem_community,
+                        logger=logger,
+                    ),
+                )
             )
-            for cm in per_sg[0].cms
-        ]
+        return modems
+
+    @staticmethod
+    def _normalize_ip_value(raw_value: str) -> str:
+        value = str(raw_value).strip()
+        if value == "":
+            return ""
+        if not value.startswith("0x"):
+            return value
+        try:
+            return InetGenerate.hex_to_inet(value[2:])
+        except Exception:
+            return value
+
+    @staticmethod
+    def _resolve_modem_community(settings: CmtsOrchestratorSettings) -> str:
+        _ = settings
+        defaults = CmtsRequestDefaults.from_system_config()
+        if defaults.cm_snmpv2c_write_community is None:
+            return ""
+        return str(defaults.cm_snmpv2c_write_community).strip()
+
+    @staticmethod
+    def _fetch_modem_sysdescr(
+        sg_id: ServiceGroupId,
+        mac: str,
+        ip_address: str,
+        community: str,
+        logger: logging.Logger,
+    ) -> SystemDescriptorModel:
+        if ip_address.strip() == "":
+            return SystemDescriptor.empty().to_model()
+        if community.strip() == "":
+            logger.warning(
+                "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=empty_community",
+                int(sg_id),
+                mac,
+                ip_address,
+            )
+            return SystemDescriptor.empty().to_model()
+        logger.info(
+            "heavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=%s mac=%s ip=%s community=%s",
+            int(sg_id),
+            mac,
+            ip_address,
+            community,
+        )
+        sysdescr_model = SnmpInventoryProvider._fetch_modem_sysdescr_for_community(
+            mac=mac,
+            ip_address=ip_address,
+            community=community,
+        )
+        if not bool(sysdescr_model.is_empty):
+            logger.info(
+                "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=success",
+                int(sg_id),
+                mac,
+                ip_address,
+                community,
+            )
+            return sysdescr_model
+        logger.warning(
+            "heavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=empty",
+            int(sg_id),
+            mac,
+            ip_address,
+            community,
+        )
+        return SystemDescriptor.empty().to_model()
+
+    @staticmethod
+    def _fetch_modem_sysdescr_for_community(
+        mac: str,
+        ip_address: str,
+        community: str,
+    ) -> SystemDescriptorModel:
+        try:
+            cable_modem = CableModem(
+                mac_address=MacAddress(mac),
+                inet=Inet(ip_address),
+                write_community=SnmpCommunity(community),
+            )
+            sysdescr = _run_asyncio(
+                cable_modem.getSysDescr(
+                    timeout=CM_SYSDESCR_TIMEOUT_SECONDS,
+                    retries=CM_SYSDESCR_RETRIES,
+                )
+            )
+            return sysdescr.to_model()
+        except Exception:
+            return SystemDescriptor.empty().to_model()
 
 
 _DEFAULT_INVENTORY_PROVIDER = SnmpInventoryProvider()

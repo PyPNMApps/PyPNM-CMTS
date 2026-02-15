@@ -82,10 +82,13 @@ Response:
 
 ## POST /cmts/servingGroup/get/cableModems
 
-Return Cached Cable Modem Membership Grouped By Service Group. The request uses `cmts.serving_group.id` and is cache-first (no refresh controls).
+Return Cached Cable Modem Membership Grouped By Service Group. The request uses `cmts.serving_group.id` and is cache-first.
 When a snapshot is missing for a discovered SG, the group returns empty items and `metadata.refresh_state` is `ERROR` with a bounded `last_error`.
 Channel set values are populated from CMTS registration status when available; defaults are `0` otherwise.
 Registration status is returned as an object with numeric `status` and decoded `text` tokens; unknown values map to `other`.
+Heavy refresh also snapshots per-modem `sysdescr` into SGW cache.
+By default, this endpoint returns data from the latest SGW heavy-poll snapshot.
+If refresh is requested, the endpoint should use refreshed cache data when available.
 
 Request body:
 
@@ -97,7 +100,12 @@ Request body:
     }
   },
   "page": 1,
-  "page_size": 100
+  "page_size": 100,
+  "refresh": {
+    "mode": "none",
+    "wait_for_cache": false,
+    "timeout_seconds": 8
+  }
 }
 ```
 
@@ -105,6 +113,12 @@ Semantics:
 - `cmts.serving_group.id: []` means all discovered service groups.
 - `cmts.serving_group.id: [3147266]` means a single service group.
 - `cmts.serving_group.id: [3147266, 3213825]` means multiple service groups.
+- Default response source is SGW heavy-poll cache snapshot data.
+- Heavy-poll `sysdescr` fetch uses the configured CM default write community (`cm_snmpv2c_write_community`) as a single selected value.
+- No SNMP community fallback/cycling is performed for heavy-poll `sysdescr` collection.
+- `refresh.mode` supports `none`, `light`, `heavy`.
+- `refresh.wait_for_cache` waits for SGW snapshot advance when refresh mode is not `none`.
+- `refresh.timeout_seconds` controls wait duration in seconds (default `8`).
 - Unknown fields are ignored but not supported for this endpoint.
 
 Response:
@@ -117,6 +131,15 @@ Response:
   "requested_sg_ids": [],
   "resolved_sg_ids": [3147266, 3213825],
   "missing_sg_ids": [],
+  "refresh": {
+    "requested": false,
+    "mode": "none",
+    "applied": false,
+    "wait_for_cache": false,
+    "advanced": false,
+    "timeout_seconds": 8,
+    "message": ""
+  },
   "groups": [
     {
       "sg_id": 3147266,
@@ -129,6 +152,14 @@ Response:
           "mac_address": "aa:bb:cc:dd:ee:ff",
           "ipv4": "192.168.0.100",
           "ipv6": "",
+          "sysdescr": {
+            "HW_REV": "1A",
+            "VENDOR": "LANCity",
+            "BOOTR": "LANCity-Boot-1.0.0",
+            "SW_REV": "LANCity-7.3.5.0",
+            "MODEL": "LANCity-D3.1",
+            "is_empty": false
+          },
           "ds_channel_ids": [10],
           "us_channel_ids": [20],
           "registration_status": {
@@ -379,10 +410,10 @@ Response:
         "aa:bb:cc:dd:ee:01": {
           "sysdescr": {
             "HW_REV": "1A",
-            "VENDOR": "Hitron Technologies",
-            "BOOTR": "2022.01-MXL-v-4.0.369",
-            "SW_REV": "8.5.0.0.1b2",
-            "MODEL": "CGNDP4",
+            "VENDOR": "LANCity",
+            "BOOTR": "LANCity-Boot-1.0.0",
+            "SW_REV": "LANCity-7.3.5.0",
+            "MODEL": "LANCity-D3.1",
             "is_empty": false
           }
         },

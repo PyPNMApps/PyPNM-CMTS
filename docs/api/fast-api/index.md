@@ -52,7 +52,7 @@ pypnm-cmts serve --mute-tags "Orchestrator,Operational" --mute-tags-hard
 
 CMTS endpoints document JSON-only responses; binary or archive responses are advertised only for PyPNM endpoints that return files.
 
-SGW refresh runs in a background loop after startup prime. Cache-first endpoints
+SGW refresh runs in a background loop after startup discovery. Cache-first endpoints
 may request a refresh, but they do not execute SNMP in the request thread.
 
 ## Current Endpoints
