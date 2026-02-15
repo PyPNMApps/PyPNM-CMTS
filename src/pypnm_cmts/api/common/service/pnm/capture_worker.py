@@ -11,6 +11,7 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.docsis.cable_modem import CableModem
 from pypnm.lib.types import InetAddressStr, MacAddressStr
 
+from pypnm_cmts.api.common.operations.logging import short_op_id
 from pypnm_cmts.api.common.operations.models import (
     OperationRequestContextModel,
     OperationRequestSummaryModel,
@@ -46,7 +47,7 @@ class PnmCaptureWorkerBase(ABC):
         """Execute eligibility, precheck, and capture stages for a modem work item."""
         self.logger.info(
             "[START] operation_id=%s, sg_id=%s, mac=%s, attempt=%s",
-            item.operation_id,
+            short_op_id(item.operation_id),
             item.sg_id,
             item.mac_address,
             item.attempt,
@@ -71,7 +72,7 @@ class PnmCaptureWorkerBase(ABC):
         if eligibility_result.status_code != ServiceStatusCode.SUCCESS:
             self.logger.info(
                 "[ELIGIBILITY_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                item.operation_id,
+                short_op_id(item.operation_id),
                 item.sg_id,
                 item.mac_address,
                 eligibility_result.status_code.value,
@@ -90,7 +91,7 @@ class PnmCaptureWorkerBase(ABC):
         )
         self.logger.info(
             "[PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s%s",
-            item.operation_id,
+            short_op_id(item.operation_id),
             item.sg_id,
             item.mac_address,
             ip_address,
@@ -111,7 +112,7 @@ class PnmCaptureWorkerBase(ABC):
         if precheck_status != ServiceStatusCode.SUCCESS:
             self.logger.info(
                 "[PRECHECK_FAILED] operation_id=%s sg_id=%s mac=%s status=%s message=%s",
-                item.operation_id,
+                short_op_id(item.operation_id),
                 item.sg_id,
                 item.mac_address,
                 precheck_status.value,
@@ -134,7 +135,7 @@ class PnmCaptureWorkerBase(ABC):
         stages.append(capture_result)
         self.logger.info(
             "[COMPLETE] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_count=%s file_count=%s",
-            item.operation_id,
+            short_op_id(item.operation_id),
             item.sg_id,
             item.mac_address,
             capture_result.status_code.value,

@@ -29,6 +29,7 @@ from pypnm.lib.types import (
 )
 
 from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
+from pypnm_cmts.api.common.operations.logging import short_op_id
 from pypnm_cmts.api.common.operations.models import (
     OperationExecutionModel,
     OperationRequestContextModel,
@@ -148,7 +149,7 @@ class RxMerCaptureWorker(PnmCaptureWorkerBase):
         tftp_log_key, tftp_log_value = PnmCaptureHelper.resolve_tftp_log_target(modem_ip=modem_ip, tftp_servers=tftp_servers)
         self.logger.info(
             "[CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s %s=%s tftp_path=\"%s\"",
-            operation_id,
+            short_op_id(operation_id),
             sg_id,
             mac_address,
             modem_ip,
@@ -175,7 +176,7 @@ class RxMerCaptureWorker(PnmCaptureWorkerBase):
             final_message = message or MISSING_TRANSACTION_MESSAGE
         self.logger.info(
             "[CAPTURE_RESULT] operation_id=%s sg_id=%s mac=%s status=%s message=%s tx_id=%s filename=%s",
-            operation_id,
+            short_op_id(operation_id),
             sg_id,
             mac_address,
             status_code.value,
@@ -242,7 +243,7 @@ class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
     def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(
             "RxMer-StartCapture [QUEUED] operation_id=%s, scope_sg=%s, scope_macs=%s",
-            state.operation_id,
+            short_op_id(state.operation_id),
             len(state.request_summary.serving_group_ids),
             len(state.request_summary.mac_addresses),
         )

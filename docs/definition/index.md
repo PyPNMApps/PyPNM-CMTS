@@ -11,6 +11,7 @@ Table Of Contents in alphabetical order.
 - [Adapter Kind](#adapter-kind)
 - [Cable Modem](#cable-modem)
 - [CMTS Index](#cmts-index)
+- [Community Source](#community-source)
 - [Command (CLI)](#command-cli)
 - [Controller](#controller)
 - [Coordination Election Name](#coordination-election-name)
@@ -76,6 +77,12 @@ address and may include IP addressing when available.
 ### CMTS Index
 A numeric index selecting which CMTS entry in `system.json` is being targeted by the adapter or a service group. This allows one configuration
 file to describe multiple CMTS targets.
+
+### Community Source
+A log context field that indicates where the SNMP write community value was resolved from for modem operations.
+
+- `request_override`: the request payload explicitly provided an SNMP write community override.
+- `system_default`: no request override was provided, so the value came from system defaults.
 
 ### Command (CLI)
 An explicit subcommand passed to `pypnm-cmts` that selects an execution path (for example, `run`, `run-forever`, or `serve`).

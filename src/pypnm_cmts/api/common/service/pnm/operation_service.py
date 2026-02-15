@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import MacAddressStr
 
+from pypnm_cmts.api.common.operations.logging import short_op_id
 from pypnm_cmts.api.common.operations.models import (
     OperationRequestContextModel,
     OperationRequestSummaryModel,
@@ -153,7 +154,7 @@ class PnmServiceGroupOperationServiceBase(ABC):
     def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(
             "Operation-Start [QUEUED] operation_id=%s, scope_sg=%s, scope_macs=%s",
-            state.operation_id,
+            short_op_id(state.operation_id),
             len(state.request_summary.serving_group_ids),
             len(state.request_summary.mac_addresses),
         )

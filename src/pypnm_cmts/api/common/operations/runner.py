@@ -14,6 +14,7 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import InetAddressStr, MacAddressStr, TimestampSec
 from pypnm.lib.utils import Generate, TimeUnit
 
+from pypnm_cmts.api.common.operations.logging import short_op_id
 from pypnm_cmts.api.common.operations.models import (
     OperationErrorSummaryModel,
     OperationExecutionModel,
@@ -112,7 +113,7 @@ class OperationRunner:
         try:
             self._execute_operation(operation_id)
         except Exception as exc:
-            self.logger.exception("operation runner failed for %s", operation_id)
+            self.logger.exception("operation runner failed for %s", short_op_id(operation_id))
             self._mark_failed(operation_id, str(exc))
         finally:
             self._cleanup(operation_id)
@@ -560,7 +561,7 @@ class OperationRunner:
     def _log_terminal_state(self, state: OperationStateModel) -> None:
         self.logger.info(
             "operation terminal operation_id=%s state=%s total=%s success=%s failed=%s completed=%s",
-            state.operation_id,
+            short_op_id(state.operation_id),
             state.state.value,
             state.counters.total_modems,
             state.counters.success,
