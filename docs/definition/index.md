@@ -137,7 +137,7 @@ inventory. It runs more frequently than heavy refresh.
 
 ### Log Operation Label (CaseSnake)
 A bracketed operation marker in log messages that uses uppercase snake case for quick scanning and filtering. Examples: `[REFRESH_HEAVY]`,
-`[REFRESH_LIGHT]`, and `[CM_SYSDESCR_RESULT]`.
+`[REFRESH_LIGHT]`, `[CM_SYSDESCR_RESULT]`, `[REQUEST_SCOPE]`, and `[OPERATION_END]`.
 
 ### OFDM
 Orthogonal Frequency-Division Multiplexing downstream channels in DOCSIS 3.1. OFDM channels are represented by a channel id and a frequency range

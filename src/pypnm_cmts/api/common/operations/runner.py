@@ -560,7 +560,7 @@ class OperationRunner:
 
     def _log_terminal_state(self, state: OperationStateModel) -> None:
         self.logger.info(
-            "operation terminal operation_id=%s state=%s total=%s success=%s failed=%s completed=%s",
+            "[OPERATION_END] operation_id=%s state=%s total=%s success=%s failed=%s completed=%s",
             short_op_id(state.operation_id),
             state.state.value,
             state.counters.total_modems,

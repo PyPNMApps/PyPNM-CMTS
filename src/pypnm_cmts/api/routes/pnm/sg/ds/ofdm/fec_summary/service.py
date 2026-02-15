@@ -57,6 +57,10 @@ from pypnm_cmts.api.common.service.pnm.constants import (
     NO_MESSAGE_RESPONSE,
     PRECHECK_FAILURE_MESSAGE,
 )
+from pypnm_cmts.api.common.service.pnm.logging import (
+    build_request_scope_log,
+    build_start_capture_queued_log,
+)
 from pypnm_cmts.api.common.service.pnm.modem import PnmModemResolver
 from pypnm_cmts.api.common.service.pnm.operation_service import (
     DEFAULT_MAX_INLINE_RECORDS,
@@ -245,10 +249,12 @@ class FecSummaryServiceGroupOperationService(PnmServiceGroupOperationServiceBase
 
     def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(
-            "FecSummary-StartCapture [QUEUED] operation_id=%s, scope_sg=%s, scope_macs=%s",
-            short_op_id(state.operation_id),
-            len(state.request_summary.serving_group_ids),
-            len(state.request_summary.mac_addresses),
+            build_start_capture_queued_log(
+                operation_name="FecSummary",
+                operation_id=state.operation_id,
+                scope_sg_count=len(state.request_summary.serving_group_ids),
+                scope_mac_count=len(state.request_summary.mac_addresses),
+            )
         )
 
     @staticmethod
@@ -339,12 +345,14 @@ class FecSummaryServiceGroupOperationService(PnmServiceGroupOperationServiceBase
         requested_mac_addresses = list(cmts.cable_modem.mac_address)
         serving_group_ids, mac_addresses = self._resolve_modem_scope(requested_sg_ids, requested_mac_addresses)
         self.logger.info(
-            "fec_summary request scope requested_sg=%s requested_macs=%s resolved_sg=%s resolved_macs=%s channel_count=%s",
-            len(requested_sg_ids),
-            len(requested_mac_addresses),
-            len(serving_group_ids),
-            len(mac_addresses),
-            len(channel_ids),
+            build_request_scope_log(
+                operation_name="FecSummary",
+                requested_sg_count=len(requested_sg_ids),
+                requested_mac_count=len(requested_mac_addresses),
+                resolved_sg_count=len(serving_group_ids),
+                resolved_mac_count=len(mac_addresses),
+                channel_count=len(channel_ids),
+            )
         )
         execution = request.execution
         return OperationRequestSummaryModel(
