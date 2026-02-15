@@ -43,6 +43,40 @@ Options:
 - `--author`, `--year`
 - `--verbose`
 
+### tools/maintenance/kill-pypnm-cmts.py
+
+Lists active `pypnm-cmts` processes in a numbered table and supports terminating by table line number.
+
+```bash
+./tools/maintenance/kill-pypnm-cmts.py
+```
+
+```bash
+./tools/maintenance/kill-pypnm-cmts.py --line 1 3
+```
+
+```bash
+./tools/maintenance/kill-pypnm-cmts.py --all
+```
+
+```bash
+./tools/maintenance/kill-pypnm-cmts.py --all --signal KILL
+```
+
+Key options:
+- `--line <n ...>` kill specific rows from the displayed table
+- `--all` kill all active `pypnm-cmts` processes
+- `--signal <TERM|KILL|INT|...>` choose signal (default `TERM`)
+
+Process:
+- Run without arguments to list active processes in a left-aligned table with `LINE`, `PID`, `PPID`, `ELAPSED`, and `COMMAND`
+- Choose one or more `LINE` values from that table and pass them to `--line`
+- Use `--all` when you want to terminate every listed `pypnm-cmts` process
+
+Display notes:
+- If `tabulate` is installed, the script uses markdown-style table rendering
+- If `tabulate` is not installed, the script falls back to plain fixed-width formatting
+
 ## Security
 
 ### tools/security/scan-mac-addresses.py
