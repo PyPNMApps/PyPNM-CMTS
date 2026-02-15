@@ -149,15 +149,17 @@ class ConstDisplayCaptureWorker(PnmCaptureWorkerBase):
             interface_parameters = DownstreamOfdmParameters(channel_id=list(channel_ids))
         tftp_servers = PnmCaptureHelper.resolve_tftp_servers(request_context)
         tftp_path = PnmConfigManager.get_tftp_path()
+        modem_ip = str(cable_modem.get_inet_address)
+        tftp_log_key, tftp_log_value = PnmCaptureHelper.resolve_tftp_log_target(modem_ip=modem_ip, tftp_servers=tftp_servers)
         self.logger.info(
-            "[CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s tftp_ipv4=%s tftp_ipv6=%s tftp_path=%s",
+            "[CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s %s=%s tftp_path=%s",
             operation_id,
             sg_id,
             mac_address,
-            cable_modem.get_inet_address,
+            modem_ip,
             len(channel_ids),
-            str(tftp_servers[0]),
-            str(tftp_servers[1]),
+            tftp_log_key,
+            tftp_log_value,
             tftp_path,
         )
         modulation_order_offset = ConstDisplayConstant.MODULATION_OFFSET.value

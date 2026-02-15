@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from ipaddress import ip_address
+
 from pypnm.api.routes.common.extended.common_messaging_service import (
     MessagePayload,
     MessageResponse,
@@ -83,8 +85,23 @@ class PnmCaptureHelper:
     def now_epoch() -> TimestampSec:
         return TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
 
+    @staticmethod
+    def resolve_tftp_log_target(
+        modem_ip: str,
+        tftp_servers: tuple[Inet, Inet],
+    ) -> tuple[str, str]:
+        modem_ip_value = str(modem_ip).strip()
+        try:
+            parsed_ip = ip_address(modem_ip_value)
+            if parsed_ip.version == 6:
+                return ("tftp_ipv6", str(tftp_servers[1]))
+            return ("tftp_ipv4", str(tftp_servers[0]))
+        except ValueError:
+            if ":" in modem_ip_value:
+                return ("tftp_ipv6", str(tftp_servers[1]))
+            return ("tftp_ipv4", str(tftp_servers[0]))
+
 
 __all__ = [
     "PnmCaptureHelper",
 ]
-
