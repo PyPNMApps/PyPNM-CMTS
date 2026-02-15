@@ -33,7 +33,7 @@ class PnmModemResolver:
         store = sgw_store if sgw_store is not None else get_sgw_store()
         if store is None:
             logger.info(
-                "%s [MODem_IP_UNRESOLVED] sg_id=%s mac=%s reason=sgw_store_missing",
+                "%s [MODEM_IP_UNRESOLVED] sg_id=%s mac=%s reason=sgw_store_missing",
                 log_prefix,
                 sg_id,
                 mac_address,
@@ -42,7 +42,7 @@ class PnmModemResolver:
         entry = store.get_entry(sg_id)
         if entry is None:
             logger.info(
-                "%s [MODem_IP_UNRESOLVED] sg_id=%s mac=%s reason=sg_entry_missing",
+                "%s [MODEM_IP_UNRESOLVED] sg_id=%s mac=%s reason=sg_entry_missing",
                 log_prefix,
                 sg_id,
                 mac_address,
@@ -59,7 +59,7 @@ class PnmModemResolver:
             normalized_ipv6 = PnmModemResolver.normalize_ip_value(raw_ipv6)
             ip_value = PnmModemResolver.select_ip(modem)
             logger.info(
-                "%s [MODem_IP_CANDIDATES] sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
+                "%s [MODEM_IP_CANDIDATES] sg_id=%s mac=%s ipv4_raw=%s ipv4_norm=%s ipv6_raw=%s ipv6_norm=%s",
                 log_prefix,
                 sg_id,
                 mac_address,
@@ -70,7 +70,7 @@ class PnmModemResolver:
             )
             if ip_value is None:
                 logger.info(
-                    "%s [MODem_IP_UNRESOLVED] sg_id=%s mac=%s",
+                    "%s [MODEM_IP_UNRESOLVED] sg_id=%s mac=%s",
                     log_prefix,
                     sg_id,
                     mac_address,
@@ -80,7 +80,7 @@ class PnmModemResolver:
                 return (InetAddressStr(str(Inet(ip_value))), store)
             except Exception:
                 logger.info(
-                    "%s [MODem_IP_INVALID] sg_id=%s mac=%s ip_selected=%s",
+                    "%s [MODEM_IP_INVALID] sg_id=%s mac=%s ip_selected=%s",
                     log_prefix,
                     sg_id,
                     mac_address,
@@ -89,7 +89,7 @@ class PnmModemResolver:
                 return (None, store)
         if not matched_modem:
             logger.info(
-                "%s [MODem_IP_UNRESOLVED] sg_id=%s mac=%s reason=modem_not_in_sg_snapshot",
+                "%s [MODEM_IP_UNRESOLVED] sg_id=%s mac=%s reason=modem_not_in_sg_snapshot",
                 log_prefix,
                 sg_id,
                 mac_address,

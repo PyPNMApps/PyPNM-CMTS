@@ -50,7 +50,9 @@ def test_sgw_manager_logs_refresh_fields(caplog: pytest.LogCaptureFixture) -> No
 
     records = [record for record in caplog.records if record.name == "SgwManager"]
     assert records
-    record = records[0]
+    record = next(
+        record for record in records if hasattr(record, "result")
+    )
     assert record.sg_id == int(sg_id)
     assert record.refresh_mode in (REFRESH_MODE_HEAVY, REFRESH_MODE_LIGHT, REFRESH_MODE_NONE)
     assert record.duration_ms >= 0.0
