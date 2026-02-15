@@ -210,9 +210,11 @@ class ServingGroupCableModemOperationsService:
             len(scoped_modems),
         )
         self.logger.info(
-            "getSysDescr [COMMUNITIES] count=%d values=%s",
+            "getSysDescr [COMMUNITIES] count=%d%s",
             len(communities),
-            [str(community) for community in communities],
+            f" values={[str(community) for community in communities]}"
+            if self.logger.isEnabledFor(logging.DEBUG)
+            else "",
         )
 
         per_sg_results = manager.run_scoped_job(
@@ -613,12 +615,12 @@ class ServingGroupCableModemOperationsService:
             current_oid_name = SYS_DESCR_OID_NAME
             try:
                 logger.info(
-                    "getSysDescr [POLL_ATTEMPT] sg_id=%s mac=%s inet=%s community=%s oid=%s outcome=attempt",
+                    "getSysDescr [POLL_ATTEMPT] sg_id=%s mac=%s inet=%s oid=%s outcome=attempt%s",
                     sg_id,
                     mac_address,
                     ip_address,
-                    str(community),
                     SYS_DESCR_OID_NAME,
+                    f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
                 )
                 cable_modem = PnmModemResolver.build_cable_modem(
                     mac_address=mac_address,
@@ -634,32 +636,32 @@ class ServingGroupCableModemOperationsService:
                 sysdescr_text = str(sysdescr_model).strip()
                 if sysdescr_text == "":
                     logger.info(
-                        "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s community=%s oid=%s outcome=empty",
+                        "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s oid=%s outcome=empty%s",
                         sg_id,
                         mac_address,
                         ip_address,
-                        str(community),
                         SYS_DESCR_OID_NAME,
+                        f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
                     )
                     continue
                 logger.info(
-                    "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s community=%s oid=%s outcome=success",
+                    "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s oid=%s outcome=success%s",
                     sg_id,
                     mac_address,
                     ip_address,
-                    str(community),
                     SYS_DESCR_OID_NAME,
+                    f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
                 )
                 return sysdescr_model.to_model()
             except Exception as exc:
                 logger.warning(
-                    "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s community=%s oid=%s outcome=exception error=%s",
+                    "getSysDescr [POLL_RESULT] sg_id=%s mac=%s inet=%s oid=%s outcome=exception error=%s%s",
                     sg_id,
                     mac_address,
                     ip_address,
-                    str(community),
                     current_oid_name,
                     exc,
+                    f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
                 )
                 continue
         return None

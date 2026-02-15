@@ -89,13 +89,13 @@ class PnmCaptureWorkerBase(ABC):
             write_community=write_community,
         )
         self.logger.info(
-            "[PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s community=%s",
+            "[PRECHECK_START] operation_id=%s sg_id=%s mac=%s ip=%s community_source=%s%s",
             item.operation_id,
             item.sg_id,
             item.mac_address,
             ip_address,
             community_source,
-            write_community,
+            f" community={write_community}" if self.logger.isEnabledFor(logging.DEBUG) else "",
         )
         precheck_status, precheck_message = self._precheck_executor(precheck_cm)
         precheck_result = OperationStageResultModel(

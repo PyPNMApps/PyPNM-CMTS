@@ -184,12 +184,15 @@ class SnmpInventoryProvider:
             return []
         modem_community = SnmpInventoryProvider._resolve_modem_community(settings)
         logger.debug(
-            "HeavyPoll [CM_SYSDESCR_COMMUNITY] sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s",
+            "HeavyPoll [CM_SYSDESCR_COMMUNITY] sg_id=%s adapter_community=%s adapter_write_community=%s cm_default_write_community=%s selected_modem_community=%s%s",
             int(sg_id),
-            str(settings.adapter.community),
-            str(settings.adapter.write_community),
-            str(CmtsRequestDefaults.from_system_config().cm_snmpv2c_write_community or ""),
-            modem_community,
+            "***" if not logger.isEnabledFor(logging.DEBUG) else str(settings.adapter.community),
+            "***" if not logger.isEnabledFor(logging.DEBUG) else str(settings.adapter.write_community),
+            "***"
+            if not logger.isEnabledFor(logging.DEBUG)
+            else str(CmtsRequestDefaults.from_system_config().cm_snmpv2c_write_community or ""),
+            "***" if not logger.isEnabledFor(logging.DEBUG) else modem_community,
+            " values_hidden=true" if not logger.isEnabledFor(logging.DEBUG) else "",
         )
         modems: list[SgwCableModemModel] = []
         for cm in per_sg[0].cms:
@@ -252,11 +255,11 @@ class SnmpInventoryProvider:
             )
             return SystemDescriptor.empty().to_model()
         logger.debug(
-            "HeavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=%s mac=%s ip=%s community=%s",
+            "HeavyPoll [CM_SYSDESCR_ATTEMPT] sg_id=%s mac=%s ip=%s%s",
             int(sg_id),
             mac,
             ip_address,
-            community,
+            f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
         )
         try:
             sysdescr_model = SnmpInventoryProvider._fetch_modem_sysdescr_for_community(
@@ -266,29 +269,29 @@ class SnmpInventoryProvider:
             )
         except Exception as exc:
             logger.warning(
-                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=exception error=%s",
+                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=exception error=%s%s",
                 int(sg_id),
                 mac,
                 ip_address,
-                community,
                 str(exc),
+                f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
             )
             return SystemDescriptor.empty().to_model()
         if not bool(sysdescr_model.is_empty):
             logger.debug(
-                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=success",
+                "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=success%s",
                 int(sg_id),
                 mac,
                 ip_address,
-                community,
+                f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
             )
             return sysdescr_model
         logger.warning(
-            "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s community=%s outcome=empty",
+            "HeavyPoll [CM_SYSDESCR_RESULT] sg_id=%s mac=%s ip=%s outcome=empty%s",
             int(sg_id),
             mac,
             ip_address,
-            community,
+            f" community={community}" if logger.isEnabledFor(logging.DEBUG) else "",
         )
         return SystemDescriptor.empty().to_model()
 

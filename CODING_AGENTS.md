@@ -96,6 +96,8 @@ Before introducing new types, constants, validators, or storage patterns:
 - Keep operation labels in CaseSnake inside brackets for all log operations, for example `[REFRESH_HEAVY]` and `[CM_SYSDESCR_RESULT]`.
 - Use clear operation names with consistent casing in log messages.
 - Log only required troubleshooting context fields (for example `sg_id`, `mac`, `ip`, `community`) and avoid redundant keys.
+- Do not expose SNMP community values in INFO, WARNING, or ERROR logs.
+- SNMP community values may appear only at DEBUG level, using inline conditional formatting in a single log call.
 
 ## PNM Data Type Placement Rule
 
