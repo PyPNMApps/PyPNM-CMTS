@@ -16,7 +16,7 @@ from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SystemCmtsSnmpService")
 
 
 class SystemCmtsSnmpService:

@@ -32,7 +32,7 @@ class SpectrumAnalyzerRouter:
         if tags is None:
             tags = ["CMTS PNM SpectrumAnalyzer"]
         self.router = APIRouter(prefix=prefix, tags=tags)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(self.__class__.__name__)
         self._service = SpectrumAnalyzerServiceGroupOperationService()
         self._register_routes()
 

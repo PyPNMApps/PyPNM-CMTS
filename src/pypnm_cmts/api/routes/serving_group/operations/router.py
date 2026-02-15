@@ -35,7 +35,7 @@ class ServingGroupRouter:
         if tags is None:
             tags = ["CMTS Serving Group Operations"]
         self.router = APIRouter(prefix=prefix, tags=tags)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(self.__class__.__name__)
         self._service = ServingGroupCacheService()
         self._register_routes()
 

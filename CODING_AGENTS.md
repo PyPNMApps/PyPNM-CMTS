@@ -80,6 +80,12 @@ Before introducing new types, constants, validators, or storage patterns:
 - Use absolute package imports in source files.
 - Do not use relative imports such as `from .module import ...`.
 
+## Logger Naming Rule
+
+- Do not use full module-path logger names in production classes.
+- Avoid `logging.getLogger(__name__)` in class-based service/router/runtime modules.
+- Use class-name loggers for class-based components, for example `logging.getLogger(self.__class__.__name__)`.
+
 ## PNM Data Type Placement Rule
 
 - Place all PNM SNMP table data type models under `src/pypnm_cmts/pnm/data_type`.

@@ -258,6 +258,140 @@ Response:
 }
 ```
 
+## POST /cmts/servingGroup/cableModem/operations/getSysDescr
+
+Collect `sysDescr` for cable modems resolved from serving-group and MAC scope.
+This endpoint is cache-backed for scope resolution and executes SG-scoped worker polling through SGW manager dispatch.
+OpenAPI tag: `CMTS Serving Group CableModem Operations`.
+
+Request body:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": []
+    },
+    "cable_modem": {
+      "mac_address": [],
+      "snmp": {
+        "snmpV2C": {
+          "community": "private"
+        }
+      }
+    }
+  }
+}
+```
+
+Semantics:
+- `cmts.serving_group.id: []` means all discovered service groups.
+- `cmts.cable_modem.mac_address: []` means all cable modems in resolved service groups.
+- `cmts.cable_modem.snmp.snmpV2C.community` is optional.
+- Community selection uses a single value only, in this order: request `snmpV2C.community`, then CMTS adapter read community, then system read community.
+- No SNMP community fallback attempts are performed once a community is selected.
+
+Execution model:
+
+```mermaid
+flowchart LR
+    A[Client] --> B[API Router]
+    B --> C[Service Layer]
+
+    subgraph SGW[SGW Scoped Parallelism]
+      direction LR
+      D[SGW Manager run_scoped_job]
+      E[SG-1 Worker]
+      F[SG-2 Worker]
+      G[SG-N Worker]
+      D --> E
+      D --> F
+      D --> G
+    end
+
+    C --> D
+
+    subgraph SG1[Within SG-1 Worker]
+      direction TB
+      E1[Modem 1 Poll]
+      E2[Modem 2 Poll]
+      E3[Modem N Poll]
+      E1 --> E2 --> E3
+    end
+    E --> E1
+
+    subgraph SG2[Within SG-2 Worker]
+      direction TB
+      F1[Modem 1 Poll]
+      F2[Modem 2 Poll]
+      F1 --> F2
+    end
+    F --> F1
+
+    subgraph SGN[Within SG-N Worker]
+      direction TB
+      G1[Modem 1 Poll]
+      G2[Modem N Poll]
+      G1 --> G2
+    end
+    G --> G1
+
+    E3 --> R1[SG-1 Result]
+    F2 --> R2[SG-2 Result]
+    G2 --> R3[SG-N Result]
+
+    R1 --> Z[Aggregate and Return Response]
+    R2 --> Z
+    R3 --> Z
+```
+
+Response:
+
+```json
+{
+  "status": 0,
+  "message": "",
+  "timestamp": "2026-02-15T01:15:42+00:00",
+  "requested_sg_ids": [],
+  "requested_mac_addresses": [],
+  "resolved_sg_ids": [3147266, 3213825],
+  "missing_sg_ids": [],
+  "missing_mac_addresses": [],
+  "groups": [
+    {
+      "sg_id": 3147266,
+      "status": 0,
+      "message": "",
+      "modem_count": 2,
+      "success_count": 2,
+      "failure_count": 0,
+      "modems": {
+        "aa:bb:cc:dd:ee:01": {
+          "sysdescr": {
+            "HW_REV": "1A",
+            "VENDOR": "Hitron Technologies",
+            "BOOTR": "2022.01-MXL-v-4.0.369",
+            "SW_REV": "8.5.0.0.1b2",
+            "MODEL": "CGNDP4",
+            "is_empty": false
+          }
+        },
+        "aa:bb:cc:dd:ee:02": {
+          "sysdescr": {
+            "HW_REV": "",
+            "VENDOR": "",
+            "BOOTR": "",
+            "SW_REV": "",
+            "MODEL": "",
+            "is_empty": true
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
 Single service group request:
 
 ```json

@@ -30,7 +30,7 @@ class SystemRouter:
         if tags is None:
             tags = ["CMTS System"]
         self.router = APIRouter(prefix=prefix, tags=tags)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(self.__class__.__name__)
         self._register_routes()
 
     def _register_routes(self) -> None:

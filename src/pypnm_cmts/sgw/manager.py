@@ -8,6 +8,14 @@ import random
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import (
+    ALL_COMPLETED,
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
+from typing import TypeVar
 
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
 from pypnm_cmts.lib.constants import CacheRefreshMode
@@ -44,6 +52,7 @@ REFRESH_COUNT_LIGHT = "light"
 HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPayloadModel]
 LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
 Clock = Callable[[], float]
+TScopedResult = TypeVar("TScopedResult")
 
 
 class SgwManager:
@@ -222,6 +231,75 @@ class SgwManager:
                 self._refresh_requests[sg_id] = mode
                 return (True, "")
         return (True, "")
+
+    def run_scoped_job(
+        self,
+        sg_ids: list[ServiceGroupId],
+        worker: Callable[[ServiceGroupId], TScopedResult],
+        max_workers: int | None = None,
+        overall_timeout_seconds: float | None = None,
+    ) -> dict[ServiceGroupId, TScopedResult]:
+        """
+        Execute a scoped SG job through SGW-managed threading and wait for completion.
+
+        Args:
+            sg_ids (list[ServiceGroupId]): Service groups in scope for this job.
+            worker (Callable[[ServiceGroupId], TScopedResult]): Per-SG worker function.
+            max_workers (int | None): Optional worker override; defaults to SGW settings.
+            overall_timeout_seconds (float | None): Optional timeout for the full scoped job.
+
+        Returns:
+            dict[ServiceGroupId, TScopedResult]: Per-SG worker outputs.
+        """
+        if not sg_ids:
+            return {}
+
+        with self._lock:
+            managed = set(self._service_groups)
+            configured_limit = int(self._settings.sgw.max_workers)
+
+        filtered = [sg_id for sg_id in sg_ids if sg_id in managed]
+        if not filtered:
+            return {}
+
+        worker_limit = int(max_workers) if max_workers is not None else configured_limit
+        if worker_limit <= 0:
+            worker_limit = len(filtered)
+        worker_limit = max(1, min(worker_limit, len(filtered)))
+
+        results: dict[ServiceGroupId, TScopedResult] = {}
+        executor = ThreadPoolExecutor(max_workers=worker_limit)
+        try:
+            future_to_sg: dict[Future[TScopedResult], ServiceGroupId] = {
+                executor.submit(worker, sg_id): sg_id for sg_id in filtered
+            }
+            futures = list(future_to_sg.keys())
+
+            if overall_timeout_seconds is not None and float(overall_timeout_seconds) > 0.0:
+                done, pending = wait(
+                    futures,
+                    timeout=float(overall_timeout_seconds),
+                    return_when=ALL_COMPLETED,
+                )
+                for future in done:
+                    sg_id = future_to_sg[future]
+                    results[sg_id] = future.result()
+                if pending:
+                    for future in pending:
+                        future.cancel()
+                    self.logger.warning(
+                        "sgw scoped job timeout: timed_out_sg_count=%d timeout_seconds=%s",
+                        len(pending),
+                        overall_timeout_seconds,
+                    )
+                return results
+
+            for future in as_completed(futures):
+                sg_id = future_to_sg[future]
+                results[sg_id] = future.result()
+            return results
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def refresh_forever(
         self,

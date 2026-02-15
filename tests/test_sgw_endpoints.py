@@ -6,9 +6,12 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 
 from pypnm_cmts.api.main import app
 from pypnm_cmts.api.routes.serving_group.cm.operations.schemas import (
+    ServingGroupCableModemSysDescrEntryModel,
+    ServingGroupCableModemSysDescrGroupModel,
     ServingGroupDocsDevResetNowRequest,
 )
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
@@ -24,6 +27,7 @@ from pypnm_cmts.sgw.models import (
     SgwSnapshotModel,
 )
 from pypnm_cmts.sgw.runtime_state import (
+    get_sgw_manager,
     reset_sgw_runtime_state,
     set_sgw_startup_success,
 )
@@ -635,3 +639,171 @@ def test_serving_group_docs_dev_reset_now_missing_mac_returns_failure(monkeypatc
 def test_serving_group_docs_dev_reset_now_schema_excludes_pnm_parameters() -> None:
     schema = ServingGroupDocsDevResetNowRequest.model_json_schema()
     assert "pnm_parameters" not in str(schema)
+
+
+def test_serving_group_get_sys_descr_grouped_by_sg(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(
+        store,
+        SG_ID_ONE,
+        [
+            SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.101"),
+            SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.102"),
+            SgwCableModemModel(mac="aa:bb:cc:dd:ee:03", ipv4="192.168.0.103"),
+        ],
+    )
+    _seed_store(
+        store,
+        SG_ID_TWO,
+        [
+            SgwCableModemModel(mac="aa:bb:cc:dd:ee:04", ipv4="192.168.0.104"),
+            SgwCableModemModel(mac="aa:bb:cc:dd:ee:05", ipv4="192.168.0.105"),
+        ],
+    )
+    _configure_runtime_state(store, [SG_ID_ONE, SG_ID_TWO])
+
+    sysdescr_by_mac = {
+        "aa:bb:cc:dd:ee:01": SystemDescriptorModel(HW_REV="1", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+        "aa:bb:cc:dd:ee:02": SystemDescriptorModel(HW_REV="1", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+        "aa:bb:cc:dd:ee:03": SystemDescriptorModel(HW_REV="1", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+        "aa:bb:cc:dd:ee:04": None,
+        "aa:bb:cc:dd:ee:05": SystemDescriptorModel(HW_REV="1", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+    }
+
+    def _fake_collect(
+        sg_id: object,
+        mac_address: object,
+        ip_address: object,
+        communities: object,
+    ) -> SystemDescriptorModel | None:
+        assert sg_id in (SG_ID_ONE, SG_ID_TWO)
+        assert isinstance(communities, list)
+        assert communities == ["private"]
+        return sysdescr_by_mac[str(mac_address)]
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._collect_modem_sysdescr",
+        staticmethod(_fake_collect),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/cableModem/operations/getSysDescr",
+            json={
+                "cmts": {
+                    "cable_modem": {"snmp": {"snmpV2C": {"community": "private"}}},
+                }
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        groups = payload["groups"]
+        assert [group["sg_id"] for group in groups] == [int(SG_ID_ONE), int(SG_ID_TWO)]
+        sg_one = groups[0]
+        assert sg_one["modems"]["aa:bb:cc:dd:ee:03"]["sysdescr"]["MODEL"] == "M"
+        sg_two = groups[1]
+        assert sg_two["status"] == ServiceStatusCode.SUCCESS.value
+        assert sg_two["modem_count"] == 2
+        assert sg_two["success_count"] == 1
+        assert sg_two["failure_count"] == 1
+        assert sg_two["modems"]["aa:bb:cc:dd:ee:04"]["sysdescr"]["is_empty"] is True
+
+
+def test_serving_group_get_sys_descr_all_fail_returns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(
+        store,
+        SG_ID_ONE,
+        [SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.101")],
+    )
+    _seed_store(
+        store,
+        SG_ID_TWO,
+        [SgwCableModemModel(mac="aa:bb:cc:dd:ee:02", ipv4="192.168.0.102")],
+    )
+    _configure_runtime_state(store, [SG_ID_ONE, SG_ID_TWO])
+
+    def _fake_collect(
+        sg_id: object,
+        mac_address: object,
+        ip_address: object,
+        communities: object,
+    ) -> SystemDescriptorModel | None:
+        return None
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._collect_modem_sysdescr",
+        staticmethod(_fake_collect),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/cableModem/operations/getSysDescr",
+            json={"cmts": {}},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        assert "no modem sysdescr responses received" in str(payload["message"]).lower()
+        assert len(payload["groups"]) == 2
+        assert payload["groups"][0]["status"] == ServiceStatusCode.FAILURE.value
+        assert payload["groups"][1]["status"] == ServiceStatusCode.FAILURE.value
+
+
+def test_serving_group_get_sys_descr_uses_sgw_scoped_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(
+        store,
+        SG_ID_ONE,
+        [SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.101")],
+    )
+    _configure_runtime_state(store, [SG_ID_ONE])
+    manager = get_sgw_manager()
+    assert manager is not None
+
+    called = {"value": False}
+
+    def _fake_run_scoped_job(
+        sg_ids: list[ServiceGroupId],
+        worker: object,
+        max_workers: int | None = None,
+        overall_timeout_seconds: float | None = None,
+    ) -> dict[ServiceGroupId, ServingGroupCableModemSysDescrGroupModel]:
+        called["value"] = True
+        assert sg_ids == [SG_ID_ONE]
+        assert overall_timeout_seconds is None
+        assert max_workers is None
+        return {
+            SG_ID_ONE: ServingGroupCableModemSysDescrGroupModel(
+                sg_id=SG_ID_ONE,
+                status=ServiceStatusCode.SUCCESS,
+                message="",
+                modem_count=1,
+                success_count=1,
+                failure_count=0,
+                modems={
+                    "aa:bb:cc:dd:ee:01": ServingGroupCableModemSysDescrEntryModel(
+                        sysdescr=SystemDescriptorModel(HW_REV="1", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+                    )
+                },
+            )
+        }
+
+    monkeypatch.setattr(manager, "run_scoped_job", _fake_run_scoped_job)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/cableModem/operations/getSysDescr",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}}},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.SUCCESS.value
+        assert called["value"] is True

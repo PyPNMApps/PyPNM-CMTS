@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 from pypnm.lib.mac_address import MacAddress, MacAddressFormat
 from pypnm.lib.types import InetAddressStr, MacAddressStr
 
@@ -94,10 +95,54 @@ class ServingGroupDocsDevResetNowResponse(CacheResponseBase):
     )
 
 
+class ServingGroupCableModemSysDescrEntryModel(BaseModel):
+    """Per-modem sysDescr payload."""
+
+    sysdescr: SystemDescriptorModel = Field(
+        default_factory=SystemDescriptorModel,
+        description="Cable modem parsed sysDescr model.",
+    )
+
+
+class ServingGroupCableModemSysDescrGroupModel(BaseModel):
+    """Per-serving-group sysDescr response payload."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Per-group status code.")
+    message: str = Field(default="", description="Per-group status message.")
+    modem_count: int = Field(default=0, ge=0, description="Resolved modem count in this serving group.")
+    success_count: int = Field(default=0, ge=0, description="Modems with valid sysDescr values.")
+    failure_count: int = Field(default=0, ge=0, description="Modems without valid sysDescr values.")
+    modems: dict[MacAddressStr, ServingGroupCableModemSysDescrEntryModel] = Field(
+        default_factory=dict,
+        description="Per-modem sysDescr data keyed by cable modem MAC address.",
+    )
+
+
+class ServingGroupGetSysDescrResponse(CacheResponseBase):
+    """Response model for SG-scoped cable modem sysDescr collection."""
+
+    requested_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers.")
+    requested_mac_addresses: list[MacAddressStr] = Field(default_factory=list, description="Requested cable modem MAC addresses.")
+    resolved_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Resolved service group identifiers.")
+    missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers not found.")
+    missing_mac_addresses: list[MacAddressStr] = Field(
+        default_factory=list,
+        description="Requested cable modem MAC addresses not found in resolved scope.",
+    )
+    groups: list[ServingGroupCableModemSysDescrGroupModel] = Field(
+        default_factory=list,
+        description="Per-serving-group sysDescr results.",
+    )
+
+
 __all__ = [
     "ServingGroupDocsDevResetNowCableModemModel",
     "ServingGroupDocsDevResetNowEnvelopeModel",
     "ServingGroupDocsDevResetNowRequest",
     "ServingGroupDocsDevResetNowResponse",
     "ServingGroupDocsDevResetNowResultModel",
+    "ServingGroupCableModemSysDescrEntryModel",
+    "ServingGroupCableModemSysDescrGroupModel",
+    "ServingGroupGetSysDescrResponse",
 ]

@@ -34,7 +34,7 @@ class ModulationProfileRouter:
         if tags is None:
             tags = ["CMTS PNM DOWNSTREAM OFDM ModulationProfile"]
         self.router = APIRouter(prefix=prefix, tags=tags)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(self.__class__.__name__)
         self._service = ModulationProfileServiceGroupOperationService()
         self._register_routes()
 
