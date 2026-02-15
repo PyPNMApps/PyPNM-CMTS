@@ -166,7 +166,7 @@ def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: pytest.Monk
     _disable_startup(monkeypatch)
     store = SgwCacheStore()
     modems_one = [
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv6="0x00000000000000000000000000000000"),
     ]
     modems_two = [
         SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
@@ -195,6 +195,7 @@ def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: pytest.Monk
         ]
         assert "sysdescr" in groups[0]["items"][0]
         assert groups[0]["items"][0]["sysdescr"]["is_empty"] is True
+        assert groups[0]["items"][0]["ipv6"] == "::"
         assert groups[0]["items"][0]["registration_status"]["status"] == 1
         assert groups[0]["items"][0]["registration_status"]["text"] == "other"
 

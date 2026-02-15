@@ -7,6 +7,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from pypnm.lib.inet_utils import InetGenerate
 from pypnm.lib.mac_address import MacAddress
 from pypnm.lib.types import (
     HostNameStr,
@@ -239,13 +240,27 @@ class CmtsInventoryDiscoveryService:
 
         return RegisteredCableModemModel(
             mac=MacAddressStr(str(normalized_mac)),
-            ipv4=IPv4Str("" if ipv4_value is None else str(ipv4_value)),
-            ipv6=IPv6Str("" if ipv6_value is None else str(ipv6_value)),
-            ipv6_link_local=IPv6LinkLocalStr(IPv6Str("" if ipv6_ll_value is None else str(ipv6_ll_value))),
+            ipv4=IPv4Str(CmtsInventoryDiscoveryService._normalize_inet_value("" if ipv4_value is None else str(ipv4_value))),
+            ipv6=IPv6Str(CmtsInventoryDiscoveryService._normalize_inet_value("" if ipv6_value is None else str(ipv6_value))),
+            ipv6_link_local=IPv6LinkLocalStr(
+                IPv6Str(CmtsInventoryDiscoveryService._normalize_inet_value("" if ipv6_ll_value is None else str(ipv6_ll_value)))
+            ),
             ds_channel_set=ChSetId(0) if ds_channel_set is None else ChSetId(int(ds_channel_set)),
             us_channel_set=ChSetId(0) if us_channel_set is None else ChSetId(int(us_channel_set)),
             registration_status=CmtsCmRegState(1) if reg_status is None else CmtsCmRegState(int(reg_status)),
         )
+
+    @staticmethod
+    def _normalize_inet_value(raw_value: str) -> str:
+        value = str(raw_value).strip()
+        if value == "":
+            return ""
+        if not value.startswith("0x"):
+            return value
+        try:
+            return InetGenerate.hex_to_inet(value[2:])
+        except Exception:
+            return value
 
     def _persist_snapshot(
         self,

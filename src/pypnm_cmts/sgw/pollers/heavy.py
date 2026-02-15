@@ -197,11 +197,12 @@ class SnmpInventoryProvider:
         modems: list[SgwCableModemModel] = []
         for cm in per_sg[0].cms:
             normalized_ipv4 = SnmpInventoryProvider._normalize_ip_value(str(cm.ipv4))
+            normalized_ipv6 = SnmpInventoryProvider._normalize_ip_value(str(cm.ipv6))
             modems.append(
                 SgwCableModemModel(
                     mac=cm.mac,
                     ipv4=normalized_ipv4,
-                    ipv6=cm.ipv6,
+                    ipv6=normalized_ipv6,
                     ds_channel_set=cm.ds_channel_set,
                     us_channel_set=cm.us_channel_set,
                     registration_status=cm.registration_status,

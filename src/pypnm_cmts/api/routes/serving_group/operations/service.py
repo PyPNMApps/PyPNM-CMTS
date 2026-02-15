@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from pypnm.lib.inet_utils import InetGenerate
 from pypnm.lib.types import (
     ChannelId,
     MacAddressStr,
@@ -616,8 +617,8 @@ class ServingGroupCacheService:
         ds_channel_ids: list[ChannelId],
         us_channel_ids: list[ChannelId],
     ) -> ServingGroupCableModemEntryModel:
-        ipv4_value = "" if modem.ipv4 is None else str(modem.ipv4)
-        ipv6_value = "" if modem.ipv6 is None else str(modem.ipv6)
+        ipv4_value = self._normalize_inet_value("" if modem.ipv4 is None else str(modem.ipv4))
+        ipv6_value = self._normalize_inet_value("" if modem.ipv6 is None else str(modem.ipv6))
         reg_status_value = CmtsCmRegState(modem.registration_status)
         return ServingGroupCableModemEntryModel(
             mac_address=str(modem.mac),
@@ -659,6 +660,18 @@ class ServingGroupCacheService:
         if total_items <= 0:
             return 0
         return (int(total_items) + int(page_size) - 1) // int(page_size)
+
+    @staticmethod
+    def _normalize_inet_value(raw_value: str) -> str:
+        value = str(raw_value).strip()
+        if value == "":
+            return ""
+        if not value.startswith("0x"):
+            return value
+        try:
+            return InetGenerate.hex_to_inet(value[2:])
+        except Exception:
+            return value
 
     @staticmethod
     def _utc_now() -> TimeStamp:
