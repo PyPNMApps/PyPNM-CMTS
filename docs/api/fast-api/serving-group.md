@@ -229,6 +229,10 @@ Semantics:
 - `cmts.cable_modem.mac_address: []` means all cable modems in resolved service groups.
 - `cmts.cable_modem.snmp.snmpV2C.community` is optional; system default write community is used when omitted or null.
 - `pnm_parameters` is not part of this endpoint request.
+- Post-reset verification uses ICMP ping:
+- The service waits for ping failure as reset confirmation.
+- If ping stays reachable, it retries up to 5 checks with 2-second delay between checks.
+- If ping remains reachable after all retries, that modem is marked failed.
 
 Response:
 
@@ -240,19 +244,25 @@ Response:
   "requested_sg_ids": [3147266],
   "requested_mac_addresses": ["aa:bb:cc:dd:ee:02"],
   "resolved_sg_ids": [3147266],
-  "resolved_mac_addresses": ["aa:bb:cc:dd:ee:02"],
   "missing_sg_ids": [],
   "missing_mac_addresses": [],
-  "attempted_count": 1,
-  "success_count": 1,
-  "failure_count": 0,
-  "results": [
+  "groups": [
     {
       "sg_id": 3147266,
-      "mac_address": "aa:bb:cc:dd:ee:02",
-      "ip_address": "192.168.0.102",
       "status": 0,
-      "message": "docsDevResetNow command sent"
+      "message": "",
+      "modem_count": 1,
+      "success_count": 1,
+      "failure_count": 0,
+      "modems": {
+        "aa:bb:cc:dd:ee:02": {
+          "ip_address": "192.168.0.102",
+          "status": 0,
+          "message": "docsDevResetNow verified by ping failure after 2 attempt(s)",
+          "ping_attempts": 2,
+          "ping_last_reachable": false
+        }
+      }
     }
   ]
 }

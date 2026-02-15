@@ -64,14 +64,29 @@ class ServingGroupDocsDevResetNowRequest(BaseModel):
     )
 
 
-class ServingGroupDocsDevResetNowResultModel(BaseModel):
+class ServingGroupDocsDevResetNowModemModel(BaseModel):
     """Per-modem docsDevResetNow execution result."""
 
-    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
-    mac_address: MacAddressStr = Field(..., description="Cable modem MAC address.")
     ip_address: InetAddressStr | None = Field(default=None, description="Resolved cable modem IP address.")
     status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Per-modem reset status code.")
     message: str = Field(default="", description="Per-modem reset status message.")
+    ping_attempts: int = Field(default=0, ge=0, description="Number of post-reset ping verification attempts.")
+    ping_last_reachable: bool | None = Field(default=None, description="Reachability observed on the last ping verification attempt.")
+
+
+class ServingGroupDocsDevResetNowGroupModel(BaseModel):
+    """Per-serving-group docsDevResetNow response payload."""
+
+    sg_id: ServiceGroupId = Field(..., description="Service group identifier.")
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Per-group status code.")
+    message: str = Field(default="", description="Per-group status message.")
+    modem_count: int = Field(default=0, ge=0, description="Resolved modem count in this serving group.")
+    success_count: int = Field(default=0, ge=0, description="Modems reset and verified unreachable by ping.")
+    failure_count: int = Field(default=0, ge=0, description="Modems where reset or ping verification failed.")
+    modems: dict[MacAddressStr, ServingGroupDocsDevResetNowModemModel] = Field(
+        default_factory=dict,
+        description="Per-modem docsDevResetNow results keyed by cable modem MAC address.",
+    )
 
 
 class ServingGroupDocsDevResetNowResponse(CacheResponseBase):
@@ -80,18 +95,14 @@ class ServingGroupDocsDevResetNowResponse(CacheResponseBase):
     requested_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers.")
     requested_mac_addresses: list[MacAddressStr] = Field(default_factory=list, description="Requested cable modem MAC addresses.")
     resolved_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Resolved service group identifiers.")
-    resolved_mac_addresses: list[MacAddressStr] = Field(default_factory=list, description="Resolved cable modem MAC addresses.")
     missing_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Requested service group identifiers not found.")
     missing_mac_addresses: list[MacAddressStr] = Field(
         default_factory=list,
         description="Requested cable modem MAC addresses not found in resolved scope.",
     )
-    attempted_count: int = Field(default=0, ge=0, description="Total reset attempts issued.")
-    success_count: int = Field(default=0, ge=0, description="Total successful reset commands.")
-    failure_count: int = Field(default=0, ge=0, description="Total failed reset commands.")
-    results: list[ServingGroupDocsDevResetNowResultModel] = Field(
+    groups: list[ServingGroupDocsDevResetNowGroupModel] = Field(
         default_factory=list,
-        description="Per-modem reset command results.",
+        description="Per-serving-group docsDevResetNow results.",
     )
 
 
@@ -141,7 +152,8 @@ __all__ = [
     "ServingGroupDocsDevResetNowEnvelopeModel",
     "ServingGroupDocsDevResetNowRequest",
     "ServingGroupDocsDevResetNowResponse",
-    "ServingGroupDocsDevResetNowResultModel",
+    "ServingGroupDocsDevResetNowModemModel",
+    "ServingGroupDocsDevResetNowGroupModel",
     "ServingGroupCableModemSysDescrEntryModel",
     "ServingGroupCableModemSysDescrGroupModel",
     "ServingGroupGetSysDescrResponse",

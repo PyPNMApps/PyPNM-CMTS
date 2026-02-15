@@ -579,6 +579,23 @@ def test_serving_group_docs_dev_reset_now_scoped_success(monkeypatch: pytest.Mon
         "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._send_docs_dev_reset_now",
         staticmethod(_fake_reset),
     )
+    ping_calls = {"count": 0}
+
+    def _fake_ping(mac_address: object, ip_address: object, write_community: object) -> bool:
+        ping_calls["count"] += 1
+        assert mac_address == "aa:bb:cc:dd:ee:02"
+        assert ip_address == "192.168.0.102"
+        assert write_community == "private"
+        return ping_calls["count"] < 3
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._is_modem_ping_reachable",
+        staticmethod(_fake_ping),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._sleep_before_ping_retry",
+        staticmethod(lambda: None),
+    )
 
     with TestClient(app) as client:
         response = client.post(
@@ -596,14 +613,15 @@ def test_serving_group_docs_dev_reset_now_scoped_success(monkeypatch: pytest.Mon
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
-        assert payload["attempted_count"] == 1
-        assert payload["success_count"] == 1
-        assert payload["failure_count"] == 0
         assert payload["missing_sg_ids"] == []
         assert payload["missing_mac_addresses"] == []
-        assert payload["results"][0]["sg_id"] == int(SG_ID_ONE)
-        assert payload["results"][0]["mac_address"] == "aa:bb:cc:dd:ee:02"
-        assert payload["results"][0]["status"] == ServiceStatusCode.SUCCESS.value
+        assert payload["groups"][0]["sg_id"] == int(SG_ID_ONE)
+        assert payload["groups"][0]["success_count"] == 1
+        assert payload["groups"][0]["failure_count"] == 0
+        modem = payload["groups"][0]["modems"]["aa:bb:cc:dd:ee:02"]
+        assert modem["status"] == ServiceStatusCode.SUCCESS.value
+        assert modem["ping_attempts"] == 3
+        assert modem["ping_last_reachable"] is False
 
 
 def test_serving_group_docs_dev_reset_now_missing_mac_returns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -630,10 +648,46 @@ def test_serving_group_docs_dev_reset_now_missing_mac_returns_failure(monkeypatc
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.FAILURE.value
-        assert payload["attempted_count"] == 0
-        assert payload["success_count"] == 0
-        assert payload["failure_count"] == 0
         assert payload["missing_mac_addresses"] == ["aa:bb:cc:dd:ee:03"]
+        assert payload["groups"][0]["modem_count"] == 0
+
+
+def test_serving_group_docs_dev_reset_now_ping_success_after_retries_is_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_sgw_runtime_state()
+    _disable_startup(monkeypatch)
+    store = SgwCacheStore()
+    _seed_store(
+        store,
+        SG_ID_ONE,
+        [SgwCableModemModel(mac="aa:bb:cc:dd:ee:01", ipv4="192.168.0.101")],
+    )
+    _configure_runtime_state(store, [SG_ID_ONE])
+
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._send_docs_dev_reset_now",
+        staticmethod(lambda mac_address, ip_address, write_community: (ServiceStatusCode.SUCCESS, "docsDevResetNow command sent")),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._is_modem_ping_reachable",
+        staticmethod(lambda mac_address, ip_address, write_community: True),
+    )
+    monkeypatch.setattr(
+        "pypnm_cmts.api.routes.serving_group.cm.operations.service.ServingGroupCableModemOperationsService._sleep_before_ping_retry",
+        staticmethod(lambda: None),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cmts/servingGroup/cableModem/operations/docsDevResetNow",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}}},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == ServiceStatusCode.FAILURE.value
+        modem = payload["groups"][0]["modems"]["aa:bb:cc:dd:ee:01"]
+        assert modem["status"] == ServiceStatusCode.PING_FAILED.value
+        assert modem["ping_attempts"] == 5
+        assert modem["ping_last_reachable"] is True
 
 
 def test_serving_group_docs_dev_reset_now_schema_excludes_pnm_parameters() -> None:
