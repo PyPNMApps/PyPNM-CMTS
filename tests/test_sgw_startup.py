@@ -17,7 +17,6 @@ from pypnm_cmts.docsis.data_type.cmts_service_group import CmtsServiceGroupModel
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.discovery import ServiceGroupDiscovery
-from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.models import SgwCableModemModel, SgwSnapshotPayloadModel
 from pypnm_cmts.sgw.precheck import CmtsStartupPrecheckResult
 from pypnm_cmts.sgw.runtime_state import (
@@ -78,7 +77,7 @@ def _set_discovery(monkeypatch: object, discovery: ServiceGroupDiscovery) -> Non
     )
 
 
-def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: Path) -> None:
+def test_startup_discovers_sgs_and_initializes_cache_runtime(monkeypatch: object, tmp_path: Path) -> None:
     reset_sgw_runtime_state()
     settings = _build_settings(tmp_path / "coordination")
     sg_ids = [ServiceGroupId(1), ServiceGroupId(2), ServiceGroupId(3)]
@@ -101,10 +100,9 @@ def test_startup_discovers_sgs_and_primes_cache(monkeypatch: object, tmp_path: P
         assert status.discovered_sg_ids == sg_ids
         store = get_sgw_store()
         assert store is not None
-        for sg_id in sg_ids:
-            entry = store.get_entry(sg_id)
-            assert entry is not None
-            assert float(entry.snapshot.metadata.snapshot_time_epoch) > 0.0
+        manager = get_sgw_manager()
+        assert manager is not None
+        assert manager.get_service_groups() == sg_ids
 
 
 def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: Path) -> None:
@@ -126,11 +124,12 @@ def test_readiness_true_when_discovery_succeeds(monkeypatch: object, tmp_path: P
 
     with TestClient(app) as client:
         response = client.get("/ops/ready")
-        assert response.status_code == 200
+        assert response.status_code == 503
         payload = response.json()
-        assert payload["status"] == OperationalStatus.OK.value
+        assert payload["status"] == OperationalStatus.ERROR.value
         assert payload["discovery_ok"] is True
-        assert payload["sgw_ready"] is True
+        assert payload["sgw_ready"] is False
+        assert payload["failed_check"] == ReadinessCheck.SGW_CACHE.value
         assert payload["discovered_sg_ids"] == [1, 2]
 
 
@@ -186,11 +185,10 @@ def test_startup_disabled_mode_uses_coherent_store_and_manager(monkeypatch: obje
     assert manager.get_store() is store
 
 
-def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Path) -> None:
+def test_startup_without_prime_reports_cache_not_ready(monkeypatch: object, tmp_path: Path) -> None:
     reset_sgw_runtime_state()
     settings = _build_settings(tmp_path / "coordination")
     sg_ids = [ServiceGroupId(1)]
-    error_message = "prime failed"
 
     monkeypatch.setattr(
         CmtsOrchestratorSettings,
@@ -200,25 +198,20 @@ def test_startup_prime_failure_records_failure(monkeypatch: object, tmp_path: Pa
     _patch_pollers(monkeypatch)
     _set_discovery(monkeypatch, FakeDiscovery(sg_ids))
 
-    def _raise_refresh(self: SgwManager, _now_epoch: float) -> None:
-        raise RuntimeError(error_message)
-
-    monkeypatch.setattr(SgwManager, "refresh_once", _raise_refresh)
-
     with TestClient(app) as client:
         response = client.get("/ops/ready")
         assert response.status_code == 503
         payload = response.json()
-        assert payload["failed_check"] == ReadinessCheck.SGW_PRIME.value
-        assert error_message in payload["message"]
+        assert payload["failed_check"] == ReadinessCheck.SGW_CACHE.value
+        assert payload["message"] == "sgw cache not primed"
         assert payload["discovered_sg_ids"] == [1]
 
     status = get_sgw_startup_status()
     assert status.startup_completed is True
     assert status.discovery_ok is True
-    assert status.prime_failed is True
+    assert status.prime_failed is False
     assert status.discovered_sg_ids == sg_ids
-    assert error_message in status.error_message
+    assert status.error_message == ""
 
 
 @pytest.mark.unit

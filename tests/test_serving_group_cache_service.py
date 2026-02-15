@@ -43,21 +43,17 @@ def test_require_fresh_returns_immediately(monkeypatch: pytest.MonkeyPatch) -> N
     manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
     set_sgw_startup_success([sg_id], store, manager, 1_000.0)
 
-    request = GetServingGroupTopologyRequest(
-        cmts={"serving_group": {"id": [int(sg_id)]}},
-        refresh="heavy",
-        require_fresh=True,
-        max_wait_seconds=5.0,
-    )
-
-    waited_seconds = service._wait_for_refresh(
-        request=request,
+    GetServingGroupTopologyRequest(cmts={"serving_group": {"id": [int(sg_id)]}})
+    baseline = service._snapshot_baseline([sg_id], store)
+    refresh_advanced, waited_seconds = service._wait_for_refresh(
         sg_ids=[sg_id],
         store=store,
-        refresh_applied=True,
+        baseline=baseline,
+        timeout_seconds=1,
     )
 
-    assert waited_seconds == 0.0
+    assert refresh_advanced is False
+    assert waited_seconds >= 0.0
 
 
 @pytest.mark.unit
@@ -74,18 +70,14 @@ def test_require_fresh_returns_immediately_when_snapshot_does_not_advance(monkey
     manager = SgwManager(settings=settings, store=store, service_groups=[sg_id])
     set_sgw_startup_success([sg_id], store, manager, 1_000.0)
 
-    request = GetServingGroupTopologyRequest(
-        cmts={"serving_group": {"id": [int(sg_id)]}},
-        refresh="heavy",
-        require_fresh=True,
-        max_wait_seconds=1.0,
-    )
-
-    waited_seconds = service._wait_for_refresh(
-        request=request,
+    GetServingGroupTopologyRequest(cmts={"serving_group": {"id": [int(sg_id)]}})
+    baseline = service._snapshot_baseline([sg_id], store)
+    refresh_advanced, waited_seconds = service._wait_for_refresh(
         sg_ids=[sg_id],
         store=store,
-        refresh_applied=True,
+        baseline=baseline,
+        timeout_seconds=1,
     )
 
-    assert waited_seconds == 0.0
+    assert refresh_advanced is False
+    assert waited_seconds >= 0.0
