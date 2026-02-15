@@ -145,7 +145,7 @@ class OfdmSpectrumAnalyzerCaptureWorker(PnmCaptureWorkerBase):
         modem_ip = str(cable_modem.get_inet_address)
         tftp_log_key, tftp_log_value = PnmCaptureHelper.resolve_tftp_log_target(modem_ip=modem_ip, tftp_servers=tftp_servers)
         self.logger.info(
-            "[CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s %s=%s tftp_path=%s",
+            "[CAPTURE_START] operation_id=%s sg_id=%s mac=%s ip=%s channel_count=%s %s=%s tftp_path=\"%s\"",
             operation_id,
             sg_id,
             mac_address,
