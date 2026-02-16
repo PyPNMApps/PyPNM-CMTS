@@ -60,7 +60,7 @@ jobs:
           from pathlib import Path
 
           text = Path("pyproject.toml").read_text(encoding="utf-8")
-          match = re.search(r'^\\s*version\\s*=\\s*\"([^\"]+)\"\\s*$', text, re.MULTILINE)
+          match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
           if not match:
               raise SystemExit(1)
           print(match.group(1))
@@ -80,7 +80,7 @@ jobs:
           from pathlib import Path
 
           text = Path("pyproject.toml").read_text(encoding="utf-8")
-          match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
+          match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
           if not match:
               raise SystemExit(1)
           print(match.group(1))
@@ -129,7 +129,7 @@ jobs:
           from pathlib import Path
 
           text = Path("pyproject.toml").read_text(encoding="utf-8")
-          match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
+          match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
           if not match:
               raise SystemExit(1)
           print(match.group(1))
