@@ -209,8 +209,11 @@ class OperationRunner:
                     if pending_item is None:
                         continue
 
-                    item, _ = pending_item
-                    result = self._resolve_future_result(future)
+                    item, start_time = pending_item
+                    if now - start_time >= execution.per_modem_timeout_seconds:
+                        result = self._timeout_result()
+                    else:
+                        result = self._resolve_future_result(future)
                     state = self._handle_result(operation_id, state, item, result, execution, retry_queue)
                     if state.state in {OperationState.CANCELLED, OperationState.FAILED}:
                         return
