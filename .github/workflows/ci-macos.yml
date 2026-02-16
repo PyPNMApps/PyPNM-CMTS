@@ -1,0 +1,79 @@
+name: CI macOS
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  tests:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install "pypnm-docsis>=1.0.18.0"
+          python -m pip install ".[dev,docs]"
+          python -m pip install build twine
+
+      - name: Smoke - PyPNM and PyPNM-CMTS imports
+        run: |
+          python - <<'PY'
+          import pypnm
+          import pypnm_cmts
+
+          print("PyPNM import ok")
+          print("PyPNM-CMTS import ok")
+          print(getattr(pypnm, "__version__", "unknown"))
+          print(getattr(pypnm_cmts, "__version__", "unknown"))
+          PY
+
+      - name: Smoke - CLI help
+        run: |
+          python -m pypnm_cmts.cli --help || pypnm-cmts --help
+
+      - name: Ruff
+        run: |
+          python -m ruff check src tools
+
+      - name: Run tests
+        run: |
+          python -m pytest -q -ra --tb=short
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Twine check
+        run: |
+          python -m twine check dist/*
+
+      - name: Build docs
+        run: |
+          python -m mkdocs build --strict
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.python-version }}
+          path: dist/*
