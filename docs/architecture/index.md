@@ -1,9 +1,9 @@
 # Architecture
 
-Starting point for architecture references and phase documentation.
+Starting point for architecture references.
 
 ## Contents
 - [Core Architecture](architecture.md)
+- [Mode Contract](mode-contract.md)
+- [CMTS Request Schema Contract](schema/cmts-request.md)
 - [Service Group Workers And Zero-Touch Operation](service-group-workers.md)
-- [Phase 3 Definition Of Done](phase3_definition_of_done.md)
-- [Phase 4 Zero-Touch Worker Enablement](phase4_zero_touch_worker_enablement.md)

@@ -42,7 +42,7 @@ The CLI supports optional CM-side override parameters that map directly to the r
 2) Request body overrides (if the endpoint explicitly allows them)
 3) `system.json` defaults
 
-Planned flags:
+Additional flags:
 - `--cm-snmpv2c-write-community`
 - `--cm-tftp-ipv4`
 - `--cm-tftp-ipv6`

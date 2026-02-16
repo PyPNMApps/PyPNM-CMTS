@@ -1,4 +1,4 @@
-# PyPNM-CMTS Architecture And Implementation Burndown
+# PyPNM-CMTS Architecture And Implementation Status
 
 This Document Defines The Software-Centric Architecture, Execution Modes, And A Deterministic Implementation Checklist For PyPNM-CMTS.
 
@@ -75,11 +75,11 @@ An append-only JSONL index is maintained per SG/day:
   - Light refresh (state): registration/online state deltas for known modems; cheaper polling; runs more frequently than heavy refresh and can be decoupled.
 - Explicit on-demand refresh: optional endpoint actions can request refresh, but must be rate-limited and bounded (paging and caps).
 
-## Implementation Checklist / Burndown
+## Implementation Checklist / Status
 
 Status Markers:
 - [x] Done (Implemented And Covered By Tests)
-- [ ] Todo / Not Started
+- [ ] Not Started
 - [~] In Progress (Implemented But Missing Tests Or Integration)
 
 ### Phase 0 — Contracts & Wiring

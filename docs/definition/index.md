@@ -44,7 +44,7 @@ Table Of Contents in alphabetical order.
 - [Service Group](#service-group)
 - [Service Group Descriptor](#service-group-descriptor)
 - [Service Group ID](#service-group-id)
-- [Service Group Shard Planner](#service-group-shard-planner)
+- [Service Group Shard Controller](#service-group-shard-controller)
 - [Serving Group Worker (SGW)](#serving-group-worker-sgw)
 - [Shard Mode](#shard-mode)
 - [Standalone](#standalone)
@@ -199,8 +199,8 @@ A configuration record describing a service group boundary, including `sg_id`, o
 ### Service Group ID
 An integer identifier for a service group (`ServiceGroupId`). Used as the primary key for leasing and result directory naming.
 
-### Service Group Shard Planner
-The deterministic planner that orders enabled service groups and computes the worker count for controller planning.
+### Service Group Shard Controller
+The deterministic control path that orders enabled service groups and computes the worker count for controller coordination.
 
 ### Serving Group Worker (SGW)
 The serving group worker layer that manages per-service-group cache snapshots and refresh scheduling.
@@ -250,7 +250,7 @@ that service group.
 
 ### Worker Cap
 An optional configuration value limiting the number of worker processes/replicas allowed to participate (0 means no cap). This is a
-planning/configuration primitive; enforcement may be added later.
+configuration primitive; enforcement may be added later.
 
 ### Zero-Touch (0T)
 The target operational model where service group inventory is discovered automatically and workers self-assign work via coordination leases,

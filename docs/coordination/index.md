@@ -218,7 +218,7 @@ Operational guidance:
 - Convergence requires repeated ticks and may depend on TTL expiry under contention.
 
 Wiring note:
-- TODO: Resolve owner_id via OwnerIdResolver and pass coordination settings into CoordinationManager in the CLI or launcher path.
+- Resolve owner_id via OwnerIdResolver and pass coordination settings into CoordinationManager in the CLI or launcher path.
 
 Coordination config ownership:
 - state_dir, election_name, leader_ttl_seconds, and lease_ttl_seconds are launcher-owned inputs.

@@ -48,7 +48,7 @@ Validator guarantees (high level):
 
 ### Controller
 
-Leader-election tick only. Discovers inventory when leader; otherwise reuses snapshot or configured SG list. Computes `worker_count` for planning and never runs tests. Output includes `coordination_tick` with leadership and lease details.
+Leader-election tick only. Discovers inventory when leader; otherwise reuses snapshot or configured SG list. Computes `worker_count` for coordination and never runs tests. Output includes `coordination_tick` with leadership and lease details.
 
 ### Worker
 
@@ -113,7 +113,7 @@ Likely issues:
 
 | Mode        | Leader Election | Inventory Source (preferred)                      | Lease Acquisition | Runs Tests | Typical Use |
 |-------------|------------------|---------------------------------------------------|------------------|-----------|-------------|
-| controller  | Yes              | discovery snapshot (if leader) / snapshot / config | Yes              | No        | Coordination + planning |
+| controller  | Yes              | discovery snapshot (if leader) / snapshot / config | Yes              | No        | Coordination + sizing |
 | worker      | No               | discovery snapshot or config SG list              | Yes              | Yes       | Distributed execution |
 | standalone  | No               | config/discovery                                  | Yes              | No        | Coordination-only (today) |
 | combined    | Yes              | config/discovery (controller-style)               | Yes              | Yes       | Controller + worker inside `serve --with-runner` |

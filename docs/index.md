@@ -1,7 +1,7 @@
 # PyPNM-CMTS documentation hub
 
 Use this page to get to the right guide for installs, operations, API references, and examples.
-PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group (SG). Deployments are supported via Docker; Kubernetes is a planned option.
+PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group (SG). Deployments are supported via Docker.
 
 ## New to PyPNM-CMTS? (start here)
 
@@ -20,6 +20,13 @@ PyPNM-CMTS is designed to service a single CMTS instance; scale by Service Group
 - [API reference](api/index.md) - FastAPI endpoints and Python helpers.
 - [Examples](examples/index.md) - runnable workflows.
 - [Tests](tests/index.md) - how to run and extend automated tests.
+
+## Find API endpoints quickly
+
+- [Operational endpoints](api/fast-api/operational.md) - health, readiness, process status, and SGW runtime controls.
+- [Serving group endpoints](api/fast-api/serving-group.md) - serving-group IDs, modem lists, topology, and cable modem operations.
+- [SG PNM operations](api/fast-api/pnm-sg-operations.md) - start, status, results, and cancel flows for SG PNM captures.
+- [RxMER endpoint deep dive](api/fast-api/pnm-rxmer.md) - full lifecycle and payload contract for RxMER orchestration.
 
 ## Release and support
 

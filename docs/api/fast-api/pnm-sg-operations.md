@@ -230,4 +230,4 @@ curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/spectrumAnalyzer/startCapture \
   -d '{"capture_settings":{"first_segment_center_freq":300000000,"last_segment_center_freq":900000000,"resolution_bw":30000}}'
 ```
 
-For a full response walkthrough, see `docs/api/fast-api/pnm-rxmer.md`.
+For a full response walkthrough, see [RxMER deep dive](pnm-rxmer.md).

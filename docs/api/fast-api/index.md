@@ -5,6 +5,26 @@
 
 FastAPI Endpoint Documentation For PyPNM-CMTS Lives Here.
 
+## Navigation By Intent
+
+- Operational health and runtime state:
+  - [Operational endpoints](operational.md)
+- Serving-group data and modem actions:
+  - [Serving group endpoints](serving-group.md)
+- PNM capture orchestration by serving group:
+  - [SG PNM operations](pnm-sg-operations.md)
+  - [RxMER deep dive](pnm-rxmer.md)
+  - [SG operations data model](pypnm-cmts/sg-operations.md)
+
+## Endpoint Family Map
+
+- `GET /ops/*`:
+  - Liveness/readiness/version and process visibility.
+- `GET|POST /cmts/servingGroup/*`:
+  - Service-group inventory, topology, and modem-scope operations.
+- `POST /cmts/pnm/sg/*`:
+  - `startCapture`, `status`, `results`, `cancel` orchestration workflow.
+
 ## Running The Service
 
 Start the FastAPI service using the CLI:
@@ -116,9 +136,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 ## Endpoint Documentation
 
 - [Operational endpoints](operational.md)
+- [Serving group endpoints](serving-group.md)
 - [SG PNM operations](pnm-sg-operations.md)
 - [RxMER deep dive](pnm-rxmer.md)
-- [Serving group endpoints](serving-group.md)
+- [SG operations data model](pypnm-cmts/sg-operations.md)
 
 ## GET /cmts/system/sysDescr
 

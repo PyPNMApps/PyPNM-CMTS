@@ -5,65 +5,55 @@ repo_url: https://github.com/PyPNMApps/PyPNM-CMTS
 repo_name: PyPNMApps/PyPNM-CMTS
 
 nav:
-  - Docs hub: index.md
-  - Architecture:
-      - Overview: architecture/index.md
-      - Core Architecture: architecture/architecture.md
-      - Mode Contract: architecture/mode-contract.md
-      - Service Group Workers And Zero-Touch Operation: architecture/service-group-workers.md
-      - Phase 3 Definition Of Done: architecture/phase3_definition_of_done.md
-      - Phase 4 Zero-Touch Worker Enablement: architecture/phase4_zero_touch_worker_enablement.md
-      - Phase 7.8 Burndown: architecture/phase-7.8-burndown.md
-      - Phase 7.7 Archive: architecture/archive/phase-7.7/README.md
-  - Definition: definition/index.md
-  - Planning:
-      - Overview: planning/index.md
-      - Phase 0: planning/phase0.md
-      - Phase 1: planning/phase1.md
-      - Phase 2: planning/phase2.md
-      - Phase 5 Burndown: planning/phase5-burndown.md
-      - Phase 6-2 Burndown: planning/phase6-2-burndown.md
-      - Phase 6-4 Burndown: planning/phase6-4-burndown.md
-      - Phase 6 Burndown: planning/phase6-burndown.md
-      - Phase 7 Burndown: planning/phase7-burndown.md
-      - Phase 7: planning/phase7.md
-  - Install: install/index.md
-  - System:
-      - Overview: system/index.md
-      - CLI option reference: system/cli-options.md
-      - Config workflow: system/config.md
-      - Manpage: system/pypnm-cmts-manpage.md
-  - CLI: system/cli.md
-  - FAQ: faq/index.md
-  - Tools: tools/index.md
-  - Scripts: scripts/index.md
-  - Examples:
-      - Overview: examples/index.md
-      - CLI: examples/cli.md
-  - Coordination:
-      - Overview: coordination/index.md
-      - Mermaid Examples: coordination/mermaid-examples.md
+  - Start:
+      - Docs hub: index.md
+      - Install: install/index.md
+      - FAQ: faq/index.md
+  - Operate:
+      - System:
+          - Overview: system/index.md
+          - CLI: system/cli.md
+          - CLI option reference: system/cli-options.md
+          - Config workflow: system/config.md
+          - Manpage: system/pypnm-cmts-manpage.md
+      - Coordination:
+          - Overview: coordination/index.md
+          - Mermaid Examples: coordination/mermaid-examples.md
+      - Topology: topology/index.md
+      - Docker: docker/index.md
   - API:
       - Overview: api/index.md
       - Common: api/common/index.md
       - FastAPI:
           - Overview: api/fast-api/index.md
           - Operational: api/fast-api/operational.md
-          - SG PNM Operations: api/fast-api/pnm-sg-operations.md
           - Serving Group: api/fast-api/serving-group.md
+          - SG PNM Operations: api/fast-api/pnm-sg-operations.md
+          - RxMER Deep Dive: api/fast-api/pnm-rxmer.md
+          - SG Operations Data Model: api/fast-api/pypnm-cmts/sg-operations.md
       - Python: api/python/index.md
-  - Tests:
-      - Overview: tests/index.md
-      - Pytest: tests/pytest/index.md
-      - Live CMTS: tests/pytest/live-cmts.md
-  - TODO: todo/todo.md
-  - Topology: topology/index.md
-  - Docker: docker/index.md
-  - Release: release/index.md
-  - Developer:
-      - Deferred cleanups: dev/deferred-cleanups.md
-  - Issues: issues/index.md
-  - Style guide: style-guide.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - Core Architecture: architecture/architecture.md
+      - Mode Contract: architecture/mode-contract.md
+      - CMTS Request Schema: architecture/schema/cmts-request.md
+      - Service Group Workers And Zero-Touch Operation: architecture/service-group-workers.md
+  - Develop:
+      - Examples:
+          - Overview: examples/index.md
+          - CLI: examples/cli.md
+      - Tools: tools/index.md
+      - Scripts: scripts/index.md
+      - Tests:
+          - Overview: tests/index.md
+          - Pytest: tests/pytest/index.md
+          - Live CMTS: tests/pytest/live-cmts.md
+      - Developer:
+          - Deferred cleanups: dev/deferred-cleanups.md
+      - Style guide: style-guide.md
+  - Project:
+      - Release: release/index.md
+      - Issues: issues/index.md
 
 theme:
   name: material
@@ -89,3 +79,15 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:mermaid2.fence_mermaid
+
+not_in_nav: |
+  bundles/**
+  architecture/phase*.md
+  architecture/archive/phase-*/**
+  definition/index.md
+
+exclude_docs: |
+  bundles/**
+  architecture/phase*.md
+  architecture/archive/phase-*/**
+  definition/index.md
