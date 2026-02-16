@@ -56,15 +56,15 @@ jobs:
         run: |
           tag_version="${GITHUB_REF#refs/tags/v}"
           file_version=$(python - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-text = Path("pyproject.toml").read_text(encoding="utf-8")
-match = re.search(r'^\\s*version\\s*=\\s*\"([^\"]+)\"\\s*$', text, re.MULTILINE)
-if not match:
-    raise SystemExit(1)
-print(match.group(1))
-PY
+          text = Path("pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^\\s*version\\s*=\\s*\"([^\"]+)\"\\s*$', text, re.MULTILINE)
+          if not match:
+              raise SystemExit(1)
+          print(match.group(1))
+          PY
           )
           if [ "$tag_version" != "$file_version" ]; then
             echo "Tag version $tag_version does not match pyproject.toml $file_version" >&2
@@ -76,26 +76,26 @@ PY
         if: steps.gate.outputs.publish == 'true' && github.event.inputs.force_publish != 'true'
         run: |
           version=$(python - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-text = Path("pyproject.toml").read_text(encoding="utf-8")
-match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
-if not match:
-    raise SystemExit(1)
-print(match.group(1))
-PY
+          text = Path("pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
+          if not match:
+              raise SystemExit(1)
+          print(match.group(1))
+          PY
           )
           exists=$(python - <<PY
-import json
-import urllib.request
+          import json
+          import urllib.request
 
-version = "${version}"
-with urllib.request.urlopen("https://pypi.org/pypi/pypnm-docsis-cmts/json") as response:
-    data = json.load(response)
-exists = bool(data.get("releases", {}).get(version))
-print("true" if exists else "false")
-PY
+          version = "${version}"
+          with urllib.request.urlopen("https://pypi.org/pypi/pypnm-docsis-cmts/json") as response:
+              data = json.load(response)
+          exists = bool(data.get("releases", {}).get(version))
+          print("true" if exists else "false")
+          PY
           )
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
           if [ "$exists" = "true" ]; then
@@ -125,15 +125,15 @@ PY
           exists="${{ steps.exists.outputs.exists }}"
           publish="${{ steps.decide.outputs.publish }}"
           version=$(python - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-text = Path("pyproject.toml").read_text(encoding="utf-8")
-match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
-if not match:
-    raise SystemExit(1)
-print(match.group(1))
-PY
+          text = Path("pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^\s*version\s*=\s*\"([^\"]+)\"\s*$', text, re.MULTILINE)
+          if not match:
+              raise SystemExit(1)
+          print(match.group(1))
+          PY
           )
           echo "ref=${ref}"
           echo "version=${version}"
