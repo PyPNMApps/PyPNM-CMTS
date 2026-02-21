@@ -50,6 +50,7 @@ INSTALL_PREFIXES: Final[list[str]]       = ["install.sh", "scripts/install", "de
 DOCKER_PREFIXES: Final[list[str]]        = ["docker/", "docker-compose", "docs/docker/"]
 K8S_PREFIX: Final[str]                   = "docs/kubernetes/"
 ALLOWED_RELEASE_BRANCHES: Final[set[str]] = {"main", "hot-fix"}
+PYPNM_DOCSIS_DEPENDENCY_PREFIX: Final[str] = "pypnm-docsis"
 
 
 SUMMARY: dict[str, str] = {}
@@ -295,6 +296,99 @@ def _read_pyproject_version() -> str:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _read_pyproject_pypnm_docsis_version() -> str:
+    """Read pinned pypnm-docsis dependency version from [project].dependencies."""
+    if not PYPROJECT_FILE_PATH.exists():
+        print(f"ERROR: pyproject.toml not found: {PYPROJECT_FILE_PATH}", file=sys.stderr)
+        sys.exit(1)
+
+    text = PYPROJECT_FILE_PATH.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    in_project_section = False
+    in_dependencies = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "[project]":
+            in_project_section = True
+            continue
+
+        if in_project_section and stripped.startswith("[") and stripped.endswith("]"):
+            break
+
+        if not in_project_section:
+            continue
+
+        if stripped.startswith("dependencies") and "[" in stripped:
+            in_dependencies = True
+            continue
+
+        if in_dependencies:
+            if stripped.startswith("]"):
+                break
+            if PYPNM_DOCSIS_DEPENDENCY_PREFIX not in stripped:
+                continue
+            match = re.search(r'"pypnm-docsis\s*(==)\s*([^"]+)"', stripped)
+            if match is None:
+                print(
+                    "ERROR: pyproject.toml dependency for pypnm-docsis must be pinned with ==.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return match.group(2).strip()
+
+    print(
+        "ERROR: Could not find pinned pypnm-docsis dependency in pyproject.toml [project].dependencies.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _read_installed_pypnm_docsis_version() -> str:
+    """Read installed pypnm-docsis version from the active environment."""
+    try:
+        import pypnm
+    except ModuleNotFoundError:
+        print(
+            "ERROR: pypnm-docsis is not installed in the active environment.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    version = getattr(pypnm, "__version__", "")
+    if not isinstance(version, str) or version.strip() == "":
+        print(
+            "ERROR: Unable to resolve installed pypnm-docsis version (__version__ missing).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return version.strip()
+
+
+def _ensure_pypnm_docsis_dependency_match() -> None:
+    """Abort release when installed pypnm-docsis does not match pinned pyproject version."""
+    pinned_version = _read_pyproject_pypnm_docsis_version()
+    installed_version = _read_installed_pypnm_docsis_version()
+    if installed_version != pinned_version:
+        print(
+            "ERROR: pypnm-docsis version mismatch between active environment and pyproject.toml.",
+            file=sys.stderr,
+        )
+        print(
+            f"Active environment pypnm-docsis: {installed_version}",
+            file=sys.stderr,
+        )
+        print(
+            f"pyproject.toml pinned pypnm-docsis: {pinned_version}",
+            file=sys.stderr,
+        )
+        print(
+            "Fix the mismatch before releasing to avoid unintended dependency changes.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def _get_head_commit() -> str:
@@ -766,6 +860,8 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    _ensure_pypnm_docsis_dependency_match()
 
     if explicit_version is not None and next_mode is not None:
         print("ERROR: --version and --next cannot be used together.", file=sys.stderr)

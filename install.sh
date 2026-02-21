@@ -15,6 +15,7 @@ UNINSTALL_MODE="0"
 DEVELOPMENT_MODE="0"
 UPDATE_GA_MODE="0"
 UPDATE_HOT_FIX_MODE="0"
+UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE="0"
 PM="none"
 GITLEAKS_VERSION="8.18.1"
 
@@ -29,6 +30,7 @@ Usage:
   ./install.sh --development [venv_dir]
   ./install.sh --update-ga [TAG] [venv_dir]
   ./install.sh --update-hot-fix [TAG] [venv_dir]
+  ./install.sh --update-development-pypnm-docsis [venv_dir]
   ./install.sh --help
 
 Options:
@@ -36,6 +38,8 @@ Options:
   --update-ga [TAG]    Install the specified GA tag (latest GA if omitted).
   --update-hot-fix [TAG]
                        Install the specified hot-fix tag (latest hot-fix if omitted).
+  --update-development-pypnm-docsis
+                       Upgrade pypnm-docsis in the active venv to the latest pre-release.
   --clean              Remove prior install artifacts before installing.
   --purge-cache        Purge pip cache after venv activation.
   --uninstall          Remove local install artifacts (cannot combine with other flags).
@@ -47,6 +51,7 @@ Examples:
   ./install.sh --development
   ./install.sh --update-ga v0.1.39.0
   ./install.sh --update-hot-fix v0.1.39.1
+  ./install.sh --update-development-pypnm-docsis
 USAGE_EOF
 }
 
@@ -567,6 +572,35 @@ PYCODE
   trap - EXIT
 }
 
+ensure_no_running_pypnm_cmts_serve() {
+  local running
+  local kill_script
+  running="$(pgrep -af '[p]ypnm-cmts serve' || true)"
+  if [[ "${running}" != "" ]]; then
+    kill_script="${PROJECT_ROOT}/tools/maintenance/kill-pypnm-cmts.py"
+    echo "ERROR: pypnm-cmts serve is currently running." >&2
+    echo "${running}" >&2
+    if [[ -f "${kill_script}" ]]; then
+      echo "Run: python3 ${kill_script} --all" >&2
+    fi
+    echo "Please stop pypnm-cmts serve before running --update-development-pypnm-docsis." >&2
+    exit 1
+  fi
+}
+
+install_update_development_pypnm_docsis() {
+  ensure_no_running_pypnm_cmts_serve
+  ensure_venv
+  activate_venv
+  python -m pip install --upgrade pip setuptools wheel
+  purge_pip_cache
+  python -m pip install --upgrade --pre pypnm-docsis
+  python - <<'PYCODE'
+import pypnm
+print(f"Installed pypnm-docsis v{pypnm.__version__}")
+PYCODE
+}
+
 verify_mkdocs() {
   if ! python -m mkdocs --version >/dev/null 2>&1; then
     echo "ERROR: mkdocs is not available; ensure docs extras are installed." >&2
@@ -615,6 +649,11 @@ else
           shift
         fi
         ;;
+      --update-development-pypnm-docsis)
+        UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE="1"
+        MODE="update-development-pypnm-docsis"
+        shift
+        ;;
       --clean)
         CLEAN_MODE="1"
         shift
@@ -651,7 +690,7 @@ else
 fi
 
 if [[ "${UNINSTALL_MODE}" == "1" ]]; then
-  if [[ "${CLEAN_MODE}" == "1" || "${DEVELOPMENT_MODE}" == "1" || "${UPDATE_GA_MODE}" == "1" || "${UPDATE_HOT_FIX_MODE}" == "1" ]]; then
+  if [[ "${CLEAN_MODE}" == "1" || "${DEVELOPMENT_MODE}" == "1" || "${UPDATE_GA_MODE}" == "1" || "${UPDATE_HOT_FIX_MODE}" == "1" || "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE}" == "1" ]]; then
     echo "ERROR: --uninstall cannot be combined with other flags." >&2
     usage
     exit 1
@@ -695,11 +734,15 @@ install_dev_prereqs
 if [[ "${MODE}" == "standard" || "${MODE}" == "development" ]]; then
   install_standard
 else
-  ensure_git_clean
-  if [[ "${MODE}" == "update-ga" ]]; then
-    install_from_tag "${UPDATE_TAG}" "GA"
+  if [[ "${MODE}" == "update-development-pypnm-docsis" ]]; then
+    install_update_development_pypnm_docsis
   else
-    install_from_tag "${UPDATE_TAG}" "hot-fix"
+    ensure_git_clean
+    if [[ "${MODE}" == "update-ga" ]]; then
+      install_from_tag "${UPDATE_TAG}" "GA"
+    else
+      install_from_tag "${UPDATE_TAG}" "hot-fix"
+    fi
   fi
 fi
 
