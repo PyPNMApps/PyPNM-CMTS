@@ -3,16 +3,31 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
-from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from typing import ClassVar
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
-from pypnm_cmts.api.common.operations.models import (
-    OperationResultsSummaryModel,
-    OperationStateModel,
-    PerModemLinkageRecordModel,
+from pydantic import BaseModel, ConfigDict, Field
+
+from pypnm_cmts.api.common.operations.request_schemas import (
+    PnmCaptureOperationLookupRequest,
+    PnmCaptureResultsRequest,
+    PnmCmtsRequestEnvelopeRequest,
 )
-from pypnm_cmts.lib.types import PnmCaptureOperationId
+from pypnm_cmts.api.common.operations.response_schemas import (
+    PnmCaptureOperationResponseModel,
+    PnmCaptureResultsResponseModel,
+    PnmCaptureStartResponseModel,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmCableModemResultsBaseModel,
+    PnmCaptureDetailsModel,
+    PnmChannelGroupedResultsModel,
+    PnmChannelWithCableModemsResultsModel,
+    PnmDecodedAnalysisResultModel,
+    PnmResultsCmtsModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+    PnmServingGroupWithChannelsResultsModel,
+)
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_RETRY_COUNT = 3
@@ -43,67 +58,101 @@ class RxMerServiceGroupExecutionModel(BaseModel):
     )
 
 
-class RxMerServiceGroupStartCaptureRequest(BaseModel):
+class RxMerServiceGroupStartCaptureRequest(PnmCmtsRequestEnvelopeRequest):
     """Request payload for SG-level RxMER startCapture."""
 
     model_config = ConfigDict(extra="ignore")
 
-    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
     execution: RxMerServiceGroupExecutionModel = Field(
         default_factory=RxMerServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
     )
 
 
-class RxMerServiceGroupOperationRequest(BaseModel):
+class RxMerServiceGroupOperationRequest(PnmCaptureOperationLookupRequest):
     """Request payload for SG-level RxMER operation lookup."""
+    pass
 
-    pnm_capture_operation_id: PnmCaptureOperationId = Field(..., description="Operation identifier.")
+
+class RxMerServiceGroupResultsRequest(PnmCaptureResultsRequest):
+    """Request payload for SG-level RxMER results lookup and rendering."""
+    pass
 
 
-class RxMerServiceGroupStartCaptureResponse(BaseModel):
+class RxMerServiceGroupStartCaptureResponse(PnmCaptureStartResponseModel):
     """Response payload for SG-level RxMER startCapture."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel = Field(..., description="Initial operation state.")
 
-
-class RxMerServiceGroupStatusResponse(BaseModel):
+class RxMerServiceGroupStatusResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level RxMER status."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Operation state snapshot.")
 
-
-class RxMerServiceGroupCancelResponse(BaseModel):
+class RxMerServiceGroupCancelResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level RxMER cancel."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Updated operation state.")
+
+class RxMerCaptureDetailsModel(PnmCaptureDetailsModel):
+    """RxMER capture metadata."""
+
+    capture_type: str = Field(default="RXMER", description="Capture type identifier.")
 
 
-class RxMerServiceGroupResultsResponse(BaseModel):
+class RxMerResultsCmtsModel(PnmResultsCmtsModel):
+    """RxMER CMTS context."""
+
+
+class RxMerResultsDataModel(PnmDecodedAnalysisResultModel):
+    """RxMER modem data payload placeholder backed by current linkage records."""
+    stage_status_codes: PnmResultsStageStatusCodesModel = Field(
+        default_factory=PnmResultsStageStatusCodesModel,
+        description="Stage status summary.",
+    )
+    stage_messages: PnmResultsStageMessagesModel | None = Field(
+        default=None,
+        description="Optional per-stage messages.",
+    )
+
+
+class RxMerResultsCableModemModel(PnmCableModemResultsBaseModel):
+    """RxMER cable modem result."""
+
+    rxmer_data: RxMerResultsDataModel = Field(default_factory=RxMerResultsDataModel, description="RxMER modem data payload.")
+
+
+class RxMerResultsChannelModel(PnmChannelWithCableModemsResultsModel[RxMerResultsCableModemModel]):
+    """RxMER channel group."""
+
+
+class RxMerResultsServingGroupModel(PnmServingGroupWithChannelsResultsModel[RxMerResultsChannelModel]):
+    """Serving-group grouped RxMER results."""
+
+
+class RxMerServiceGroupResultsModel(
+    PnmChannelGroupedResultsModel[RxMerCaptureDetailsModel, RxMerResultsCmtsModel, RxMerResultsChannelModel]
+):
+    """Structured RxMER results payload for UI/API consumers."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = RxMerCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = RxMerResultsCmtsModel
+    serving_groups: list[RxMerResultsServingGroupModel] = Field(
+        default_factory=list,
+        description="Serving-group grouped RxMER results.",
+    )
+
+
+class RxMerServiceGroupResultsResponse(PnmCaptureResultsResponseModel[RxMerServiceGroupResultsModel]):
     """Response payload for SG-level RxMER results."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    summary: OperationResultsSummaryModel = Field(
-        default_factory=OperationResultsSummaryModel,
-        description="Results summary for the operation.",
-    )
-    records: list[PerModemLinkageRecordModel] = Field(
-        default_factory=list,
-        description="Linkage records included in the response.",
-    )
+    _results_factory: ClassVar[type[BaseModel]] = RxMerServiceGroupResultsModel
 
 
 __all__ = [
     "RxMerServiceGroupCancelResponse",
     "RxMerServiceGroupExecutionModel",
     "RxMerServiceGroupOperationRequest",
+    "RxMerServiceGroupResultsRequest",
+    "RxMerResultsDataModel",
+    "RxMerServiceGroupResultsModel",
     "RxMerServiceGroupResultsResponse",
     "RxMerServiceGroupStartCaptureRequest",
     "RxMerServiceGroupStartCaptureResponse",

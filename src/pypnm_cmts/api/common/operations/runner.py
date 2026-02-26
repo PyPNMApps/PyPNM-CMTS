@@ -283,6 +283,7 @@ class OperationRunner:
                 stage=stage_result.stage,
                 status_code=stage_result.status_code,
                 failure_reason=stage_result.failure_reason,
+                channel_id=stage_result.channel_id,
                 transaction_ids=list(stage_result.transaction_ids),
                 filenames=list(stage_result.filenames),
                 started_epoch=stage_result.started_epoch,

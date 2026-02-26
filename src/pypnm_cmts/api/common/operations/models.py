@@ -8,6 +8,7 @@ from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import (
     ChannelId,
     FileNameStr,
+    HostNameStr,
     InetAddressStr,
     IPv4Str,
     IPv6Str,
@@ -107,6 +108,7 @@ class OperationRequestSummaryModel(BaseModel):
 class OperationRequestContextModel(BaseModel):
     """Internal request context for capture overrides."""
 
+    cmts_hostname: HostNameStr | None = Field(default=None, description="Optional CMTS hostname captured for the operation.")
     tftp_ipv4: IPv4Str | None = Field(default=None, description="Optional TFTP IPv4 override.")
     tftp_ipv6: IPv6Str | None = Field(default=None, description="Optional TFTP IPv6 override.")
     snmp_write_community: SnmpWriteCommunity | None = Field(
@@ -175,6 +177,10 @@ class OperationStageResultModel(BaseModel):
         default=None,
         description="Optional normalized failure reason for the stage.",
     )
+    channel_id: ChannelId | None = Field(
+        default=None,
+        description="Channel identifier associated with this stage result, if known.",
+    )
     transaction_ids: list[TransactionId] = Field(
         default_factory=list,
         description="Transaction identifiers linked to this stage.",
@@ -225,6 +231,10 @@ class PerModemLinkageRecordModel(BaseModel):
     failure_reason: PnmCaptureFailureReason | None = Field(
         default=None,
         description="Optional normalized failure reason for the stage.",
+    )
+    channel_id: ChannelId | None = Field(
+        default=None,
+        description="Channel identifier associated with this modem stage record, if known.",
     )
     transaction_ids: list[TransactionId] = Field(
         default_factory=list,

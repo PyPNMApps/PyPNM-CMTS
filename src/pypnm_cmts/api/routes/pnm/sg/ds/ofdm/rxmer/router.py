@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupCancelResponse,
     RxMerServiceGroupOperationRequest,
+    RxMerServiceGroupResultsRequest,
     RxMerServiceGroupResultsResponse,
     RxMerServiceGroupStartCaptureRequest,
     RxMerServiceGroupStartCaptureResponse,
@@ -81,7 +82,7 @@ class RxMerRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: RxMerServiceGroupOperationRequest,
+            payload: RxMerServiceGroupResultsRequest,
         ) -> RxMerServiceGroupResultsResponse:
             """
             **Serving Group RxMER Results**

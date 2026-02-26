@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from pypnm.api.routes.common.classes.common_endpoint_classes.common.enum import (
+    OutputType,
+)
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import (
     FileNameStr,
@@ -43,9 +46,14 @@ from pypnm_cmts.api.common.operations.runner import (
     OperationWorkItemModel,
 )
 from pypnm_cmts.api.common.operations.store import OperationStore
+from pypnm_cmts.api.common.service.pnm.results_analysis import (
+    PnmStoredCaptureAnalysisResultModel,
+    PnmStoredCaptureAnalysisService,
+)
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
     RxMerServiceGroupExecutionModel,
     RxMerServiceGroupOperationRequest,
+    RxMerServiceGroupResultsRequest,
     RxMerServiceGroupStartCaptureRequest,
 )
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import (
@@ -69,10 +77,16 @@ def _build_service(
     tmp_path: Path,
     worker: Callable[[OperationWorkItemModel], OperationWorkerResultModel] | None = None,
     sgw_store: SgwCacheStore | None = None,
+    results_analysis_service: PnmStoredCaptureAnalysisService | None = None,
 ) -> RxMerServiceGroupOperationService:
     store = OperationStore(base_dir=tmp_path)
     runner = OperationRunner(store=store, worker=worker)
-    return RxMerServiceGroupOperationService(store=store, runner=runner, sgw_store=sgw_store)
+    return RxMerServiceGroupOperationService(
+        store=store,
+        runner=runner,
+        sgw_store=sgw_store,
+        results_analysis_service=results_analysis_service,
+    )
 
 
 def _build_request(
@@ -209,6 +223,9 @@ def test_rxmer_results_empty(tmp_path: Path) -> None:
     results_response = service.results(results_request)
     assert results_response.summary.record_count == 0
     assert results_response.records == []
+    assert results_response.results.capture_details.capture_type == "RXMER"
+    assert results_response.results.channels == []
+    assert results_response.results.serving_groups == []
 
 
 def test_rxmer_results_include_records(tmp_path: Path) -> None:
@@ -237,6 +254,127 @@ def test_rxmer_results_include_records(tmp_path: Path) -> None:
     results_response = service.results(results_request)
     assert results_response.summary.record_count == 1
     assert len(results_response.records) == 1
+    assert results_response.results.channels == []
+    assert len(results_response.results.serving_groups) == 1
+    channel = results_response.results.serving_groups[0].channels[0]
+    assert channel.service_group_id == ServiceGroupId(1)
+    assert channel.channel_id is None
+    assert len(channel.cable_modems) == 1
+    modem = channel.cable_modems[0]
+    assert modem.mac_address == MacAddressStr("aa:bb:cc:dd:ee:ff")
+    assert modem.rxmer_data.file is not None
+    assert modem.rxmer_data.file.transaction_id == "1a2b3c4d5e6f7a8b9c0d1e2f"
+    assert modem.rxmer_data.file.filename == "capture.bin"
+
+
+def test_rxmer_results_request_accepts_nested_operation_shape() -> None:
+    request = RxMerServiceGroupResultsRequest.model_validate(
+        {
+            "operation": {
+                "pnm_capture_operation_id": "6c83fb8c215081133c6bf041",
+            },
+            "output": {
+                "type": "archive",
+                "archive_includes": {
+                    "pnm_files": True,
+                    "png": True,
+                    "json": True,
+                },
+            },
+        }
+    )
+    assert request.operation.pnm_capture_operation_id == PnmCaptureOperationId("6c83fb8c215081133c6bf041")
+    assert request.output.type == OutputType.ARCHIVE
+    assert request.output.archive_includes is not None
+    assert request.output.archive_includes.png is True
+
+
+def test_rxmer_results_request_coerces_legacy_flat_shape() -> None:
+    request = RxMerServiceGroupResultsRequest.model_validate(
+        {
+            "pnm_capture_operation_id": "6c83fb8c215081133c6bf041",
+        }
+    )
+    assert request.operation.pnm_capture_operation_id == PnmCaptureOperationId("6c83fb8c215081133c6bf041")
+    assert request.output.type == OutputType.JSON
+    assert request.output.archive_includes is None
+
+
+def test_rxmer_results_request_rejects_archive_includes_for_json_output() -> None:
+    with pytest.raises(ValidationError):
+        RxMerServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {
+                    "pnm_capture_operation_id": "6c83fb8c215081133c6bf041",
+                },
+                "output": {
+                    "type": "json",
+                    "archive_includes": {
+                        "json": True,
+                    },
+                },
+            }
+        )
+
+
+class _FakeResultsAnalysisService(PnmStoredCaptureAnalysisService):
+    def __init__(self) -> None:
+        self.calls: list[list[TransactionId]] = []
+
+    def analyze_transactions_basic(
+        self,
+        transaction_ids: list[TransactionId],
+    ) -> dict[TransactionId, PnmStoredCaptureAnalysisResultModel]:
+        self.calls.append(list(transaction_ids))
+        return {
+            TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"): PnmStoredCaptureAnalysisResultModel(
+                transaction_id=TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"),
+                pnm_file_type="RECEIVE_MODULATION_ERROR_RATIO",
+                analysis={"channel_id": 10, "carrier_values": {"carrier_count": 1}},
+            )
+        }
+
+
+def test_rxmer_results_basic_analysis_decodes_via_common_service(tmp_path: Path) -> None:
+    analysis_service = _FakeResultsAnalysisService()
+    service = _build_service(tmp_path, results_analysis_service=analysis_service)
+    request = _build_request()
+    start_response = service.start_capture(request)
+
+    service._store.append_result_record(
+        PerModemLinkageRecordModel(
+            pnm_capture_operation_id=start_response.operation.operation_id,
+            sg_id=ServiceGroupId(1),
+            mac_address=MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            stage=OperationStage.CAPTURE,
+            status_code=ServiceStatusCode.SUCCESS,
+            transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+            filenames=[FileNameStr("capture.bin")],
+            started_epoch=1,
+            finished_epoch=2,
+            message="",
+        )
+    )
+
+    results_response = service.results(
+        RxMerServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
+                "analysis": {"type": "basic"},
+                "output": {"type": "json"},
+            }
+        )
+    )
+
+    modem = results_response.results.serving_groups[0].channels[0].cable_modems[0]
+    assert analysis_service.calls == [[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")]]
+    assert modem.rxmer_data.pnm_file_type == "RECEIVE_MODULATION_ERROR_RATIO"
+    assert modem.rxmer_data.analysis is not None
+    assert modem.rxmer_data.analysis["channel_id"] == 10
+    assert modem.rxmer_data.analysis_error is None
+    assert modem.rxmer_data.file is not None
+    assert modem.rxmer_data.file.transaction_id == "1a2b3c4d5e6f7a8b9c0d1e2f"
 
 
 def test_rxmer_runner_transitions_to_running(tmp_path: Path) -> None:
