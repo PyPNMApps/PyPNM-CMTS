@@ -100,6 +100,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/ds/ofdm/fecSummary/status` - Get serving group FecSummary operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/fecSummary/results` - Get serving group FecSummary operation results.
 - `POST /cmts/pnm/sg/ds/ofdm/fecSummary/cancel` - Cancel serving group FecSummary operation.
+  - See [FecSummary orchestration deep dive](pnm-fec-summary.md).
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/startCapture` - Start serving group ConstellationDisplay operation.
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/status` - Get serving group ConstellationDisplay operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/results` - Get serving group ConstellationDisplay operation results.

@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.fec_summary.schemas import (
     FecSummaryServiceGroupCancelResponse,
     FecSummaryServiceGroupOperationRequest,
+    FecSummaryServiceGroupResultsRequest,
     FecSummaryServiceGroupResultsResponse,
     FecSummaryServiceGroupStartCaptureRequest,
     FecSummaryServiceGroupStartCaptureResponse,
@@ -81,7 +82,7 @@ class FecSummaryRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: FecSummaryServiceGroupOperationRequest,
+            payload: FecSummaryServiceGroupResultsRequest,
         ) -> FecSummaryServiceGroupResultsResponse:
             """
             **Serving Group FecSummary Results**

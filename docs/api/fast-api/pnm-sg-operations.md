@@ -125,6 +125,22 @@ ChannelEstCoeff `results` follows the same structured pattern as RxMER:
 - `POST /cmts/pnm/sg/ds/ofdm/fecSummary/results`
 - `POST /cmts/pnm/sg/ds/ofdm/fecSummary/cancel`
 
+FEC summary accepts optional capture settings on `startCapture`:
+
+```json
+{
+  "capture_settings": {
+    "fec_summary_type": 2
+  }
+}
+```
+
+FecSummary `results` now follows the same structured pattern as RxMER and ChannelEstCoeff:
+
+- `results.serving_groups[] -> channels[] -> cable_modems[]`
+- `cable_modems[].fec_summary_data.file` (singular analyzed file link)
+- `analysis.type=basic` triggers PyPNM basic FEC summary analysis decode
+
 ### DS OFDM ConstellationDisplay
 
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/startCapture`
@@ -271,4 +287,4 @@ curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/spectrumAnalyzer/startCapture \
   -d '{"capture_settings":{"first_segment_center_freq":300000000,"last_segment_center_freq":900000000,"resolution_bw":30000}}'
 ```
 
-For full response walkthroughs, see [RxMER deep dive](pnm-rxmer.md) and [ChannelEstCoeff deep dive](pnm-channel-est-coeff.md).
+For full response walkthroughs, see [RxMER deep dive](pnm-rxmer.md), [ChannelEstCoeff deep dive](pnm-channel-est-coeff.md), and [FecSummary deep dive](pnm-fec-summary.md).

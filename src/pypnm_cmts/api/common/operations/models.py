@@ -159,6 +159,10 @@ class OperationRequestContextModel(BaseModel):
         default=None,
         description="Optional sample-duration override in seconds for downstream histogram capture.",
     )
+    fec_summary_type: int | None = Field(
+        default=None,
+        description="Optional FEC summary interval type override for downstream OFDM FEC summary capture.",
+    )
 
 
 class OperationErrorSummaryModel(BaseModel):
