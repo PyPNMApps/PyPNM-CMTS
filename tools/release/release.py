@@ -346,6 +346,28 @@ def _read_pyproject_pypnm_docsis_version() -> str:
     sys.exit(1)
 
 
+def _write_pyproject_pypnm_docsis_version(version: str) -> None:
+    """Update pinned pypnm-docsis dependency version in [project].dependencies."""
+    if not PYPROJECT_FILE_PATH.exists():
+        print(f"ERROR: pyproject.toml not found: {PYPROJECT_FILE_PATH}", file=sys.stderr)
+        sys.exit(1)
+
+    text = PYPROJECT_FILE_PATH.read_text(encoding="utf-8")
+    updated_text, replacements = re.subn(
+        r'("pypnm-docsis\s*==\s*)([^"]+)(")',
+        rf"\g<1>{version}\g<3>",
+        text,
+        count=1,
+    )
+    if replacements != 1:
+        print(
+            "ERROR: Could not update pinned pypnm-docsis dependency in pyproject.toml.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    PYPROJECT_FILE_PATH.write_text(updated_text, encoding="utf-8")
+
+
 def _read_installed_pypnm_docsis_version() -> str:
     """Read installed pypnm-docsis version from the active environment."""
     try:
@@ -367,8 +389,17 @@ def _read_installed_pypnm_docsis_version() -> str:
     return version.strip()
 
 
+def _prompt_yes_no_default_no(prompt: str) -> bool:
+    """Prompt for yes/no with default No."""
+    try:
+        response = input(prompt)
+    except EOFError:
+        return False
+    return response.strip().lower() in {"y", "yes"}
+
+
 def _ensure_pypnm_docsis_dependency_match() -> None:
-    """Abort release when installed pypnm-docsis does not match pinned pyproject version."""
+    """Ensure installed pypnm-docsis matches pinned pyproject version or confirm pin update."""
     pinned_version = _read_pyproject_pypnm_docsis_version()
     installed_version = _read_installed_pypnm_docsis_version()
     if installed_version != pinned_version:
@@ -388,7 +419,24 @@ def _ensure_pypnm_docsis_dependency_match() -> None:
             "Fix the mismatch before releasing to avoid unintended dependency changes.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        should_update = _prompt_yes_no_default_no(
+            "\n"
+            "Detected a version mismatch between the active environment and pyproject.toml for pypnm-docsis.\n\n"
+            f"Active environment: {installed_version}\n"
+            f"pyproject.toml pinned: {pinned_version}\n\n"
+            "Update pyproject.toml to match the active environment version? [y/N]: "
+        )
+        if not should_update:
+            print(
+                "Release aborted. pyproject.toml was not modified (default No).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _write_pyproject_pypnm_docsis_version(installed_version)
+        print(
+            f"Updated pyproject.toml pypnm-docsis pin to {installed_version}.",
+            file=sys.stderr,
+        )
 
 
 def _get_head_commit() -> str:
