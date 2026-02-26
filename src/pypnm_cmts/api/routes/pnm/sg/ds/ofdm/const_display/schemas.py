@@ -3,19 +3,34 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
-from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.docsis.data_type.DsCmConstDisplay import (
     CmDsConstellationDisplayConst as ConstDisplayConstant,
 )
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
-from pypnm_cmts.api.common.operations.models import (
-    OperationResultsSummaryModel,
-    OperationStateModel,
-    PerModemLinkageRecordModel,
+from pypnm_cmts.api.common.operations.request_schemas import (
+    PnmCaptureOperationLookupRequest,
+    PnmCaptureResultsRequest,
+    PnmCmtsRequestEnvelopeRequest,
 )
-from pypnm_cmts.lib.types import PnmCaptureOperationId
+from pypnm_cmts.api.common.operations.response_schemas import (
+    PnmCaptureOperationResponseModel,
+    PnmCaptureResultsResponseModel,
+    PnmCaptureStartResponseModel,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmCableModemResultsBaseModel,
+    PnmCaptureDetailsModel,
+    PnmChannelGroupedResultsModel,
+    PnmChannelWithCableModemsResultsModel,
+    PnmDecodedAnalysisResultModel,
+    PnmResultsCmtsModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+    PnmServingGroupWithChannelsResultsModel,
+)
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_RETRY_COUNT = 3
@@ -59,12 +74,11 @@ class ConstellationDisplaySettingsModel(BaseModel):
     )
 
 
-class ConstDisplayServiceGroupStartCaptureRequest(BaseModel):
+class ConstDisplayServiceGroupStartCaptureRequest(PnmCmtsRequestEnvelopeRequest):
     """Request payload for SG-level ConstDisplay startCapture."""
 
     model_config = ConfigDict(extra="ignore")
 
-    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
     execution: ConstDisplayServiceGroupExecutionModel = Field(
         default_factory=ConstDisplayServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
@@ -75,56 +89,96 @@ class ConstDisplayServiceGroupStartCaptureRequest(BaseModel):
     )
 
 
-class ConstDisplayServiceGroupOperationRequest(BaseModel):
+class ConstDisplayServiceGroupOperationRequest(PnmCaptureOperationLookupRequest):
     """Request payload for SG-level ConstDisplay operation lookup."""
 
-    pnm_capture_operation_id: PnmCaptureOperationId = Field(..., description="Operation identifier.")
+
+class ConstDisplayServiceGroupResultsRequest(PnmCaptureResultsRequest):
+    """Request payload for SG-level ConstDisplay results lookup and rendering."""
 
 
-class ConstDisplayServiceGroupStartCaptureResponse(BaseModel):
+class ConstDisplayServiceGroupStartCaptureResponse(PnmCaptureStartResponseModel):
     """Response payload for SG-level ConstDisplay startCapture."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel = Field(..., description="Initial operation state.")
 
-
-class ConstDisplayServiceGroupStatusResponse(BaseModel):
+class ConstDisplayServiceGroupStatusResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level ConstDisplay status."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Operation state snapshot.")
 
-
-class ConstDisplayServiceGroupCancelResponse(BaseModel):
+class ConstDisplayServiceGroupCancelResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level ConstDisplay cancel."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Updated operation state.")
+
+class ConstDisplayCaptureDetailsModel(PnmCaptureDetailsModel):
+    """ConstDisplay capture metadata."""
+
+    capture_type: str = Field(default="CONSTELLATION_DISPLAY", description="Capture type identifier.")
 
 
-class ConstDisplayServiceGroupResultsResponse(BaseModel):
+class ConstDisplayResultsCmtsModel(PnmResultsCmtsModel):
+    """ConstDisplay CMTS context."""
+
+
+class ConstDisplayResultsDataModel(PnmDecodedAnalysisResultModel):
+    """ConstDisplay modem data payload backed by linkage + decoded analysis."""
+
+    stage_status_codes: PnmResultsStageStatusCodesModel = Field(
+        default_factory=PnmResultsStageStatusCodesModel,
+        description="Stage status summary.",
+    )
+    stage_messages: PnmResultsStageMessagesModel | None = Field(
+        default=None,
+        description="Optional per-stage messages.",
+    )
+
+
+class ConstDisplayResultsCableModemModel(PnmCableModemResultsBaseModel):
+    """ConstDisplay cable modem result."""
+
+    constellation_display_data: ConstDisplayResultsDataModel = Field(
+        default_factory=ConstDisplayResultsDataModel,
+        description="ConstellationDisplay modem data payload.",
+    )
+
+
+class ConstDisplayResultsChannelModel(PnmChannelWithCableModemsResultsModel[ConstDisplayResultsCableModemModel]):
+    """ConstDisplay channel group."""
+
+
+class ConstDisplayResultsServingGroupModel(PnmServingGroupWithChannelsResultsModel[ConstDisplayResultsChannelModel]):
+    """Serving-group grouped ConstDisplay results."""
+
+
+class ConstDisplayServiceGroupResultsModel(
+    PnmChannelGroupedResultsModel[ConstDisplayCaptureDetailsModel, ConstDisplayResultsCmtsModel, ConstDisplayResultsChannelModel]
+):
+    """Structured ConstDisplay results payload for UI/API consumers."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = ConstDisplayCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = ConstDisplayResultsCmtsModel
+    serving_groups: list[ConstDisplayResultsServingGroupModel] = Field(
+        default_factory=list,
+        description="Serving-group grouped ConstDisplay results.",
+    )
+
+
+class ConstDisplayServiceGroupResultsResponse(PnmCaptureResultsResponseModel[ConstDisplayServiceGroupResultsModel]):
     """Response payload for SG-level ConstDisplay results."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    summary: OperationResultsSummaryModel = Field(
-        default_factory=OperationResultsSummaryModel,
-        description="Results summary for the operation.",
-    )
-    records: list[PerModemLinkageRecordModel] = Field(
-        default_factory=list,
-        description="Linkage records included in the response.",
-    )
+    _results_factory: ClassVar[type[BaseModel]] = ConstDisplayServiceGroupResultsModel
 
 
 __all__ = [
     "ConstellationDisplaySettingsModel",
+    "ConstDisplayResultsCableModemModel",
+    "ConstDisplayResultsChannelModel",
+    "ConstDisplayResultsDataModel",
+    "ConstDisplayResultsServingGroupModel",
     "ConstDisplayServiceGroupCancelResponse",
     "ConstDisplayServiceGroupExecutionModel",
     "ConstDisplayServiceGroupOperationRequest",
+    "ConstDisplayServiceGroupResultsModel",
+    "ConstDisplayServiceGroupResultsRequest",
     "ConstDisplayServiceGroupResultsResponse",
     "ConstDisplayServiceGroupStartCaptureRequest",
     "ConstDisplayServiceGroupStartCaptureResponse",

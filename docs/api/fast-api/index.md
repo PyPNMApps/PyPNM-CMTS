@@ -105,6 +105,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/status` - Get serving group ConstellationDisplay operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/results` - Get serving group ConstellationDisplay operation results.
 - `POST /cmts/pnm/sg/ds/ofdm/constellationDisplay/cancel` - Cancel serving group ConstellationDisplay operation.
+  - See [ConstellationDisplay orchestration deep dive](pnm-constellation-display.md).
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/startCapture` - Start serving group ModulationProfile operation.
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/status` - Get serving group ModulationProfile operation status.
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/results` - Get serving group ModulationProfile operation results.

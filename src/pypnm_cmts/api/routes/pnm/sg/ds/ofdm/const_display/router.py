@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.const_display.schemas import (
     ConstDisplayServiceGroupCancelResponse,
     ConstDisplayServiceGroupOperationRequest,
+    ConstDisplayServiceGroupResultsRequest,
     ConstDisplayServiceGroupResultsResponse,
     ConstDisplayServiceGroupStartCaptureRequest,
     ConstDisplayServiceGroupStartCaptureResponse,
@@ -81,7 +82,7 @@ class ConstDisplayRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: ConstDisplayServiceGroupOperationRequest,
+            payload: ConstDisplayServiceGroupResultsRequest,
         ) -> ConstDisplayServiceGroupResultsResponse:
             """
             **Serving Group ConstDisplay Results**
