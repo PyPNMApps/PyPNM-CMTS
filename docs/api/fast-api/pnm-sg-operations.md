@@ -4,7 +4,7 @@ Serving-group PNM operations share the same orchestration contract:
 
 - `POST .../startCapture` creates an operation and returns `operation_id`
 - `POST .../status` returns persisted operation state
-- `POST .../results` returns linkage records (`transaction_ids`, `filenames`)
+- `POST .../results` returns a structured results payload and compatibility linkage records
 - `POST .../cancel` requests cooperative cancellation
 
 All SG PNM endpoints are JSON-only and use numeric `ServiceStatusCode`.
@@ -36,7 +36,36 @@ All SG PNM endpoints are JSON-only and use numeric `ServiceStatusCode`.
 }
 ```
 
-`status`, `results`, `cancel`:
+`status`, `cancel`:
+
+```json
+{
+  "pnm_capture_operation_id": "<operation_id>"
+}
+```
+
+`results` (recommended nested request shape):
+
+```json
+{
+  "operation": {
+    "pnm_capture_operation_id": "<operation_id>"
+  },
+  "selection": {
+    "serving_group_ids": [],
+    "channel_ids": [],
+    "mac_addresses": []
+  },
+  "analysis": {
+    "type": "basic"
+  },
+  "output": {
+    "type": "json"
+  }
+}
+```
+
+`results` (legacy compatibility, still accepted):
 
 ```json
 {
@@ -52,6 +81,12 @@ All SG PNM endpoints are JSON-only and use numeric `ServiceStatusCode`.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/status`
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/results`
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/cancel`
+
+RxMER `results` supports structured decoded output:
+
+- `results.serving_groups[] -> channels[] -> cable_modems[]`
+- `cable_modems[].rxmer_data.file` (singular analyzed file link)
+- `analysis.type=basic` triggers PyPNM basic RxMER analysis decode
 
 ### DS Histogram
 
@@ -76,6 +111,12 @@ Downstream histogram accepts optional capture settings on `startCapture`:
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/status`
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/results`
 - `POST /cmts/pnm/sg/ds/ofdm/channelEstCoeff/cancel`
+
+ChannelEstCoeff `results` follows the same structured pattern as RxMER:
+
+- `results.serving_groups[] -> channels[] -> cable_modems[]`
+- `cable_modems[].channel_est_coeff_data.file` (singular analyzed file link)
+- `analysis.type=basic` triggers PyPNM basic ChannelEstCoeff analysis decode
 
 ### DS OFDM FecSummary
 
@@ -211,7 +252,7 @@ Fetch results for any operation:
 ```bash
 curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/ds/ofdm/fecSummary/results \
   -H "content-type: application/json" \
-  -d '{"pnm_capture_operation_id":"<operation_id>"}'
+  -d '{"operation":{"pnm_capture_operation_id":"<operation_id>"},"analysis":{"type":"basic"},"output":{"type":"json"}}'
 ```
 
 Cancel any operation:
@@ -230,4 +271,4 @@ curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/spectrumAnalyzer/startCapture \
   -d '{"capture_settings":{"first_segment_center_freq":300000000,"last_segment_center_freq":900000000,"resolution_bw":30000}}'
 ```
 
-For a full response walkthrough, see [RxMER deep dive](pnm-rxmer.md).
+For full response walkthroughs, see [RxMER deep dive](pnm-rxmer.md) and [ChannelEstCoeff deep dive](pnm-channel-est-coeff.md).

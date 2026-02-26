@@ -3,16 +3,31 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
-from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from typing import ClassVar
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
-from pypnm_cmts.api.common.operations.models import (
-    OperationResultsSummaryModel,
-    OperationStateModel,
-    PerModemLinkageRecordModel,
+from pydantic import BaseModel, ConfigDict, Field
+
+from pypnm_cmts.api.common.operations.request_schemas import (
+    PnmCaptureOperationLookupRequest,
+    PnmCaptureResultsRequest,
+    PnmCmtsRequestEnvelopeRequest,
 )
-from pypnm_cmts.lib.types import PnmCaptureOperationId
+from pypnm_cmts.api.common.operations.response_schemas import (
+    PnmCaptureOperationResponseModel,
+    PnmCaptureResultsResponseModel,
+    PnmCaptureStartResponseModel,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmCableModemResultsBaseModel,
+    PnmCaptureDetailsModel,
+    PnmChannelGroupedResultsModel,
+    PnmChannelWithCableModemsResultsModel,
+    PnmDecodedAnalysisResultModel,
+    PnmResultsCmtsModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+    PnmServingGroupWithChannelsResultsModel,
+)
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_RETRY_COUNT = 3
@@ -43,67 +58,112 @@ class ChannelEstCoeffServiceGroupExecutionModel(BaseModel):
     )
 
 
-class ChannelEstCoeffServiceGroupStartCaptureRequest(BaseModel):
+class ChannelEstCoeffServiceGroupStartCaptureRequest(PnmCmtsRequestEnvelopeRequest):
     """Request payload for SG-level ChannelEstCoeff startCapture."""
 
     model_config = ConfigDict(extra="ignore")
 
-    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
     execution: ChannelEstCoeffServiceGroupExecutionModel = Field(
         default_factory=ChannelEstCoeffServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
     )
 
 
-class ChannelEstCoeffServiceGroupOperationRequest(BaseModel):
+class ChannelEstCoeffServiceGroupOperationRequest(PnmCaptureOperationLookupRequest):
     """Request payload for SG-level ChannelEstCoeff operation lookup."""
 
-    pnm_capture_operation_id: PnmCaptureOperationId = Field(..., description="Operation identifier.")
+
+class ChannelEstCoeffServiceGroupResultsRequest(PnmCaptureResultsRequest):
+    """Request payload for SG-level ChannelEstCoeff results lookup and rendering."""
 
 
-class ChannelEstCoeffServiceGroupStartCaptureResponse(BaseModel):
+class ChannelEstCoeffServiceGroupStartCaptureResponse(PnmCaptureStartResponseModel):
     """Response payload for SG-level ChannelEstCoeff startCapture."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel = Field(..., description="Initial operation state.")
 
-
-class ChannelEstCoeffServiceGroupStatusResponse(BaseModel):
+class ChannelEstCoeffServiceGroupStatusResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level ChannelEstCoeff status."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Operation state snapshot.")
 
-
-class ChannelEstCoeffServiceGroupCancelResponse(BaseModel):
+class ChannelEstCoeffServiceGroupCancelResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level ChannelEstCoeff cancel."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Updated operation state.")
+
+class ChannelEstCoeffCaptureDetailsModel(PnmCaptureDetailsModel):
+    """ChannelEstCoeff capture metadata."""
+
+    capture_type: str = Field(default="CHANNEL_EST_COEFF", description="Capture type identifier.")
 
 
-class ChannelEstCoeffServiceGroupResultsResponse(BaseModel):
+class ChannelEstCoeffResultsCmtsModel(PnmResultsCmtsModel):
+    """ChannelEstCoeff CMTS context."""
+
+
+class ChannelEstCoeffResultsDataModel(PnmDecodedAnalysisResultModel):
+    """ChannelEstCoeff modem data payload backed by linkage + decoded analysis."""
+
+    stage_status_codes: PnmResultsStageStatusCodesModel = Field(
+        default_factory=PnmResultsStageStatusCodesModel,
+        description="Stage status summary.",
+    )
+    stage_messages: PnmResultsStageMessagesModel | None = Field(
+        default=None,
+        description="Optional per-stage messages.",
+    )
+
+
+class ChannelEstCoeffResultsCableModemModel(PnmCableModemResultsBaseModel):
+    """ChannelEstCoeff cable modem result."""
+
+    channel_est_coeff_data: ChannelEstCoeffResultsDataModel = Field(
+        default_factory=ChannelEstCoeffResultsDataModel,
+        description="ChannelEstCoeff modem data payload.",
+    )
+
+
+class ChannelEstCoeffResultsChannelModel(PnmChannelWithCableModemsResultsModel[ChannelEstCoeffResultsCableModemModel]):
+    """ChannelEstCoeff channel group."""
+
+
+class ChannelEstCoeffResultsServingGroupModel(
+    PnmServingGroupWithChannelsResultsModel[ChannelEstCoeffResultsChannelModel]
+):
+    """Serving-group grouped ChannelEstCoeff results."""
+
+
+class ChannelEstCoeffServiceGroupResultsModel(
+    PnmChannelGroupedResultsModel[
+        ChannelEstCoeffCaptureDetailsModel,
+        ChannelEstCoeffResultsCmtsModel,
+        ChannelEstCoeffResultsChannelModel,
+    ]
+):
+    """Structured ChannelEstCoeff results payload for UI/API consumers."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = ChannelEstCoeffCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = ChannelEstCoeffResultsCmtsModel
+    serving_groups: list[ChannelEstCoeffResultsServingGroupModel] = Field(
+        default_factory=list,
+        description="Serving-group grouped ChannelEstCoeff results.",
+    )
+
+
+class ChannelEstCoeffServiceGroupResultsResponse(PnmCaptureResultsResponseModel[ChannelEstCoeffServiceGroupResultsModel]):
     """Response payload for SG-level ChannelEstCoeff results."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    summary: OperationResultsSummaryModel = Field(
-        default_factory=OperationResultsSummaryModel,
-        description="Results summary for the operation.",
-    )
-    records: list[PerModemLinkageRecordModel] = Field(
-        default_factory=list,
-        description="Linkage records included in the response.",
-    )
+    _results_factory: ClassVar[type[BaseModel]] = ChannelEstCoeffServiceGroupResultsModel
 
 
 __all__ = [
+    "ChannelEstCoeffResultsCableModemModel",
+    "ChannelEstCoeffResultsChannelModel",
+    "ChannelEstCoeffResultsDataModel",
+    "ChannelEstCoeffResultsServingGroupModel",
     "ChannelEstCoeffServiceGroupCancelResponse",
     "ChannelEstCoeffServiceGroupExecutionModel",
     "ChannelEstCoeffServiceGroupOperationRequest",
+    "ChannelEstCoeffServiceGroupResultsModel",
+    "ChannelEstCoeffServiceGroupResultsRequest",
     "ChannelEstCoeffServiceGroupResultsResponse",
     "ChannelEstCoeffServiceGroupStartCaptureRequest",
     "ChannelEstCoeffServiceGroupStartCaptureResponse",
