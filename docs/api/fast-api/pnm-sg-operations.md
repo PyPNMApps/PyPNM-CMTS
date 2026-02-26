@@ -166,6 +166,12 @@ Constellation display also accepts optional capture settings on `startCapture`:
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/results`
 - `POST /cmts/pnm/sg/ds/ofdm/modulationProfile/cancel`
 
+ModulationProfile `results` now follows the same structured pattern as RxMER, ChannelEstCoeff, and FecSummary:
+
+- `results.serving_groups[] -> channels[] -> cable_modems[]`
+- `cable_modems[].modulation_profile_data.file` (singular analyzed file link)
+- `analysis.type=basic` triggers PyPNM basic modulation profile analysis decode
+
 ### Full Bandwidth SpectrumAnalyzer
 
 - `POST /cmts/pnm/sg/spectrumAnalyzer/startCapture`
@@ -287,4 +293,4 @@ curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/spectrumAnalyzer/startCapture \
   -d '{"capture_settings":{"first_segment_center_freq":300000000,"last_segment_center_freq":900000000,"resolution_bw":30000}}'
 ```
 
-For full response walkthroughs, see [RxMER deep dive](pnm-rxmer.md), [ChannelEstCoeff deep dive](pnm-channel-est-coeff.md), and [FecSummary deep dive](pnm-fec-summary.md).
+For full response walkthroughs, see [RxMER deep dive](pnm-rxmer.md), [ChannelEstCoeff deep dive](pnm-channel-est-coeff.md), [FecSummary deep dive](pnm-fec-summary.md), and [ModulationProfile deep dive](pnm-modulation-profile.md).

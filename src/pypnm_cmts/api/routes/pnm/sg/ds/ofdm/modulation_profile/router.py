@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.modulation_profile.schemas import (
     ModulationProfileServiceGroupCancelResponse,
     ModulationProfileServiceGroupOperationRequest,
+    ModulationProfileServiceGroupResultsRequest,
     ModulationProfileServiceGroupResultsResponse,
     ModulationProfileServiceGroupStartCaptureRequest,
     ModulationProfileServiceGroupStartCaptureResponse,
@@ -81,7 +82,7 @@ class ModulationProfileRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: ModulationProfileServiceGroupOperationRequest,
+            payload: ModulationProfileServiceGroupResultsRequest,
         ) -> ModulationProfileServiceGroupResultsResponse:
             """
             **Serving Group ModulationProfile Results**

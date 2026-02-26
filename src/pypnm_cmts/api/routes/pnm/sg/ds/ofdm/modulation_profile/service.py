@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from pypnm.api.routes.common.classes.common_endpoint_classes.common.enum import (
+    AnalysisType,
+)
 from pypnm.api.routes.common.classes.operation.cable_modem_precheck import (
     CableModemServicePreCheck,
 )
@@ -27,6 +30,7 @@ from pypnm.lib.types import (
     FileNameStr,
     InetAddressStr,
     MacAddressStr,
+    TimestampSec,
     TransactionId,
 )
 
@@ -66,15 +70,31 @@ from pypnm_cmts.api.common.service.pnm.operation_service import (
     DEFAULT_MAX_INLINE_RECORDS,
     PnmServiceGroupOperationServiceBase,
 )
+from pypnm_cmts.api.common.service.pnm.results_analysis import (
+    PnmStoredCaptureAnalysisResultModel,
+    PnmStoredCaptureAnalysisService,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmAnalyzedFileLinkModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+)
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.modulation_profile.schemas import (
+    ModulationProfileResultsCableModemModel,
+    ModulationProfileResultsChannelModel,
+    ModulationProfileResultsDataModel,
+    ModulationProfileResultsServingGroupModel,
     ModulationProfileServiceGroupCancelResponse,
     ModulationProfileServiceGroupOperationRequest,
+    ModulationProfileServiceGroupResultsModel,
+    ModulationProfileServiceGroupResultsRequest,
     ModulationProfileServiceGroupResultsResponse,
     ModulationProfileServiceGroupStartCaptureRequest,
     ModulationProfileServiceGroupStartCaptureResponse,
     ModulationProfileServiceGroupStatusResponse,
 )
-from pypnm_cmts.lib.constants import OperationStage
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
+from pypnm_cmts.lib.constants import OperationStage, PnmCaptureStatus
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 from pypnm_cmts.sgw.runtime_state import get_sgw_store
 from pypnm_cmts.sgw.store import SgwCacheStore
@@ -175,6 +195,7 @@ class ModulationProfileCaptureWorker(PnmCaptureWorkerBase):
         final_transaction_ids: list[TransactionId] = []
         final_filenames: list[FileNameStr] = []
         final_message = message
+        capture_channel_id = channel_ids[0] if len(channel_ids) == 1 else None
         if status_code == ServiceStatusCode.SUCCESS and filename is not None and transaction_id is not None:
             final_transaction_ids = [transaction_id]
             final_filenames = [filename]
@@ -193,6 +214,7 @@ class ModulationProfileCaptureWorker(PnmCaptureWorkerBase):
         return OperationStageResultModel(
             stage=OperationStage.CAPTURE,
             status_code=status_code,
+            channel_id=capture_channel_id,
             transaction_ids=final_transaction_ids,
             filenames=final_filenames,
             message=final_message,
@@ -228,6 +250,7 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
         precheck_executor: PrecheckExecutor | None = None,
         sgw_store: SgwCacheStore | None = None,
         max_inline_records: int = DEFAULT_MAX_INLINE_RECORDS,
+        results_analysis_service: PnmStoredCaptureAnalysisService | None = None,
     ) -> None:
         super().__init__(
             store=store,
@@ -246,6 +269,29 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
             )
             runner = OperationRunner(self._store, worker=worker)
         self._runner = runner
+        self._results_analysis_service = results_analysis_service or PnmStoredCaptureAnalysisService()
+
+    def results(
+        self,
+        request: ModulationProfileServiceGroupOperationRequest | ModulationProfileServiceGroupResultsRequest,
+    ) -> ModulationProfileServiceGroupResultsResponse:
+        """Return operation results and decode basic ModulationProfile analysis when available."""
+        operation_id = self._extract_operation_id(request)
+        status, message, summary, records = self._load_operation_results(operation_id)
+        request_context = self._store.load_request_context(operation_id)
+        results_request = request if isinstance(request, ModulationProfileServiceGroupResultsRequest) else None
+        filtered_records = records if results_request is None else self._filter_results_records(records, results_request)
+        return ModulationProfileServiceGroupResultsResponse(
+            status=status,
+            message=message,
+            results=self._build_structured_results(
+                filtered_records,
+                results_request,
+                cmts_hostname=self._resolve_results_cmts_hostname(request_context),
+            ),
+            summary=summary,
+            records=filtered_records,
+        )
 
     def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(
@@ -267,6 +313,7 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
         snmp = cmts.cable_modem.snmp
         snmp_v2c = snmp.snmpV2C if snmp is not None else None
         return OperationRequestContextModel(
+            cmts_hostname=ModulationProfileServiceGroupOperationService._resolve_capture_cmts_hostname(),
             tftp_ipv4=tftp.ipv4 if tftp is not None else None,
             tftp_ipv6=tftp.ipv6 if tftp is not None else None,
             snmp_write_community=snmp_v2c.community if snmp_v2c is not None else None,
@@ -283,9 +330,12 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
 
     @staticmethod
     def _extract_operation_id(
-        request: ModulationProfileServiceGroupOperationRequest,
+        request: ModulationProfileServiceGroupOperationRequest | ModulationProfileServiceGroupResultsRequest,
     ) -> PnmCaptureOperationId:
-        return request.pnm_capture_operation_id
+        operation_id = getattr(request, "pnm_capture_operation_id", None)
+        if operation_id is not None:
+            return operation_id
+        return request.operation.pnm_capture_operation_id
 
     @staticmethod
     def _build_start_response(
@@ -321,8 +371,8 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
             operation=state,
         )
 
-    @staticmethod
     def _build_results_response(
+        self,
         status: ServiceStatusCode,
         message: str,
         summary: OperationResultsSummaryModel,
@@ -331,6 +381,7 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
         return ModulationProfileServiceGroupResultsResponse(
             status=status,
             message=message,
+            results=self._build_structured_results(records),
             summary=summary,
             records=records,
         )
@@ -376,6 +427,326 @@ class ModulationProfileServiceGroupOperationService(PnmServiceGroupOperationServ
         if not channel_ids:
             return []
         return list(channel_ids)
+
+    def _build_structured_results(
+        self,
+        records: list[PerModemLinkageRecordModel],
+        request: ModulationProfileServiceGroupResultsRequest | None = None,
+        cmts_hostname: str | None = None,
+    ) -> ModulationProfileServiceGroupResultsModel:
+        capture_finished_epochs = [
+            int(record.finished_epoch)
+            for record in records
+            if record.stage == OperationStage.CAPTURE and int(record.finished_epoch) > 0
+        ]
+        modem_records: dict[str, list[PerModemLinkageRecordModel]] = {}
+        for record in records:
+            mac = str(record.mac_address)
+            modem_records.setdefault(mac, []).append(record)
+
+        decoded_by_txn = self._decode_records_basic_analysis(request, records)
+        channels_by_key: dict[tuple[int | None, int | None], ModulationProfileResultsChannelModel] = {}
+        for mac in sorted(modem_records.keys()):
+            modem_stage_records = modem_records[mac]
+            capture_records = [r for r in modem_stage_records if r.stage == OperationStage.CAPTURE]
+            source_records = capture_records if capture_records else modem_stage_records
+            transaction_ids: list[TransactionId] = []
+            filenames: list[FileNameStr] = []
+            for source in source_records:
+                for transaction_id in source.transaction_ids:
+                    if transaction_id not in transaction_ids:
+                        transaction_ids.append(transaction_id)
+                for filename in source.filenames:
+                    if filename not in filenames:
+                        filenames.append(filename)
+
+            stage_status_codes = PnmResultsStageStatusCodesModel()
+            stage_messages = PnmResultsStageMessagesModel()
+            has_stage_messages = False
+            for source in modem_stage_records:
+                ModulationProfileServiceGroupOperationService._set_stage_status_code(stage_status_codes, source)
+                if source.message != "":
+                    ModulationProfileServiceGroupOperationService._set_stage_message(stage_messages, source)
+                    has_stage_messages = True
+
+            final_stage_record = ModulationProfileServiceGroupOperationService._select_final_stage_record(modem_stage_records)
+            modem_status = PnmCaptureStatus.SUCCESS
+            modem_message = ""
+            if final_stage_record is None or final_stage_record.status_code != ServiceStatusCode.SUCCESS:
+                modem_status = PnmCaptureStatus.FAILED
+                modem_message = "" if final_stage_record is None else final_stage_record.message
+            elif final_stage_record.message != "":
+                modem_message = final_stage_record.message
+
+            modem_sg_id = ServiceGroupId(int(modem_stage_records[0].sg_id)) if modem_stage_records else None
+            modem_channel_id = ModulationProfileServiceGroupOperationService._resolve_modem_channel_id(modem_stage_records)
+
+            analysis_payload, pnm_file_type, analysis_error, analyzed_transaction_id = self._resolve_modem_analysis(
+                request=request,
+                modem_status=modem_status,
+                transaction_ids=transaction_ids,
+                decoded_by_txn=decoded_by_txn,
+            )
+            system_description = self._resolve_modem_system_description(
+                transaction_ids=transaction_ids,
+                decoded_by_txn=decoded_by_txn,
+                analyzed_transaction_id=analyzed_transaction_id,
+            )
+            if modem_channel_id is None:
+                modem_channel_id = self._resolve_channel_id_from_analysis_payload(analysis_payload)
+            modem_model = ModulationProfileResultsCableModemModel(
+                mac_address=mac,
+                system_description=system_description,
+                status=modem_status,
+                message=modem_message,
+                modulation_profile_data=ModulationProfileResultsDataModel(
+                    file=self._build_modem_file_link(
+                        transaction_ids=transaction_ids,
+                        filenames=filenames,
+                        analyzed_transaction_id=analyzed_transaction_id,
+                    ),
+                    stage_status_codes=stage_status_codes,
+                    stage_messages=stage_messages if has_stage_messages else None,
+                    pnm_file_type=pnm_file_type,
+                    analysis=analysis_payload,
+                    analysis_error=analysis_error,
+                ),
+            )
+            group_key = (
+                int(modem_sg_id) if modem_sg_id is not None else None,
+                int(modem_channel_id) if modem_channel_id is not None else None,
+            )
+            channel_group = channels_by_key.get(group_key)
+            if channel_group is None:
+                channel_group = ModulationProfileResultsChannelModel(
+                    channel_id=modem_channel_id,
+                    service_group_id=modem_sg_id,
+                    cable_modems=[],
+                )
+                channels_by_key[group_key] = channel_group
+            channel_group.cable_modems.append(modem_model)
+
+        channels = [
+            channels_by_key[key]
+            for key in sorted(
+                channels_by_key.keys(),
+                key=lambda item: (-1 if item[0] is None else item[0], -1 if item[1] is None else item[1]),
+            )
+        ]
+        serving_groups = self._build_serving_groups_from_channels(channels)
+
+        results = ModulationProfileServiceGroupResultsModel()
+        results.capture_details.capture_time_epoch = (
+            TimestampSec(max(capture_finished_epochs)) if capture_finished_epochs else None
+        )
+        results.cmts.cmts_hostname = cmts_hostname
+        results.channels = []
+        results.serving_groups = serving_groups
+        return results
+
+    def _filter_results_records(
+        self,
+        records: list[PerModemLinkageRecordModel],
+        request: ModulationProfileServiceGroupResultsRequest,
+    ) -> list[PerModemLinkageRecordModel]:
+        selection = request.selection
+        if not selection.serving_group_ids and not selection.channel_ids and not selection.mac_addresses:
+            return records
+        allowed_sg_ids = {int(sg_id) for sg_id in selection.serving_group_ids}
+        allowed_channel_ids = {int(channel_id) for channel_id in selection.channel_ids}
+        allowed_macs = {str(mac).lower() for mac in selection.mac_addresses}
+        filtered: list[PerModemLinkageRecordModel] = []
+        for record in records:
+            if allowed_sg_ids and int(record.sg_id) not in allowed_sg_ids:
+                continue
+            if allowed_channel_ids and (record.channel_id is None or int(record.channel_id) not in allowed_channel_ids):
+                continue
+            if allowed_macs and str(record.mac_address).lower() not in allowed_macs:
+                continue
+            filtered.append(record)
+        return filtered
+
+    @staticmethod
+    def _select_final_stage_record(
+        modem_stage_records: list[PerModemLinkageRecordModel],
+    ) -> PerModemLinkageRecordModel | None:
+        stage_order = {OperationStage.ELIGIBILITY: 1, OperationStage.PRECHECK: 2, OperationStage.CAPTURE: 3}
+        ordered = sorted(modem_stage_records, key=lambda record: stage_order.get(record.stage, 0))
+        if not ordered:
+            return None
+        return ordered[-1]
+
+    @staticmethod
+    def _set_stage_status_code(
+        stage_status_codes: PnmResultsStageStatusCodesModel,
+        record: PerModemLinkageRecordModel,
+    ) -> None:
+        if record.stage == OperationStage.ELIGIBILITY:
+            stage_status_codes.eligibility = record.status_code
+            return
+        if record.stage == OperationStage.PRECHECK:
+            stage_status_codes.precheck = record.status_code
+            return
+        if record.stage == OperationStage.CAPTURE:
+            stage_status_codes.capture = record.status_code
+
+    @staticmethod
+    def _set_stage_message(
+        stage_messages: PnmResultsStageMessagesModel,
+        record: PerModemLinkageRecordModel,
+    ) -> None:
+        if record.stage == OperationStage.ELIGIBILITY:
+            stage_messages.eligibility = record.message
+            return
+        if record.stage == OperationStage.PRECHECK:
+            stage_messages.precheck = record.message
+            return
+        if record.stage == OperationStage.CAPTURE:
+            stage_messages.capture = record.message
+
+    @staticmethod
+    def _resolve_modem_channel_id(
+        modem_stage_records: list[PerModemLinkageRecordModel],
+    ) -> ChannelId | None:
+        capture_channel_ids = [
+            record.channel_id
+            for record in modem_stage_records
+            if record.stage == OperationStage.CAPTURE and record.channel_id is not None
+        ]
+        if not capture_channel_ids:
+            return None
+        unique_channel_ids: list[ChannelId] = []
+        for channel_id in capture_channel_ids:
+            if channel_id not in unique_channel_ids:
+                unique_channel_ids.append(channel_id)
+        if len(unique_channel_ids) == 1:
+            return unique_channel_ids[0]
+        return None
+
+    @staticmethod
+    def _analysis_requested(
+        request: ModulationProfileServiceGroupResultsRequest | None,
+    ) -> bool:
+        return request is not None and request.analysis.type == AnalysisType.BASIC
+
+    def _decode_records_basic_analysis(
+        self,
+        request: ModulationProfileServiceGroupResultsRequest | None,
+        records: list[PerModemLinkageRecordModel],
+    ) -> dict[TransactionId, PnmStoredCaptureAnalysisResultModel]:
+        if not ModulationProfileServiceGroupOperationService._analysis_requested(request):
+            return {}
+        transaction_ids: list[TransactionId] = []
+        for record in records:
+            if record.stage != OperationStage.CAPTURE or record.status_code != ServiceStatusCode.SUCCESS:
+                continue
+            transaction_ids.extend(record.transaction_ids)
+        if not transaction_ids:
+            return {}
+        return self._results_analysis_service.analyze_transactions_basic(transaction_ids)
+
+    @staticmethod
+    def _resolve_modem_analysis(
+        request: ModulationProfileServiceGroupResultsRequest | None,
+        modem_status: PnmCaptureStatus,
+        transaction_ids: list[TransactionId],
+        decoded_by_txn: dict[TransactionId, PnmStoredCaptureAnalysisResultModel],
+    ) -> tuple[dict[str, object] | None, str | None, str | None, TransactionId | None]:
+        if not ModulationProfileServiceGroupOperationService._analysis_requested(request):
+            return (None, None, None, None)
+        if modem_status != PnmCaptureStatus.SUCCESS or not transaction_ids:
+            return (None, None, None, None)
+        for transaction_id in transaction_ids:
+            decoded = decoded_by_txn.get(transaction_id)
+            if decoded is None:
+                continue
+            return (decoded.analysis, decoded.pnm_file_type, decoded.error, transaction_id)
+        return (None, None, None, None)
+
+    @staticmethod
+    def _build_modem_file_link(
+        transaction_ids: list[TransactionId],
+        filenames: list[FileNameStr],
+        analyzed_transaction_id: TransactionId | None,
+    ) -> PnmAnalyzedFileLinkModel | None:
+        if not transaction_ids and not filenames:
+            return None
+        selected_index = 0
+        if analyzed_transaction_id is not None:
+            for index, transaction_id in enumerate(transaction_ids):
+                if transaction_id == analyzed_transaction_id:
+                    selected_index = index
+                    break
+        transaction_id_value = str(transaction_ids[selected_index]) if selected_index < len(transaction_ids) else None
+        filename_value = str(filenames[selected_index]) if selected_index < len(filenames) else None
+        if transaction_id_value is None and filename_value is None:
+            return None
+        return PnmAnalyzedFileLinkModel(transaction_id=transaction_id_value, filename=filename_value)
+
+    @staticmethod
+    def _resolve_modem_system_description(
+        transaction_ids: list[TransactionId],
+        decoded_by_txn: dict[TransactionId, PnmStoredCaptureAnalysisResultModel],
+        analyzed_transaction_id: TransactionId | None,
+    ) -> dict[str, str] | None:
+        selected_ids: list[TransactionId] = []
+        if analyzed_transaction_id is not None:
+            selected_ids.append(analyzed_transaction_id)
+        selected_ids.extend([tx for tx in transaction_ids if tx != analyzed_transaction_id])
+        for transaction_id in selected_ids:
+            decoded = decoded_by_txn.get(transaction_id)
+            if decoded is None or decoded.system_description is None:
+                continue
+            normalized: dict[str, str] = {}
+            for key, value in decoded.system_description.items():
+                normalized[str(key)] = str(value)
+            return normalized or None
+        return None
+
+    @staticmethod
+    def _resolve_channel_id_from_analysis_payload(
+        analysis_payload: dict[str, object] | None,
+    ) -> ChannelId | None:
+        if not isinstance(analysis_payload, dict):
+            return None
+        value = analysis_payload.get("channel_id")
+        if value is None:
+            return None
+        try:
+            return ChannelId(int(value))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _build_serving_groups_from_channels(
+        channels: list[ModulationProfileResultsChannelModel],
+    ) -> list[ModulationProfileResultsServingGroupModel]:
+        grouped: dict[int | None, list[ModulationProfileResultsChannelModel]] = {}
+        for channel in channels:
+            key = int(channel.service_group_id) if channel.service_group_id is not None else None
+            grouped.setdefault(key, []).append(channel)
+        return [
+            ModulationProfileResultsServingGroupModel(service_group_id=sg_id, channels=grouped[sg_id])
+            for sg_id in sorted(grouped.keys(), key=lambda item: -1 if item is None else item)
+        ]
+
+    @staticmethod
+    def _resolve_results_cmts_hostname(
+        request_context: OperationRequestContextModel | None,
+    ) -> str | None:
+        if request_context is not None and request_context.cmts_hostname is not None:
+            hostname = str(request_context.cmts_hostname).strip()
+            if hostname != "":
+                return hostname
+        return ModulationProfileServiceGroupOperationService._resolve_capture_cmts_hostname()
+
+    @staticmethod
+    def _resolve_capture_cmts_hostname() -> str | None:
+        try:
+            hostname = str(CmtsSystemConfigSettings.cmts_device_hostname(0)).strip()
+        except Exception:
+            return None
+        return hostname or None
 
 
 __all__ = [
