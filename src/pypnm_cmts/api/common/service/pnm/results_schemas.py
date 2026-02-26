@@ -69,6 +69,13 @@ class PnmServingGroupWithChannelsResultsModel(BaseModel, Generic[PnmChannelResul
     channels: list[PnmChannelResultsModelT] = Field(default_factory=list, description="Channel-grouped results.")
 
 
+class PnmServingGroupWithCableModemsResultsModel(BaseModel, Generic[PnmCableModemResultsModelT]):
+    """Shared serving-group container for per-modem structured PNM results payloads."""
+
+    service_group_id: ServiceGroupId | None = Field(default=None, description="Serving group identifier for this group.")
+    cable_modems: list[PnmCableModemResultsModelT] = Field(default_factory=list, description="Per-modem results.")
+
+
 class PnmResultsStageStatusCodesModel(BaseModel):
     """Per-stage status-code summary shared across PNM operation results."""
 
@@ -146,6 +153,38 @@ class PnmChannelGroupedResultsModel(
         return normalized
 
 
+class PnmServingGroupGroupedResultsModel(
+    BaseModel,
+    Generic[PnmCaptureDetailsModelT, PnmResultsCmtsModelT, PnmServingGroupResultsModelT],
+):
+    """Generic serving-group-grouped structured results payload for PNM operations."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = PnmCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = PnmResultsCmtsModel
+
+    capture_details: PnmCaptureDetailsModelT = Field(default_factory=PnmCaptureDetailsModel, description="Capture metadata.")
+    cmts: PnmResultsCmtsModelT = Field(default_factory=PnmResultsCmtsModel, description="CMTS metadata.")
+    channels: list[BaseModel] = Field(
+        default_factory=list,
+        description="Compatibility channel-grouped results field (unused for SG-only payloads).",
+    )
+    serving_groups: list[PnmServingGroupResultsModelT] = Field(
+        default_factory=list,
+        description="Serving-group grouped results.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_default_grouping_models(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        normalized.setdefault("capture_details", cls._capture_details_factory())
+        normalized.setdefault("cmts", cls._cmts_factory())
+        return normalized
+
+
 __all__ = [
     "PnmAnalyzedFileLinkModel",
     "PnmAnalyzedFileResultModel",
@@ -159,5 +198,7 @@ __all__ = [
     "PnmDecodedAnalysisResultModel",
     "PnmResultsStageMessagesModel",
     "PnmResultsStageStatusCodesModel",
+    "PnmServingGroupWithCableModemsResultsModel",
+    "PnmServingGroupGroupedResultsModel",
     "PnmServingGroupWithChannelsResultsModel",
 ]

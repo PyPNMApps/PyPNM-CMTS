@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.ds.histogram.schemas import (
     DsHistogramServiceGroupCancelResponse,
     DsHistogramServiceGroupOperationRequest,
+    DsHistogramServiceGroupResultsRequest,
     DsHistogramServiceGroupResultsResponse,
     DsHistogramServiceGroupStartCaptureRequest,
     DsHistogramServiceGroupStartCaptureResponse,
@@ -69,7 +70,7 @@ class DsHistogramRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: DsHistogramServiceGroupOperationRequest,
+            payload: DsHistogramServiceGroupResultsRequest,
         ) -> DsHistogramServiceGroupResultsResponse:
             return self._service.results(payload)
 

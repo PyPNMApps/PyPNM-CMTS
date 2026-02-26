@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
-from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 
 from pypnm_cmts.api.common.cmts_request import (
     CmtsCableModemFilterModel,
@@ -12,12 +13,25 @@ from pypnm_cmts.api.common.cmts_request import (
     CmtsSnmpModel,
     CmtsTftpParametersModel,
 )
-from pypnm_cmts.api.common.operations.models import (
-    OperationResultsSummaryModel,
-    OperationStateModel,
-    PerModemLinkageRecordModel,
+from pypnm_cmts.api.common.operations.request_schemas import (
+    PnmCaptureOperationLookupRequest,
+    PnmCaptureResultsRequest,
 )
-from pypnm_cmts.lib.types import PnmCaptureOperationId
+from pypnm_cmts.api.common.operations.response_schemas import (
+    PnmCaptureOperationResponseModel,
+    PnmCaptureResultsResponseModel,
+    PnmCaptureStartResponseModel,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmCableModemResultsBaseModel,
+    PnmCaptureDetailsModel,
+    PnmDecodedAnalysisResultModel,
+    PnmResultsCmtsModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+    PnmServingGroupGroupedResultsModel,
+    PnmServingGroupWithCableModemsResultsModel,
+)
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_RETRY_COUNT = 3
@@ -102,49 +116,79 @@ class DsHistogramServiceGroupStartCaptureRequest(BaseModel):
     )
 
 
-class DsHistogramServiceGroupOperationRequest(BaseModel):
+class DsHistogramServiceGroupOperationRequest(PnmCaptureOperationLookupRequest):
     """Request payload for SG-level downstream Histogram operation lookup."""
 
-    pnm_capture_operation_id: PnmCaptureOperationId = Field(..., description="Operation identifier.")
+
+class DsHistogramServiceGroupResultsRequest(PnmCaptureResultsRequest):
+    """Request payload for SG-level downstream Histogram results lookup and rendering."""
 
 
-class DsHistogramServiceGroupStartCaptureResponse(BaseModel):
+class DsHistogramServiceGroupStartCaptureResponse(PnmCaptureStartResponseModel):
     """Response payload for SG-level downstream Histogram startCapture."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel = Field(..., description="Initial operation state.")
 
-
-class DsHistogramServiceGroupStatusResponse(BaseModel):
+class DsHistogramServiceGroupStatusResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level downstream Histogram status."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Operation state snapshot.")
 
-
-class DsHistogramServiceGroupCancelResponse(BaseModel):
+class DsHistogramServiceGroupCancelResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level downstream Histogram cancel."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Updated operation state.")
+
+class DsHistogramCaptureDetailsModel(PnmCaptureDetailsModel):
+    """Histogram capture metadata."""
+
+    capture_type: str = Field(default="HISTOGRAM", description="Capture type identifier.")
 
 
-class DsHistogramServiceGroupResultsResponse(BaseModel):
+class DsHistogramResultsCmtsModel(PnmResultsCmtsModel):
+    """Histogram CMTS context."""
+
+
+class DsHistogramResultsDataModel(PnmDecodedAnalysisResultModel):
+    """Histogram modem data payload backed by linkage + decoded analysis."""
+
+    stage_status_codes: PnmResultsStageStatusCodesModel = Field(
+        default_factory=PnmResultsStageStatusCodesModel,
+        description="Stage status summary.",
+    )
+    stage_messages: PnmResultsStageMessagesModel | None = Field(
+        default=None,
+        description="Optional per-stage messages.",
+    )
+
+
+class DsHistogramResultsCableModemModel(PnmCableModemResultsBaseModel):
+    """Histogram cable modem result."""
+
+    histogram_data: DsHistogramResultsDataModel = Field(
+        default_factory=DsHistogramResultsDataModel,
+        description="Histogram modem data payload.",
+    )
+
+
+class DsHistogramResultsServingGroupModel(PnmServingGroupWithCableModemsResultsModel[DsHistogramResultsCableModemModel]):
+    """Serving-group grouped histogram results."""
+
+
+class DsHistogramServiceGroupResultsModel(
+    PnmServingGroupGroupedResultsModel[
+        DsHistogramCaptureDetailsModel,
+        DsHistogramResultsCmtsModel,
+        DsHistogramResultsServingGroupModel,
+    ]
+):
+    """Structured downstream Histogram results payload for UI/API consumers."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = DsHistogramCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = DsHistogramResultsCmtsModel
+
+
+class DsHistogramServiceGroupResultsResponse(PnmCaptureResultsResponseModel[DsHistogramServiceGroupResultsModel]):
     """Response payload for SG-level downstream Histogram results."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    summary: OperationResultsSummaryModel = Field(
-        default_factory=OperationResultsSummaryModel,
-        description="Results summary for the operation.",
-    )
-    records: list[PerModemLinkageRecordModel] = Field(
-        default_factory=list,
-        description="Linkage records included in the response.",
-    )
+    _results_factory: ClassVar[type[BaseModel]] = DsHistogramServiceGroupResultsModel
 
 
 __all__ = [
@@ -152,9 +196,14 @@ __all__ = [
     "DsHistogramCmtsCableModemFilterModel",
     "DsHistogramCmtsPnmParametersModel",
     "DsHistogramCmtsRequestEnvelopeModel",
+    "DsHistogramResultsCableModemModel",
+    "DsHistogramResultsDataModel",
+    "DsHistogramResultsServingGroupModel",
     "DsHistogramServiceGroupCancelResponse",
     "DsHistogramServiceGroupExecutionModel",
     "DsHistogramServiceGroupOperationRequest",
+    "DsHistogramServiceGroupResultsModel",
+    "DsHistogramServiceGroupResultsRequest",
     "DsHistogramServiceGroupResultsResponse",
     "DsHistogramServiceGroupStartCaptureRequest",
     "DsHistogramServiceGroupStartCaptureResponse",
