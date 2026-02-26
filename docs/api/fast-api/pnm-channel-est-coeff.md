@@ -255,7 +255,7 @@ curl -X POST http://127.0.0.1:8000/cmts/pnm/sg/ds/ofdm/channelEstCoeff/results \
             "service_group_id": 3147522,
             "cable_modems": [
               {
-                "mac_address": "60:6c:63:f4:8f:b8",
+                "mac_address": "aa:bb:cc:dd:ee:ff",
                 "system_description": {
                   "VENDOR": "LANCity",
                   "MODEL": "LCPET-3"
