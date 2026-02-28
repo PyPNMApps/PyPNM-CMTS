@@ -594,6 +594,36 @@ install_update_development_pypnm_docsis() {
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
+  local current_version
+  local target_version
+  local confirm
+
+  current_version="$(python - <<'PYCODE'
+from importlib.metadata import PackageNotFoundError, version
+try:
+    print(version("pypnm-docsis"))
+except PackageNotFoundError:
+    print("not-installed")
+PYCODE
+)"
+
+  target_version="$(python -m pip index versions pypnm-docsis --pre 2>/dev/null | sed -n 's/^Available versions: //p' | head -n 1 | cut -d',' -f1 | tr -d ' ')"
+  if [[ "${target_version}" == "" ]]; then
+    target_version="latest pre-release"
+  fi
+
+  echo "pypnm-docsis local version: ${current_version}"
+  echo "pypnm-docsis target version: ${target_version}"
+  read -r -p "Proceed with update to ${target_version}? [y/N]: " confirm
+  case "${confirm}" in
+    y|Y|yes|YES)
+      ;;
+    *)
+      echo "Cancelled pypnm-docsis update."
+      exit 0
+      ;;
+  esac
+
   python -m pip install --upgrade --pre pypnm-docsis
   python - <<'PYCODE'
 import pypnm
