@@ -3,16 +3,31 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
-from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
+from typing import ClassVar
 
-from pypnm_cmts.api.common.cmts_request import CmtsRequestEnvelopeModel
-from pypnm_cmts.api.common.operations.models import (
-    OperationResultsSummaryModel,
-    OperationStateModel,
-    PerModemLinkageRecordModel,
+from pydantic import BaseModel, ConfigDict, Field
+
+from pypnm_cmts.api.common.operations.request_schemas import (
+    PnmCaptureOperationLookupRequest,
+    PnmCaptureResultsRequest,
+    PnmCmtsRequestEnvelopeRequest,
 )
-from pypnm_cmts.lib.types import PnmCaptureOperationId
+from pypnm_cmts.api.common.operations.response_schemas import (
+    PnmCaptureOperationResponseModel,
+    PnmCaptureResultsResponseModel,
+    PnmCaptureStartResponseModel,
+)
+from pypnm_cmts.api.common.service.pnm.results_schemas import (
+    PnmCableModemResultsBaseModel,
+    PnmCaptureDetailsModel,
+    PnmChannelGroupedResultsModel,
+    PnmChannelWithCableModemsResultsModel,
+    PnmDecodedAnalysisResultModel,
+    PnmResultsCmtsModel,
+    PnmResultsStageMessagesModel,
+    PnmResultsStageStatusCodesModel,
+    PnmServingGroupWithChannelsResultsModel,
+)
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_RETRY_COUNT = 3
@@ -43,67 +58,115 @@ class PreEqualizationServiceGroupExecutionModel(BaseModel):
     )
 
 
-class PreEqualizationServiceGroupStartCaptureRequest(BaseModel):
+class PreEqualizationServiceGroupStartCaptureRequest(PnmCmtsRequestEnvelopeRequest):
     """Request payload for SG-level PreEqualization startCapture."""
 
     model_config = ConfigDict(extra="ignore")
 
-    cmts: CmtsRequestEnvelopeModel = Field(default_factory=CmtsRequestEnvelopeModel, description="CMTS request envelope.")
     execution: PreEqualizationServiceGroupExecutionModel = Field(
         default_factory=PreEqualizationServiceGroupExecutionModel,
         description="Execution settings for the orchestration.",
     )
 
 
-class PreEqualizationServiceGroupOperationRequest(BaseModel):
+class PreEqualizationServiceGroupOperationRequest(PnmCaptureOperationLookupRequest):
     """Request payload for SG-level PreEqualization operation lookup."""
 
-    pnm_capture_operation_id: PnmCaptureOperationId = Field(..., description="Operation identifier.")
 
+class PreEqualizationServiceGroupResultsRequest(PnmCaptureResultsRequest):
+    """Request payload for SG-level PreEqualization results lookup and rendering."""
 
-class PreEqualizationServiceGroupStartCaptureResponse(BaseModel):
+class PreEqualizationServiceGroupStartCaptureResponse(PnmCaptureStartResponseModel):
     """Response payload for SG-level PreEqualization startCapture."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel = Field(..., description="Initial operation state.")
 
-
-class PreEqualizationServiceGroupStatusResponse(BaseModel):
+class PreEqualizationServiceGroupStatusResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level PreEqualization status."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Operation state snapshot.")
 
-
-class PreEqualizationServiceGroupCancelResponse(BaseModel):
+class PreEqualizationServiceGroupCancelResponse(PnmCaptureOperationResponseModel):
     """Response payload for SG-level PreEqualization cancel."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    operation: OperationStateModel | None = Field(default=None, description="Updated operation state.")
+
+class PreEqualizationCaptureDetailsModel(PnmCaptureDetailsModel):
+    """PreEqualization capture metadata."""
+
+    capture_type: str = Field(default="PRE_EQUALIZATION", description="Capture type identifier.")
 
 
-class PreEqualizationServiceGroupResultsResponse(BaseModel):
+class PreEqualizationResultsCmtsModel(PnmResultsCmtsModel):
+    """PreEqualization CMTS context."""
+
+
+class PreEqualizationResultsDataModel(PnmDecodedAnalysisResultModel):
+    """PreEqualization modem data payload backed by linkage and decoded analysis."""
+
+    channel_estimate_magnitude_db: list[float] | None = Field(
+        default=None,
+        description="Per-subcarrier pre-equalization channel-estimate magnitude in dB when provided by analysis.",
+    )
+    stage_status_codes: PnmResultsStageStatusCodesModel = Field(
+        default_factory=PnmResultsStageStatusCodesModel,
+        description="Stage status summary.",
+    )
+    stage_messages: PnmResultsStageMessagesModel | None = Field(
+        default=None,
+        description="Optional per-stage messages.",
+    )
+
+
+class PreEqualizationResultsCableModemModel(PnmCableModemResultsBaseModel):
+    """PreEqualization cable modem result."""
+
+    pre_equalization_data: PreEqualizationResultsDataModel = Field(
+        default_factory=PreEqualizationResultsDataModel,
+        description="PreEqualization modem data payload.",
+    )
+
+
+class PreEqualizationResultsChannelModel(PnmChannelWithCableModemsResultsModel[PreEqualizationResultsCableModemModel]):
+    """Channel-grouped pre-equalization results."""
+
+
+class PreEqualizationResultsServingGroupModel(
+    PnmServingGroupWithChannelsResultsModel[PreEqualizationResultsChannelModel]
+):
+    """Serving-group grouped pre-equalization results."""
+
+
+class PreEqualizationServiceGroupResultsModel(
+    PnmChannelGroupedResultsModel[
+        PreEqualizationCaptureDetailsModel,
+        PreEqualizationResultsCmtsModel,
+        PreEqualizationResultsChannelModel,
+    ]
+):
+    """Structured pre-equalization results payload for UI/API consumers."""
+
+    _capture_details_factory: ClassVar[type[PnmCaptureDetailsModel]] = PreEqualizationCaptureDetailsModel
+    _cmts_factory: ClassVar[type[PnmResultsCmtsModel]] = PreEqualizationResultsCmtsModel
+    serving_groups: list[PreEqualizationResultsServingGroupModel] = Field(
+        default_factory=list,
+        description="Serving-group grouped pre-equalization results.",
+    )
+
+
+class PreEqualizationServiceGroupResultsResponse(PnmCaptureResultsResponseModel[PreEqualizationServiceGroupResultsModel]):
     """Response payload for SG-level PreEqualization results."""
 
-    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Service status code.")
-    message: str = Field(default="", description="Informational or error message.")
-    summary: OperationResultsSummaryModel = Field(
-        default_factory=OperationResultsSummaryModel,
-        description="Results summary for the operation.",
-    )
-    records: list[PerModemLinkageRecordModel] = Field(
-        default_factory=list,
-        description="Linkage records included in the response.",
-    )
+    _results_factory: ClassVar[type[BaseModel]] = PreEqualizationServiceGroupResultsModel
 
 
 __all__ = [
+    "PreEqualizationResultsCableModemModel",
+    "PreEqualizationResultsChannelModel",
+    "PreEqualizationResultsDataModel",
+    "PreEqualizationResultsServingGroupModel",
     "PreEqualizationServiceGroupCancelResponse",
     "PreEqualizationServiceGroupExecutionModel",
     "PreEqualizationServiceGroupOperationRequest",
+    "PreEqualizationServiceGroupResultsModel",
+    "PreEqualizationServiceGroupResultsRequest",
     "PreEqualizationServiceGroupResultsResponse",
     "PreEqualizationServiceGroupStartCaptureRequest",
     "PreEqualizationServiceGroupStartCaptureResponse",

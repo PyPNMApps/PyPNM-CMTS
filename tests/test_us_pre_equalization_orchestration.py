@@ -28,14 +28,14 @@ from pypnm_cmts.api.common.service.pnm.results_analysis import (
     PnmStoredCaptureAnalysisResultModel,
     PnmStoredCaptureAnalysisService,
 )
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.channel_est_coeff.schemas import (
-    ChannelEstCoeffServiceGroupExecutionModel,
-    ChannelEstCoeffServiceGroupOperationRequest,
-    ChannelEstCoeffServiceGroupResultsRequest,
-    ChannelEstCoeffServiceGroupStartCaptureRequest,
+from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.schemas import (
+    PreEqualizationServiceGroupExecutionModel,
+    PreEqualizationServiceGroupOperationRequest,
+    PreEqualizationServiceGroupResultsRequest,
+    PreEqualizationServiceGroupStartCaptureRequest,
 )
-from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.channel_est_coeff.service import (
-    ChannelEstCoeffServiceGroupOperationService,
+from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.service import (
+    PreEqualizationServiceGroupOperationService,
 )
 from pypnm_cmts.lib.constants import OperationStage
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
@@ -44,23 +44,23 @@ from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 def _build_service(
     tmp_path: Path,
     results_analysis_service: PnmStoredCaptureAnalysisService | None = None,
-) -> ChannelEstCoeffServiceGroupOperationService:
+) -> PreEqualizationServiceGroupOperationService:
     store = OperationStore(base_dir=tmp_path)
     runner = OperationRunner(store=store)
-    return ChannelEstCoeffServiceGroupOperationService(
+    return PreEqualizationServiceGroupOperationService(
         store=store,
         runner=runner,
         results_analysis_service=results_analysis_service,
     )
 
 
-def _build_request() -> ChannelEstCoeffServiceGroupStartCaptureRequest:
-    return ChannelEstCoeffServiceGroupStartCaptureRequest(
+def _build_request() -> PreEqualizationServiceGroupStartCaptureRequest:
+    return PreEqualizationServiceGroupStartCaptureRequest(
         cmts=CmtsRequestEnvelopeModel(
             serving_group=CmtsServingGroupFilterModel(id=[ServiceGroupId(1)]),
             cable_modem=CmtsCableModemFilterModel(mac_address=[]),
         ),
-        execution=ChannelEstCoeffServiceGroupExecutionModel(),
+        execution=PreEqualizationServiceGroupExecutionModel(),
     )
 
 
@@ -76,19 +76,23 @@ class _FakeResultsAnalysisService(PnmStoredCaptureAnalysisService):
         return {
             TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"): PnmStoredCaptureAnalysisResultModel(
                 transaction_id=TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"),
-                pnm_file_type="OFDM_CHANNEL_ESTIMATE_COEFFICIENT",
+                pnm_file_type="UPSTREAM_PRE_EQUALIZER_COEFFICIENTS",
                 system_description={"VENDOR": "LANCity", "MODEL": "LCPET-3"},
-                analysis={"channel_id": 160, "coeff_count": 16},
+                analysis={
+                    "channel_id": 57,
+                    "tap_count": 16,
+                    "channel_estimate_magnitude_db": [-3.0, -2.5, -2.0],
+                },
             )
         }
 
 
-def test_channel_est_coeff_results_empty(tmp_path: Path) -> None:
+def test_pre_equalization_results_empty(tmp_path: Path) -> None:
     service = _build_service(tmp_path)
     start_response = service.start_capture(_build_request())
 
     results_response = service.results(
-        ChannelEstCoeffServiceGroupOperationRequest(
+        PreEqualizationServiceGroupOperationRequest(
             pnm_capture_operation_id=start_response.operation.operation_id,
         )
     )
@@ -96,13 +100,13 @@ def test_channel_est_coeff_results_empty(tmp_path: Path) -> None:
     assert results_response.summary.record_count == 0
     assert results_response.records == []
     assert results_response.results is not None
-    assert results_response.results.capture_details.capture_type == "CHANNEL_EST_COEFF"
+    assert results_response.results.capture_details.capture_type == "PRE_EQUALIZATION"
     assert results_response.results.channels == []
     assert results_response.results.serving_groups == []
 
 
-def test_channel_est_coeff_results_request_accepts_nested_operation_shape() -> None:
-    request = ChannelEstCoeffServiceGroupResultsRequest.model_validate(
+def test_pre_equalization_results_request_accepts_nested_operation_shape() -> None:
+    request = PreEqualizationServiceGroupResultsRequest.model_validate(
         {
             "operation": {"pnm_capture_operation_id": "6c83fb8c215081133c6bf041"},
             "output": {
@@ -117,8 +121,8 @@ def test_channel_est_coeff_results_request_accepts_nested_operation_shape() -> N
     assert request.output.archive_includes.png is True
 
 
-def test_channel_est_coeff_results_request_coerces_legacy_flat_shape() -> None:
-    request = ChannelEstCoeffServiceGroupResultsRequest.model_validate(
+def test_pre_equalization_results_request_coerces_legacy_flat_shape() -> None:
+    request = PreEqualizationServiceGroupResultsRequest.model_validate(
         {"pnm_capture_operation_id": "6c83fb8c215081133c6bf041"}
     )
     assert request.operation.pnm_capture_operation_id == PnmCaptureOperationId("6c83fb8c215081133c6bf041")
@@ -126,8 +130,8 @@ def test_channel_est_coeff_results_request_coerces_legacy_flat_shape() -> None:
     assert request.output.archive_includes is None
 
 
-def test_channel_est_coeff_results_request_ignores_archive_includes_for_json_output() -> None:
-    request = ChannelEstCoeffServiceGroupResultsRequest.model_validate(
+def test_pre_equalization_results_request_ignores_archive_includes_for_json_output() -> None:
+    request = PreEqualizationServiceGroupResultsRequest.model_validate(
         {
             "operation": {"pnm_capture_operation_id": "6c83fb8c215081133c6bf041"},
             "output": {"type": "json", "archive_includes": {"json": True}},
@@ -137,7 +141,7 @@ def test_channel_est_coeff_results_request_ignores_archive_includes_for_json_out
     assert request.output.archive_includes is None
 
 
-def test_channel_est_coeff_results_basic_analysis_decodes_via_common_service(tmp_path: Path) -> None:
+def test_pre_equalization_results_basic_analysis_decodes_via_common_service(tmp_path: Path) -> None:
     analysis_service = _FakeResultsAnalysisService()
     service = _build_service(tmp_path, results_analysis_service=analysis_service)
     start_response = service.start_capture(_build_request())
@@ -160,7 +164,7 @@ def test_channel_est_coeff_results_basic_analysis_decodes_via_common_service(tmp
     )
 
     results_response = service.results(
-        ChannelEstCoeffServiceGroupResultsRequest.model_validate(
+        PreEqualizationServiceGroupResultsRequest.model_validate(
             {
                 "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
                 "analysis": {"type": "basic"},
@@ -175,13 +179,14 @@ def test_channel_est_coeff_results_basic_analysis_decodes_via_common_service(tmp
     assert len(results_response.results.serving_groups) == 1
     channel = results_response.results.serving_groups[0].channels[0]
     assert channel.service_group_id == ServiceGroupId(1)
-    assert channel.channel_id == 160
+    assert channel.channel_id == 57
     modem = channel.cable_modems[0]
     assert modem.system_description is not None
     assert modem.system_description["VENDOR"] == "LANCity"
-    assert modem.channel_est_coeff_data.file is not None
-    assert modem.channel_est_coeff_data.file.transaction_id == "1a2b3c4d5e6f7a8b9c0d1e2f"
-    assert modem.channel_est_coeff_data.pnm_file_type == "OFDM_CHANNEL_ESTIMATE_COEFFICIENT"
-    assert modem.channel_est_coeff_data.analysis is not None
-    assert modem.channel_est_coeff_data.analysis["channel_id"] == 160
-    assert modem.channel_est_coeff_data.analysis_error is None
+    assert modem.pre_equalization_data.file is not None
+    assert modem.pre_equalization_data.file.transaction_id == "1a2b3c4d5e6f7a8b9c0d1e2f"
+    assert modem.pre_equalization_data.pnm_file_type == "UPSTREAM_PRE_EQUALIZER_COEFFICIENTS"
+    assert modem.pre_equalization_data.analysis is not None
+    assert modem.pre_equalization_data.analysis["channel_id"] == 57
+    assert modem.pre_equalization_data.channel_estimate_magnitude_db == [-3.0, -2.5, -2.0]
+    assert modem.pre_equalization_data.analysis_error is None

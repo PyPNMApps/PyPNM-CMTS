@@ -39,11 +39,17 @@ It complements AGENTS.md and does not replace it.
 
 ## Commit Message Output Style
 
-- Always format requested commit messages as multi-line text.
-- First line is the summary/title.
-- Follow with detail lines prefixed by `- `.
-- Keep each detail on its own line.
-- Do not include double quotes, single quotes, or backticks in commit message output.
+- If request via chat request starts with commit-msg, then preface command ./tools/git/git-save.sh with commit-msg "<commit-msg>"
+- One line summary (max 50 characters)
+- One line Summary start: Feature: , Bugfix: , Docs: , Refactor: , Test:
+- Detailed description lines (max 72 characters per line); every line after the first must start with `-`
+- When the user asks for a commit message, provide plain text for direct paste into the terminal or UI text box.
+- Do not wrap commit message suggestions in quotes (`"`), backticks (`` ` ``), or code fences unless the user explicitly asks for that format.
+- Prefer detailed commit messages that describe the current change set clearly.
+- Do not default to a one-line commit message when the change set is broad; provide a title plus concise bullet points.
+- Avoid redundant wording and avoid repeating the exact prior commit message suggestion unless the diff is unchanged and the user explicitly asks to reuse it.
+- If the user asks for "in a text box", return plain text only (no markdown fence).
+- If the user asks for "in a markdown text box", return the commit message inside a fenced code block with `text`.
 
 Example:
 

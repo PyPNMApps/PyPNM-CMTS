@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from pydantic import ValidationError
 from pypnm.api.routes.common.classes.common_endpoint_classes.common.enum import (
     OutputType,
 )
@@ -128,14 +126,15 @@ def test_const_display_results_request_coerces_legacy_flat_shape() -> None:
     assert request.output.archive_includes is None
 
 
-def test_const_display_results_request_rejects_archive_includes_for_json_output() -> None:
-    with pytest.raises(ValidationError):
-        ConstDisplayServiceGroupResultsRequest.model_validate(
-            {
-                "operation": {"pnm_capture_operation_id": "6c83fb8c215081133c6bf041"},
-                "output": {"type": "json", "archive_includes": {"json": True}},
-            }
-        )
+def test_const_display_results_request_ignores_archive_includes_for_json_output() -> None:
+    request = ConstDisplayServiceGroupResultsRequest.model_validate(
+        {
+            "operation": {"pnm_capture_operation_id": "6c83fb8c215081133c6bf041"},
+            "output": {"type": "json", "archive_includes": {"json": True}},
+        }
+    )
+    assert request.output.type == OutputType.JSON
+    assert request.output.archive_includes is None
 
 
 def test_const_display_results_basic_analysis_decodes_via_common_service(tmp_path: Path) -> None:

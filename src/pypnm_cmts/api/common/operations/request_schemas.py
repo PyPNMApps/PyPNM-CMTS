@@ -53,8 +53,8 @@ class PnmResultsOutputRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_archive_includes(self) -> PnmResultsOutputRequest:
-        if self.type != OutputType.ARCHIVE and self.archive_includes is not None:
-            raise ValueError("output.archive_includes is only valid when output.type is archive")
+        if self.type != OutputType.ARCHIVE:
+            self.archive_includes = None
         return self
 
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.pnm.sg.us.ofdma.pre_equalization.schemas import (
     PreEqualizationServiceGroupCancelResponse,
     PreEqualizationServiceGroupOperationRequest,
+    PreEqualizationServiceGroupResultsRequest,
     PreEqualizationServiceGroupResultsResponse,
     PreEqualizationServiceGroupStartCaptureRequest,
     PreEqualizationServiceGroupStartCaptureResponse,
@@ -81,7 +82,7 @@ class PreEqualizationRouter:
             responses={**JSON_ONLY_FAST_API_RESPONSE},
         )
         def results(
-            payload: PreEqualizationServiceGroupOperationRequest,
+            payload: PreEqualizationServiceGroupResultsRequest,
         ) -> PreEqualizationServiceGroupResultsResponse:
             """
             **Serving Group PreEqualization Results**
