@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from numbers import Real
 
 from pypnm.api.routes.common.classes.common_endpoint_classes.common.enum import (
     AnalysisType,
@@ -676,13 +677,18 @@ class PreEqualizationServiceGroupOperationService(PnmServiceGroupOperationServic
         if not PreEqualizationServiceGroupOperationService._analysis_requested(request):
             return (None, None, None, None)
         if modem_status != PnmCaptureStatus.SUCCESS or not transaction_ids:
-            return (None, None, None, None)
+            return (PreEqualizationServiceGroupOperationService._build_empty_pre_equalization_analysis_payload(), None, None, None)
         for transaction_id in transaction_ids:
             decoded = decoded_by_txn.get(transaction_id)
             if decoded is None:
                 continue
-            return (decoded.analysis, decoded.pnm_file_type, decoded.error, transaction_id)
-        return (None, None, None, None)
+            normalized_analysis = PreEqualizationServiceGroupOperationService._normalize_pre_equalization_analysis_payload(
+                decoded.analysis
+            )
+            if normalized_analysis is None:
+                normalized_analysis = PreEqualizationServiceGroupOperationService._build_empty_pre_equalization_analysis_payload()
+            return (normalized_analysis, decoded.pnm_file_type, decoded.error, transaction_id)
+        return (PreEqualizationServiceGroupOperationService._build_empty_pre_equalization_analysis_payload(), None, None, None)
 
     @staticmethod
     def _build_modem_file_link(
@@ -747,14 +753,50 @@ class PreEqualizationServiceGroupOperationService(PnmServiceGroupOperationServic
         if not isinstance(analysis_payload, dict):
             return None
         value = analysis_payload.get("channel_estimate_magnitude_db")
-        if not isinstance(value, list):
+        if value is None:
+            carrier_values = analysis_payload.get("carrier_values")
+            if isinstance(carrier_values, dict):
+                value = carrier_values.get("channel_estimate_magnitude_db")
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
             return None
         results: list[float] = []
         for item in value:
-            if not isinstance(item, (int, float)):
+            if not isinstance(item, Real):
                 return None
             results.append(float(item))
         return results
+
+    @staticmethod
+    def _normalize_pre_equalization_analysis_payload(
+        analysis_payload: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        if not isinstance(analysis_payload, dict):
+            return None
+        normalized = dict(analysis_payload)
+        magnitude_db = PreEqualizationServiceGroupOperationService._resolve_channel_estimate_magnitude_db(analysis_payload)
+        if magnitude_db is None:
+            return normalized
+
+        # Backward-compatibility: keep top-level field for existing CMTS consumers.
+        normalized["channel_estimate_magnitude_db"] = magnitude_db
+
+        # PyPNM canonical shape: analysis.carrier_values.channel_estimate_magnitude_db
+        carrier_values = normalized.get("carrier_values")
+        if not isinstance(carrier_values, dict):
+            carrier_values = {}
+        carrier_values = dict(carrier_values)
+        carrier_values["channel_estimate_magnitude_db"] = magnitude_db
+        normalized["carrier_values"] = carrier_values
+        return normalized
+
+    @staticmethod
+    def _build_empty_pre_equalization_analysis_payload() -> dict[str, object]:
+        return {
+            "channel_estimate_magnitude_db": None,
+            "carrier_values": {
+                "channel_estimate_magnitude_db": None,
+            },
+        }
 
     @staticmethod
     def _build_serving_groups_from_channels(

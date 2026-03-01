@@ -87,6 +87,61 @@ class _FakeResultsAnalysisService(PnmStoredCaptureAnalysisService):
         }
 
 
+class _FakeResultsAnalysisServiceNestedCarrierValues(PnmStoredCaptureAnalysisService):
+    def analyze_transactions_basic(
+        self,
+        transaction_ids: list[TransactionId],
+    ) -> dict[TransactionId, PnmStoredCaptureAnalysisResultModel]:
+        return {
+            TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"): PnmStoredCaptureAnalysisResultModel(
+                transaction_id=TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"),
+                pnm_file_type="UPSTREAM_PRE_EQUALIZER_COEFFICIENTS",
+                system_description={"VENDOR": "LANCity", "MODEL": "LCPET-3"},
+                analysis={
+                    "channel_id": 57,
+                    "carrier_values": {
+                        "channel_estimate_magnitude_db": [-3.0, -2.5, -2.0],
+                    },
+                },
+            )
+        }
+
+
+class _FakeResultsAnalysisServiceNestedCarrierValuesTuple(PnmStoredCaptureAnalysisService):
+    def analyze_transactions_basic(
+        self,
+        transaction_ids: list[TransactionId],
+    ) -> dict[TransactionId, PnmStoredCaptureAnalysisResultModel]:
+        return {
+            TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"): PnmStoredCaptureAnalysisResultModel(
+                transaction_id=TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"),
+                pnm_file_type="UPSTREAM_PRE_EQUALIZER_COEFFICIENTS",
+                system_description={"VENDOR": "LANCity", "MODEL": "LCPET-3"},
+                analysis={
+                    "channel_id": 57,
+                    "carrier_values": {
+                        "channel_estimate_magnitude_db": (-3.0, -2.5, -2.0),
+                    },
+                },
+            )
+        }
+
+
+class _FakeResultsAnalysisServiceErrorNoAnalysis(PnmStoredCaptureAnalysisService):
+    def analyze_transactions_basic(
+        self,
+        transaction_ids: list[TransactionId],
+    ) -> dict[TransactionId, PnmStoredCaptureAnalysisResultModel]:
+        return {
+            TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"): PnmStoredCaptureAnalysisResultModel(
+                transaction_id=TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f"),
+                pnm_file_type=None,
+                analysis=None,
+                error="analysis unavailable for transaction 1a2b3c4d5e6f7a8b9c0d1e2f: 404: Transaction ID not found.",
+            )
+        }
+
+
 def test_pre_equalization_results_empty(tmp_path: Path) -> None:
     service = _build_service(tmp_path)
     start_response = service.start_capture(_build_request())
@@ -188,5 +243,169 @@ def test_pre_equalization_results_basic_analysis_decodes_via_common_service(tmp_
     assert modem.pre_equalization_data.pnm_file_type == "UPSTREAM_PRE_EQUALIZER_COEFFICIENTS"
     assert modem.pre_equalization_data.analysis is not None
     assert modem.pre_equalization_data.analysis["channel_id"] == 57
+    assert isinstance(modem.pre_equalization_data.analysis["carrier_values"], dict)
+    assert modem.pre_equalization_data.analysis["carrier_values"]["channel_estimate_magnitude_db"] == [-3.0, -2.5, -2.0]
     assert modem.pre_equalization_data.channel_estimate_magnitude_db == [-3.0, -2.5, -2.0]
     assert modem.pre_equalization_data.analysis_error is None
+
+
+def test_pre_equalization_results_promotes_nested_channel_estimate_magnitude_db(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, results_analysis_service=_FakeResultsAnalysisServiceNestedCarrierValues())
+    start_response = service.start_capture(_build_request())
+
+    service._store.append_result_record(
+        PerModemLinkageRecordModel(
+            pnm_capture_operation_id=start_response.operation.operation_id,
+            sg_id=ServiceGroupId(1),
+            mac_address=MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            stage=OperationStage.CAPTURE,
+            status_code=ServiceStatusCode.SUCCESS,
+            channel_id=None,
+            transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+            filenames=[FileNameStr("capture.bin")],
+            started_epoch=1,
+            finished_epoch=2,
+            message="",
+        )
+    )
+
+    results_response = service.results(
+        PreEqualizationServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
+                "analysis": {"type": "basic"},
+                "output": {"type": "json"},
+            }
+        )
+    )
+
+    assert results_response.results is not None
+    modem = results_response.results.serving_groups[0].channels[0].cable_modems[0]
+    assert modem.pre_equalization_data.channel_estimate_magnitude_db == [-3.0, -2.5, -2.0]
+    assert modem.pre_equalization_data.analysis is not None
+    assert modem.pre_equalization_data.analysis["channel_estimate_magnitude_db"] == [-3.0, -2.5, -2.0]
+    assert isinstance(modem.pre_equalization_data.analysis["carrier_values"], dict)
+    assert modem.pre_equalization_data.analysis["carrier_values"]["channel_estimate_magnitude_db"] == [-3.0, -2.5, -2.0]
+
+
+def test_pre_equalization_results_accepts_nested_channel_estimate_sequence(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, results_analysis_service=_FakeResultsAnalysisServiceNestedCarrierValuesTuple())
+    start_response = service.start_capture(_build_request())
+
+    service._store.append_result_record(
+        PerModemLinkageRecordModel(
+            pnm_capture_operation_id=start_response.operation.operation_id,
+            sg_id=ServiceGroupId(1),
+            mac_address=MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            stage=OperationStage.CAPTURE,
+            status_code=ServiceStatusCode.SUCCESS,
+            channel_id=None,
+            transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+            filenames=[FileNameStr("capture.bin")],
+            started_epoch=1,
+            finished_epoch=2,
+            message="",
+        )
+    )
+
+    results_response = service.results(
+        PreEqualizationServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
+                "analysis": {"type": "basic"},
+                "output": {"type": "json"},
+            }
+        )
+    )
+
+    assert results_response.results is not None
+    modem = results_response.results.serving_groups[0].channels[0].cable_modems[0]
+    assert modem.pre_equalization_data.channel_estimate_magnitude_db == [-3.0, -2.5, -2.0]
+    assert modem.pre_equalization_data.analysis is not None
+    assert modem.pre_equalization_data.analysis["channel_estimate_magnitude_db"] == [-3.0, -2.5, -2.0]
+    assert isinstance(modem.pre_equalization_data.analysis["carrier_values"], dict)
+    assert modem.pre_equalization_data.analysis["carrier_values"]["channel_estimate_magnitude_db"] == [-3.0, -2.5, -2.0]
+
+
+def test_pre_equalization_results_sets_analysis_placeholder_when_decode_unavailable(tmp_path: Path) -> None:
+    service = _build_service(tmp_path, results_analysis_service=_FakeResultsAnalysisServiceErrorNoAnalysis())
+    start_response = service.start_capture(_build_request())
+
+    service._store.append_result_record(
+        PerModemLinkageRecordModel(
+            pnm_capture_operation_id=start_response.operation.operation_id,
+            sg_id=ServiceGroupId(1),
+            mac_address=MacAddressStr("aa:bb:cc:dd:ee:ff"),
+            ip_address=InetAddressStr("192.168.0.100"),
+            stage=OperationStage.CAPTURE,
+            status_code=ServiceStatusCode.SUCCESS,
+            channel_id=None,
+            transaction_ids=[TransactionId("1a2b3c4d5e6f7a8b9c0d1e2f")],
+            filenames=[FileNameStr("capture.bin")],
+            started_epoch=1,
+            finished_epoch=2,
+            message="",
+        )
+    )
+
+    results_response = service.results(
+        PreEqualizationServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
+                "analysis": {"type": "basic"},
+                "output": {"type": "json"},
+            }
+        )
+    )
+
+    assert results_response.results is not None
+    modem = results_response.results.serving_groups[0].channels[0].cable_modems[0]
+    assert modem.pre_equalization_data.channel_estimate_magnitude_db is None
+    assert modem.pre_equalization_data.analysis is not None
+    assert modem.pre_equalization_data.analysis["channel_estimate_magnitude_db"] is None
+    assert isinstance(modem.pre_equalization_data.analysis["carrier_values"], dict)
+    assert modem.pre_equalization_data.analysis["carrier_values"]["channel_estimate_magnitude_db"] is None
+    assert modem.pre_equalization_data.analysis_error is not None
+
+
+def test_pre_equalization_results_sets_analysis_placeholder_for_failed_modem(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    start_response = service.start_capture(_build_request())
+
+    service._store.append_result_record(
+        PerModemLinkageRecordModel(
+            pnm_capture_operation_id=start_response.operation.operation_id,
+            sg_id=ServiceGroupId(1),
+            mac_address=MacAddressStr("aa:bb:cc:dd:ee:00"),
+            ip_address=InetAddressStr("192.168.0.200"),
+            stage=OperationStage.CAPTURE,
+            status_code=ServiceStatusCode.FAILURE,
+            channel_id=None,
+            transaction_ids=[],
+            filenames=[],
+            started_epoch=1,
+            finished_epoch=2,
+            message="capture failed",
+        )
+    )
+
+    results_response = service.results(
+        PreEqualizationServiceGroupResultsRequest.model_validate(
+            {
+                "operation": {"pnm_capture_operation_id": str(start_response.operation.operation_id)},
+                "analysis": {"type": "basic"},
+                "output": {"type": "json"},
+            }
+        )
+    )
+
+    assert results_response.results is not None
+    modem = results_response.results.serving_groups[0].channels[0].cable_modems[0]
+    assert modem.status.value == "failed"
+    assert modem.pre_equalization_data.channel_estimate_magnitude_db is None
+    assert modem.pre_equalization_data.analysis is not None
+    assert modem.pre_equalization_data.analysis["channel_estimate_magnitude_db"] is None
+    assert isinstance(modem.pre_equalization_data.analysis["carrier_values"], dict)
+    assert modem.pre_equalization_data.analysis["carrier_values"]["channel_estimate_magnitude_db"] is None
