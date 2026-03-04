@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pypnm_cmts.api.routes.serving_group.cm.operations.schemas import (
     ServingGroupDocsDevResetNowRequest,
     ServingGroupDocsDevResetNowResponse,
+    ServingGroupGetSysDescrRequest,
     ServingGroupGetSysDescrResponse,
 )
 from pypnm_cmts.api.routes.serving_group.cm.operations.service import (
@@ -43,7 +44,7 @@ class ServingGroupCableModemOperationsRouter:
             responses=JSON_ONLY_FAST_API_RESPONSE,
         )
         def get_sys_descr(
-            request: ServingGroupDocsDevResetNowRequest,
+            request: ServingGroupGetSysDescrRequest,
         ) -> ServingGroupGetSysDescrResponse:
             """
             **Serving Group Cable Modem sysDescr**

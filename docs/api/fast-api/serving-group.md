@@ -280,7 +280,7 @@ Response:
   "missing_mac_addresses": [],
   "groups": [
     {
-      "sg_id": 3147266,
+      "service_group_id": 3147266,
       "status": 0,
       "message": "",
       "modem_count": 1,
@@ -315,13 +315,33 @@ Request body:
       "id": []
     },
     "cable_modem": {
-      "mac_address": [],
-      "snmp": {
-        "snmpV2C": {
-          "community": "private"
-        }
-      }
+      "mac_address": []
     }
+  },
+  "poll": {
+    "source": "cache",
+    "wait_for_cache": false,
+    "timeout_seconds": 8
+  }
+}
+```
+
+Heavy-refresh request example:
+
+```json
+{
+  "cmts": {
+    "serving_group": {
+      "id": [3147266]
+    },
+    "cable_modem": {
+      "mac_address": []
+    }
+  },
+  "poll": {
+    "source": "heavy",
+    "wait_for_cache": true,
+    "timeout_seconds": 8
   }
 }
 ```
@@ -329,9 +349,12 @@ Request body:
 Semantics:
 - `cmts.serving_group.id: []` means all discovered service groups.
 - `cmts.cable_modem.mac_address: []` means all cable modems in resolved service groups.
-- `cmts.cable_modem.snmp.snmpV2C.community` is optional.
-- Community selection uses a single value only, in this order: request `snmpV2C.community`, then CMTS adapter read community, then system read community.
-- No SNMP community fallback attempts are performed once a community is selected.
+- `poll.source` supports `cache` and `heavy`.
+- `poll.source=cache` uses current SGW cache scope (no on-demand refresh request).
+- `poll.source=heavy` requests SGW heavy refresh for resolved SG ids before scope resolution.
+- `poll.wait_for_cache` only applies when `poll.source=heavy`; when true, the endpoint waits for cache snapshot advance (bounded by `poll.timeout_seconds`) before resolving scope.
+- Response includes `poll.type` to carry the effective request poll source (`cache` or `heavy`).
+- Community is not request-configurable on this endpoint; it is resolved from `SystemConfigSettings.snmp_read_community`, then CMTS SNMPv2c read community.
 
 Execution model:
 
@@ -394,11 +417,9 @@ Response:
   "status": 0,
   "message": "",
   "timestamp": "2026-02-15T01:15:42+00:00",
-  "requested_sg_ids": [],
-  "requested_mac_addresses": [],
-  "resolved_sg_ids": [3147266, 3213825],
-  "missing_sg_ids": [],
-  "missing_mac_addresses": [],
+  "poll": {
+    "type": "cache"
+  },
   "groups": [
     {
       "sg_id": 3147266,
