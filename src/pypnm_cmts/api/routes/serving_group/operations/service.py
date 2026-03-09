@@ -16,6 +16,8 @@ from pypnm.lib.utils import Generate, TimeUnit
 
 from pypnm_cmts.api.common.cmts_reg_status import CmtsCmRegStateModel
 from pypnm_cmts.api.routes.serving_group.operations.schemas import (
+    DEFAULT_PAGE_NUMBER,
+    DEFAULT_PAGE_SIZE,
     GetServingGroupCableModemsRequest,
     GetServingGroupCableModemsResponse,
     GetServingGroupIdsResponse,
@@ -182,8 +184,8 @@ class ServingGroupCacheService:
                 sg_id=sg_id,
                 store=store,
                 now_epoch=now_epoch,
-                page=request.page,
-                page_size=request.page_size,
+                page=DEFAULT_PAGE_NUMBER,
+                page_size=DEFAULT_PAGE_SIZE,
             )
             groups.append(group)
         return GetServingGroupCableModemsResponse(
@@ -252,8 +254,8 @@ class ServingGroupCacheService:
                 sg_id=sg_id,
                 store=store,
                 now_epoch=now_epoch,
-                page=request.page,
-                page_size=request.page_size,
+                page=DEFAULT_PAGE_NUMBER,
+                page_size=DEFAULT_PAGE_SIZE,
             )
             groups.append(group)
         return GetServingGroupTopologyResponse(

@@ -30,11 +30,6 @@ SOCKET_TIMEOUT_SECONDS = 1.0
 FALLBACK_PORTS = (22, 80)
 DEFAULT_MAX_WAIT_SECONDS = 10.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
-CABLE_MODEM_PAGE = 1
-CABLE_MODEM_PAGE_SIZE = 50
-REFRESH_WAIT_SECONDS = 5.0
-
-
 def _get_live_hostname() -> str:
     return os.environ.get(ENV_CMTS_HOSTNAME, "").strip()
 
@@ -102,7 +97,7 @@ def _system_request_body(hostname: str, community: str) -> dict[str, object]:
 
 
 def _fetch_ids(client: TestClient) -> dict[str, object]:
-    response = client.post("/cmts/servingGroup/get/ids", json={})
+    response = client.post("/cmts/servingGroup/operations/get/ids", json={})
     assert response.status_code == 200
     return response.json()
 
@@ -188,11 +183,9 @@ def test_live_serving_group_topology(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
         sg_id = discovered[0]
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={
                 "cmts": {"serving_group": {"id": [sg_id]}},
-                "page": 1,
-                "page_size": 100,
             },
         )
         assert response.status_code == 200
@@ -213,11 +206,9 @@ def test_live_serving_group_topology_heavy_refresh(monkeypatch: pytest.MonkeyPat
             pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
         sg_id = discovered[0]
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={
                 "cmts": {"serving_group": {"id": [sg_id]}},
-                "page": 1,
-                "page_size": 100,
             },
         )
         assert response.status_code == 200
@@ -239,11 +230,9 @@ def test_live_serving_group_cable_modems(monkeypatch: pytest.MonkeyPatch) -> Non
             pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
         sg_id = discovered[0]
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
+            "/cmts/servingGroup/operations/get/cableModems",
             json={
                 "cmts": {"serving_group": {"id": [sg_id]}},
-                "page": CABLE_MODEM_PAGE,
-                "page_size": CABLE_MODEM_PAGE_SIZE,
             },
         )
         assert response.status_code == 200
@@ -271,11 +260,9 @@ def test_live_serving_group_cable_modems_heavy_refresh(monkeypatch: pytest.Monke
             pytest.skip("no SG IDs discovered yet; SGW may still be initializing")
         sg_id = discovered[0]
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
+            "/cmts/servingGroup/operations/get/cableModems",
             json={
                 "cmts": {"serving_group": {"id": [sg_id]}},
-                "page": CABLE_MODEM_PAGE,
-                "page_size": CABLE_MODEM_PAGE_SIZE,
             },
         )
         assert response.status_code == 200

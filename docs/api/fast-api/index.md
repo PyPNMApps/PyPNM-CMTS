@@ -78,10 +78,10 @@ may request a refresh, but they do not execute SNMP in the request thread.
 ## Current Endpoints
 
 - `GET /cmts/system/sysDescr` - CMTS sysDescr lookup.
-- `GET /cmts/servingGroup/get/ids` - SG cache summary and discovered IDs.
-- `GET /cmts/servingGroup/status` - SGW startup status and cache readiness.
-- `POST /cmts/servingGroup/get/cableModems` - SG cache modem membership (paginated).
-- `POST /cmts/servingGroup/get/topology` - SG cache topology summary.
+- `GET /cmts/servingGroup/operations/get/ids` - SG cache summary and discovered IDs.
+- `GET /cmts/servingGroup/operations/get/status` - SGW startup status and cache readiness.
+- `POST /cmts/servingGroup/operations/get/cableModems` - SG cache modem membership (paginated).
+- `POST /cmts/servingGroup/operations/get/topology` - SG cache topology summary.
 - `POST /cmts/servingGroup/cableModem/operations/docsDevResetNow` - Issue docsDevResetNow for scoped cable modems.
 - `POST /cmts/servingGroup/cableModem/operations/getSysDescr` - Collect per-SG cable modem sysDescr payloads.
 - `POST /cmts/pnm/sg/ds/ofdm/rxmer/startCapture` - Start serving group RxMER operation.

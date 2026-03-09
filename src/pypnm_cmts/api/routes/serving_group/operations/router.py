@@ -41,7 +41,7 @@ class ServingGroupRouter:
 
     def _register_routes(self) -> None:
         @self.router.get(
-            "/get/ids",
+            "/operations/get/ids",
             response_model=GetServingGroupIdsResponse,
             summary="Retrieve discovered serving group ids",
             description="Returns discovered serving group ids and cache summaries.",
@@ -56,7 +56,7 @@ class ServingGroupRouter:
             return self._service.get_ids()
 
         @self.router.get(
-            "/status",
+            "/operations/get/status",
             response_model=ServingGroupStatusResponse,
             summary="Serving group worker status",
             description="Returns SGW startup status and cache readiness.",
@@ -71,7 +71,7 @@ class ServingGroupRouter:
             return self._service.get_status()
 
         @self.router.post(
-            "/get/cableModems",
+            "/operations/get/cableModems",
             response_model=GetServingGroupCableModemsResponse,
             summary="Retrieve cable modems for a serving group",
             description="Returns cached cable modem membership for a serving group.",
@@ -88,7 +88,7 @@ class ServingGroupRouter:
             return self._service.get_cable_modems(request)
 
         @self.router.post(
-            "/get/topology",
+            "/operations/get/topology",
             response_model=GetServingGroupTopologyResponse,
             summary="Retrieve serving group topology",
             description="Returns cached topology summary for a serving group.",

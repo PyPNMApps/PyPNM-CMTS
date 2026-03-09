@@ -117,8 +117,6 @@ class GetServingGroupCableModemsRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     cmts: ServingGroupOnlyEnvelopeModel = Field(default_factory=ServingGroupOnlyEnvelopeModel, description="Serving group request envelope.")
-    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
-    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
     refresh: ServingGroupCacheRefreshRequestModel = Field(default_factory=ServingGroupCacheRefreshRequestModel, description="Optional refresh controls.")
 
     @model_validator(mode="after")
@@ -176,8 +174,6 @@ class GetServingGroupTopologyRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     cmts: ServingGroupOnlyEnvelopeModel = Field(default_factory=ServingGroupOnlyEnvelopeModel, description="Serving group request envelope.")
-    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="Page number (1-based).")
-    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page.")
 
     @model_validator(mode="after")
     def _validate_sg_id(self) -> GetServingGroupTopologyRequest:

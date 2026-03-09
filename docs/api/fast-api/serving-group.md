@@ -17,7 +17,7 @@ Unless otherwise noted, examples use:
 - MAC address: `aa:bb:cc:dd:ee:ff`
 - IPv4 address: `192.168.0.100`
 
-## GET /cmts/servingGroup/status
+## GET /cmts/servingGroup/operations/get/status
 
 Return SGW Startup And Cache Readiness Status. This endpoint reports the discovered SG count, cache readiness, missing cache entries, and whether the background refresh loop is running.
 
@@ -43,7 +43,7 @@ Response:
 }
 ```
 
-## GET /cmts/servingGroup/get/ids
+## GET /cmts/servingGroup/operations/get/ids
 
 Return Discovered Service Group Identifiers And Per-SG Cache Summaries. This endpoint returns HTTP 200 with `status` set to success even when `sgw_ready` is false; in that case, `message` is non-empty and summaries for missing snapshots report `refresh_state=ERROR` with a bounded `last_error`.
 Uses runtime CMTS adapter settings (hostname/community/port) from system.json/env/CLI; request body is not required.
@@ -52,7 +52,7 @@ Startup discovery mode controls whether SG IDs are enumerated via SNMP (default)
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/cmts/servingGroup/get/ids
+curl -s http://127.0.0.1:8000/cmts/servingGroup/operations/get/ids
 ```
 
 Response:
@@ -80,7 +80,7 @@ Response:
 }
 ```
 
-## POST /cmts/servingGroup/get/cableModems
+## POST /cmts/servingGroup/operations/get/cableModems
 
 Return Cached Cable Modem Membership Grouped By Service Group. The request uses `cmts.serving_group.id` and is cache-first.
 When a snapshot is missing for a discovered SG, the group returns empty items and `metadata.refresh_state` is `ERROR` with a bounded `last_error`.
@@ -99,8 +99,6 @@ Request body:
       "id": []
     }
   },
-  "page": 1,
-  "page_size": 100,
   "refresh": {
     "mode": "none",
     "wait_for_cache": false,
@@ -190,9 +188,7 @@ Example: single SG id
     "serving_group": {
       "id": [3147266]
     }
-  },
-  "page": 1,
-  "page_size": 100
+  }
 }
 ```
 
@@ -204,13 +200,11 @@ Example: multiple SG ids
     "serving_group": {
       "id": [3147266, 3213825]
     }
-  },
-  "page": 1,
-  "page_size": 100
+  }
 }
 ```
 
-## POST /cmts/servingGroup/get/topology
+## POST /cmts/servingGroup/operations/get/topology
 
 Return RF topology and cable-modem membership for one service group or all discovered service groups.
 Endpoint Constraints: empty list means all service groups; a single id returns one group; multiple ids are rejected.
@@ -224,9 +218,7 @@ Request body:
     "serving_group": {
       "id": []
     }
-  },
-  "page": 1,
-  "page_size": 100
+  }
 }
 ```
 
@@ -463,9 +455,7 @@ Single service group request:
     "serving_group": {
       "id": [3147266]
     }
-  },
-  "page": 1,
-  "page_size": 100
+  }
 }
 ```
 

@@ -101,7 +101,7 @@ def test_serving_group_ids_returns_cache_summary(monkeypatch: pytest.MonkeyPatch
     _configure_runtime_state(store, DISCOVERED_SG_IDS)
 
     with TestClient(app) as client:
-        response = client.get("/cmts/servingGroup/get/ids")
+        response = client.get("/cmts/servingGroup/operations/get/ids")
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
@@ -121,7 +121,7 @@ def test_serving_group_status_reports_cache_readiness(monkeypatch: pytest.Monkey
     _configure_runtime_state(store, DISCOVERED_SG_IDS)
 
     with TestClient(app) as client:
-        response = client.get("/cmts/servingGroup/status")
+        response = client.get("/cmts/servingGroup/operations/get/status")
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
@@ -139,7 +139,7 @@ def test_serving_group_ids_not_ready_returns_success(monkeypatch: pytest.MonkeyP
     _configure_runtime_state(store, DISCOVERED_SG_IDS)
 
     with TestClient(app) as client:
-        response = client.get("/cmts/servingGroup/get/ids")
+        response = client.get("/cmts/servingGroup/operations/get/ids")
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
@@ -160,7 +160,7 @@ def test_serving_group_ids_missing_store_returns_error_metadata(monkeypatch: pyt
     monkeypatch.setattr("pypnm_cmts.api.routes.serving_group.operations.service.get_sgw_store", lambda: None)
 
     with TestClient(app) as client:
-        response = client.get("/cmts/servingGroup/get/ids")
+        response = client.get("/cmts/servingGroup/operations/get/ids")
         assert response.status_code == 200
         payload = response.json()
         summaries = payload["summaries"]
@@ -183,7 +183,7 @@ def test_serving_group_cable_modems_defaults_to_all_sgs(monkeypatch: pytest.Monk
     _configure_runtime_state(store, DISCOVERED_SG_IDS)
 
     with TestClient(app) as client:
-        response = client.post("/cmts/servingGroup/get/cableModems", json={"cmts": {}})
+        response = client.post("/cmts/servingGroup/operations/get/cableModems", json={"cmts": {}})
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
@@ -228,13 +228,11 @@ def test_serving_group_cable_modems_filters_by_sg(monkeypatch: pytest.MonkeyPatc
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
+            "/cmts/servingGroup/operations/get/cableModems",
             json={
                 "cmts": {
                     "serving_group": {"id": [int(SG_ID_ONE)]},
-                },
-                "page": 1,
-                "page_size": 10,
+                }
             },
         )
         assert response.status_code == 200
@@ -250,14 +248,11 @@ def test_serving_group_cable_modems_filters_by_sg(monkeypatch: pytest.MonkeyPatc
         assert items[0]["registration_status"]["text"] == "dhcpv4Complete"
 
 
-def test_serving_group_cable_modems_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serving_group_cable_modems_uses_default_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     _disable_startup(monkeypatch)
     store = SgwCacheStore()
     sg_id = SG_ID_ONE
-    page_one = 1
-    page_two = 2
-    page_size = 2
     total_count = 3
     modems = [
         SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
@@ -269,34 +264,21 @@ def test_serving_group_cable_modems_pagination(monkeypatch: pytest.MonkeyPatch) 
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
+            "/cmts/servingGroup/operations/get/cableModems",
             json={
                 "cmts": {"serving_group": {"id": [int(sg_id)]}},
-                "page": page_one,
-                "page_size": page_size,
             },
         )
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
         group = payload["groups"][0]
         assert group["total_items"] == total_count
-        assert group["total_pages"] == 2
+        assert group["page"] == 1
+        assert group["page_size"] == 100
+        assert group["total_pages"] == 1
         assert [item["mac_address"] for item in group["items"]] == [
             "aa:bb:cc:dd:ee:01",
             "aa:bb:cc:dd:ee:02",
-        ]
-
-        response = client.post(
-            "/cmts/servingGroup/get/cableModems",
-            json={
-                "cmts": {"serving_group": {"id": [int(sg_id)]}},
-                "page": page_two,
-                "page_size": page_size,
-            },
-        )
-        payload = response.json()
-        group = payload["groups"][0]
-        assert [item["mac_address"] for item in group["items"]] == [
             "aa:bb:cc:dd:ee:03",
         ]
         assert group["metadata"]["snapshot_time_epoch"] == SNAPSHOT_TIME_EPOCH
@@ -308,8 +290,8 @@ def test_serving_group_cable_modems_missing_store_returns_error(monkeypatch: pyt
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
-            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}}, "page": 1, "page_size": 1},
+            "/cmts/servingGroup/operations/get/cableModems",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}}},
         )
         assert response.status_code == 200
         payload = response.json()
@@ -336,7 +318,7 @@ def test_serving_group_cable_modems_refresh_heavy_wait(monkeypatch: pytest.Monke
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
+            "/cmts/servingGroup/operations/get/cableModems",
             json={
                 "cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}},
                 "refresh": {
@@ -431,7 +413,7 @@ def test_serving_group_topology_all_sgs_returns_groups(monkeypatch: pytest.Monke
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={"cmts": {"serving_group": {"id": []}}},
         )
         payload = response.json()
@@ -483,7 +465,7 @@ def test_serving_group_topology_single_sg_returns_group(monkeypatch: pytest.Monk
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={"cmts": {"serving_group": {"id": [int(sg_id)]}}},
         )
         payload = response.json()
@@ -507,8 +489,8 @@ def test_serving_group_cable_modems_missing_sg_ids(monkeypatch: pytest.MonkeyPat
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
-            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE), 999]}}, "page": 1, "page_size": 10},
+            "/cmts/servingGroup/operations/get/cableModems",
+            json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE), 999]}}},
         )
         assert response.status_code == 200
         payload = response.json()
@@ -531,7 +513,7 @@ def test_serving_group_topology_rejects_multiple_sg_ids(monkeypatch: pytest.Monk
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={"cmts": {"serving_group": {"id": [int(SG_ID_ONE), int(SG_ID_TWO)]}}},
         )
         assert response.status_code == 422
@@ -543,13 +525,13 @@ def test_serving_group_topology_rejects_zero_sg_id(monkeypatch: pytest.MonkeyPat
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={"cmts": {"serving_group": {"id": [0]}}},
         )
         assert response.status_code == 422
 
 
-def test_serving_group_topology_paginates_modems(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serving_group_topology_uses_default_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     _disable_startup(monkeypatch)
     store = SgwCacheStore()
@@ -564,18 +546,17 @@ def test_serving_group_topology_paginates_modems(monkeypatch: pytest.MonkeyPatch
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/topology",
+            "/cmts/servingGroup/operations/get/topology",
             json={
                 "cmts": {"serving_group": {"id": [int(SG_ID_ONE)]}},
-                "page": 2,
-                "page_size": 1,
             },
         )
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
-        assert payload["groups"][0]["total_pages"] == 2
-        assert payload["groups"][0]["page"] == 2
-        assert len(payload["groups"][0]["modems"]) == 1
+        assert payload["groups"][0]["page"] == 1
+        assert payload["groups"][0]["page_size"] == 100
+        assert payload["groups"][0]["total_pages"] == 1
+        assert len(payload["groups"][0]["modems"]) == 2
 
 
 def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -594,8 +575,8 @@ def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: pytes
 
     with TestClient(app) as client:
         response = client.post(
-            "/cmts/servingGroup/get/cableModems",
-            json={"cmts": {"serving_group": {"id": [int(sg_id)]}}, "page": 1, "page_size": 1},
+            "/cmts/servingGroup/operations/get/cableModems",
+            json={"cmts": {"serving_group": {"id": [int(sg_id)]}}},
         )
         assert response.status_code == 200
         payload = response.json()

@@ -216,9 +216,9 @@ Done Criteria:
 
 #### Phase 7.5 Endpoint Implementation (Cache-First)
 
-- [ ] POST /cmts/servingGroup/get/ids
-- [ ] POST /cmts/servingGroup/get/cableModems (sg_id required, paginated)
-- [ ] POST /cmts/servingGroup/get/topology (sg_id required)
+- [ ] POST /cmts/servingGroup/operations/get/ids
+- [ ] POST /cmts/servingGroup/operations/get/cableModems (sg_id required, paginated)
+- [ ] POST /cmts/servingGroup/operations/get/topology (sg_id required)
 - [ ] Optional: POST /cmts/get/cableModems (CMTS-wide, always paginated, aggregates caches only)
 - [ ] Contract tests validate response shape, cache metadata presence, and pagination determinism
 
