@@ -33,6 +33,7 @@ from pypnm_cmts.api.routes.serving_group.operations.schemas import (
     ServingGroupTopologyChannelsModel,
     ServingGroupTopologyDownstreamChannelsModel,
     ServingGroupTopologyGroupModel,
+    ServingGroupTopologyModemEntryModel,
     ServingGroupTopologyUpstreamChannelsModel,
 )
 from pypnm_cmts.docsis.data_type.cmts_cm_reg_state import decode_cmts_cm_reg_state
@@ -254,8 +255,6 @@ class ServingGroupCacheService:
                 sg_id=sg_id,
                 store=store,
                 now_epoch=now_epoch,
-                page=DEFAULT_PAGE_NUMBER,
-                page_size=DEFAULT_PAGE_SIZE,
             )
             groups.append(group)
         return GetServingGroupTopologyResponse(
@@ -372,27 +371,32 @@ class ServingGroupCacheService:
         sg_id: ServiceGroupId,
         store: SgwCacheStore,
         now_epoch: float,
-        page: int,
-        page_size: int,
     ) -> ServingGroupTopologyGroupModel:
         entry = store.get_entry(sg_id)
         if entry is None:
             metadata = self._build_error_metadata(self.SNAPSHOT_MISSING_TEMPLATE.format(sg_id=int(sg_id)))
             return ServingGroupTopologyGroupModel(
                 sg_id=sg_id,
-                page=page,
-                page_size=page_size,
-                total_items=0,
-                total_pages=0,
-                modems=[],
+                modem_count=0,
+                success_count=0,
+                failure_count=0,
+                modems={},
                 metadata=metadata,
             )
         metadata = self._resolve_metadata(sg_id, store, now_epoch)
         ordered = self._sort_modems(entry.snapshot.cable_modems)
-        total_items = len(ordered)
-        total_pages = self._total_pages(total_items, page_size)
-        paged = self._paginate_modems(ordered, page, page_size)
-        modems = [MacAddressStr(str(modem.mac)) for modem in paged]
+        modem_count = len(ordered)
+        success_count = 0
+        failure_count = 0
+        modems: dict[MacAddressStr, ServingGroupTopologyModemEntryModel] = {}
+        for modem in ordered:
+            modem_mac = MacAddressStr(str(modem.mac))
+            sysdescr = modem.sysdescr
+            if bool(sysdescr.is_empty):
+                failure_count += 1
+            else:
+                success_count += 1
+            modems[modem_mac] = ServingGroupTopologyModemEntryModel(sysdescr=sysdescr)
         ds_channels = self._resolve_rf_channels(
             entry.snapshot.ds_rf_channels,
             entry.snapshot.ds_channels.channel_ids,
@@ -430,10 +434,9 @@ class ServingGroupCacheService:
             ds_ch_set_id=entry.snapshot.ds_ch_set_id,
             us_ch_set_id=entry.snapshot.us_ch_set_id,
             channels=channels,
-            page=page,
-            page_size=page_size,
-            total_items=total_items,
-            total_pages=total_pages,
+            modem_count=modem_count,
+            success_count=success_count,
+            failure_count=failure_count,
             modems=modems,
             metadata=metadata,
         )

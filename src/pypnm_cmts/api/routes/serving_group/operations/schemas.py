@@ -196,7 +196,7 @@ class ServingGroupTopologyChannelSetCountModel(BaseModel):
 class ServingGroupTopologyChannelCountModel(BaseModel):
     """Cable modem count per channel."""
 
-    channel_id: int = Field(default=0, description="Channel identifier.")
+    channel_id: ChannelId = Field(default=ChannelId(0), description="Channel identifier.")
     modem_count: int = Field(default=0, description="Cable modem count for the channel.")
 
 
@@ -225,6 +225,15 @@ class ServingGroupTopologyChannelsModel(BaseModel):
     us: ServingGroupTopologyUpstreamChannelsModel = Field(default_factory=ServingGroupTopologyUpstreamChannelsModel, description="Upstream channel inventory.")
 
 
+class ServingGroupTopologyModemEntryModel(BaseModel):
+    """Per-modem topology payload sourced from SGW cache."""
+
+    sysdescr: SystemDescriptorModel = Field(
+        default_factory=SystemDescriptorModel,
+        description="Cable modem sysDescr model from SGW cache snapshot.",
+    )
+
+
 class ServingGroupTopologyGroupModel(BaseModel):
     """Topology payload for a single service group."""
 
@@ -232,11 +241,13 @@ class ServingGroupTopologyGroupModel(BaseModel):
     ds_ch_set_id: ChSetId = Field(default=DEFAULT_CHANNEL_SET_ID, description="Downstream channel set identifier.")
     us_ch_set_id: ChSetId = Field(default=DEFAULT_CHANNEL_SET_ID, description="Upstream channel set identifier.")
     channels: ServingGroupTopologyChannelsModel = Field(default_factory=ServingGroupTopologyChannelsModel, description="Directional channel inventory and counts.")
-    page: int = Field(default=DEFAULT_PAGE_NUMBER, description="Current page number.")
-    page_size: int = Field(default=DEFAULT_PAGE_SIZE, description="Requested page size.")
-    total_items: int = Field(default=0, description="Total number of modems for the service group.")
-    total_pages: int = Field(default=0, description="Total pages for the service group.")
-    modems: list[MacAddressStr] = Field(default_factory=list, description="Paged cable modem MAC addresses.")
+    modem_count: int = Field(default=0, ge=0, description="Resolved modem count in this serving group.")
+    success_count: int = Field(default=0, ge=0, description="Modems with non-empty cached sysDescr values.")
+    failure_count: int = Field(default=0, ge=0, description="Modems with empty cached sysDescr values.")
+    modems: dict[MacAddressStr, ServingGroupTopologyModemEntryModel] = Field(
+        default_factory=dict,
+        description="Per-modem cached sysDescr data keyed by cable modem MAC address.",
+    )
     metadata: SgwCacheMetadataModel = Field(default_factory=SgwCacheMetadataModel, description="Cache metadata for the snapshot.")
 
 
@@ -271,6 +282,7 @@ __all__ = [
     "ServingGroupTopologyChannelSetCountModel",
     "ServingGroupTopologyChannelsModel",
     "ServingGroupTopologyDownstreamChannelsModel",
+    "ServingGroupTopologyModemEntryModel",
     "ServingGroupTopologyGroupModel",
     "ServingGroupTopologyUpstreamChannelsModel",
 ]

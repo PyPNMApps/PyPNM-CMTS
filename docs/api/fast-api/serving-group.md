@@ -551,11 +551,31 @@ Response (grouped by service group). OFDMA entries omit center_frequency_hz and 
           ]
         }
       },
-      "page": 1,
-      "page_size": 100,
-      "total_items": 2,
-      "total_pages": 1,
-      "modems": ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:ff"],
+      "modem_count": 2,
+      "success_count": 1,
+      "failure_count": 1,
+      "modems": {
+        "aa:bb:cc:dd:ee:01": {
+          "sysdescr": {
+            "HW_REV": "1A",
+            "VENDOR": "Hitron Technologies",
+            "BOOTR": "Boot-1.0.0",
+            "SW_REV": "7.3.5.0",
+            "MODEL": "DOCSIS-3.1",
+            "is_empty": false
+          }
+        },
+        "aa:bb:cc:dd:ee:ff": {
+          "sysdescr": {
+            "HW_REV": "",
+            "VENDOR": "",
+            "BOOTR": "",
+            "SW_REV": "",
+            "MODEL": "",
+            "is_empty": true
+          }
+        }
+      },
       "metadata": {
         "snapshot_time_epoch": 1767416694.071116,
         "age_seconds": 0,

@@ -531,12 +531,15 @@ def test_serving_group_topology_rejects_zero_sg_id(monkeypatch: pytest.MonkeyPat
         assert response.status_code == 422
 
 
-def test_serving_group_topology_uses_default_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serving_group_topology_returns_cached_sysdescr_by_mac(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_sgw_runtime_state()
     _disable_startup(monkeypatch)
     store = SgwCacheStore()
     modems = [
-        SgwCableModemModel(mac="aa:bb:cc:dd:ee:01"),
+        SgwCableModemModel(
+            mac="aa:bb:cc:dd:ee:01",
+            sysdescr=SystemDescriptorModel(HW_REV="1A", VENDOR="V", BOOTR="B", SW_REV="S", MODEL="M", is_empty=False),
+        ),
         SgwCableModemModel(mac="aa:bb:cc:dd:ee:02"),
     ]
     ds_channels = SgwChannelSummaryModel(count=1, channel_ids=[100])
@@ -553,10 +556,12 @@ def test_serving_group_topology_uses_default_pagination(monkeypatch: pytest.Monk
         )
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
-        assert payload["groups"][0]["page"] == 1
-        assert payload["groups"][0]["page_size"] == 100
-        assert payload["groups"][0]["total_pages"] == 1
-        assert len(payload["groups"][0]["modems"]) == 2
+        group = payload["groups"][0]
+        assert group["modem_count"] == 2
+        assert group["success_count"] == 1
+        assert group["failure_count"] == 1
+        assert group["modems"]["aa:bb:cc:dd:ee:01"]["sysdescr"]["is_empty"] is False
+        assert group["modems"]["aa:bb:cc:dd:ee:02"]["sysdescr"]["is_empty"] is True
 
 
 def test_serving_group_metadata_age_seconds_uses_request_time(monkeypatch: pytest.MonkeyPatch) -> None:
