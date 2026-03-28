@@ -51,3 +51,12 @@ def test_install_script_update_ga_mode() -> None:
     result = _run_install(script_path, ["--update-ga", "v0.1.2.3"], env)
     assert result.returncode == 0
     assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-ga" in result.stdout
+
+
+def test_install_script_fallback_installs_full_docs_toolchain() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    expected_packages = "pytest mkdocs mkdocs-material mkdocs-mermaid2-plugin pymdown-extensions"
+    assert script_text.count(expected_packages) == 2

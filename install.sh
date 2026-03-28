@@ -509,12 +509,12 @@ install_standard() {
   fi
   echo "⚠️  Install with [dev,docs] failed; falling back to [dev]." >&2
   if python -m pip install -e "${PROJECT_ROOT}[dev]"; then
-    python -m pip install pytest mkdocs mkdocs-material
+    python -m pip install pytest mkdocs mkdocs-material mkdocs-mermaid2-plugin pymdown-extensions
     return
   fi
   echo "⚠️  Install with [dev] failed; falling back to base install." >&2
   python -m pip install -e "${PROJECT_ROOT}"
-  python -m pip install pytest mkdocs mkdocs-material
+  python -m pip install pytest mkdocs mkdocs-material mkdocs-mermaid2-plugin pymdown-extensions
 }
 
 install_from_tag() {
