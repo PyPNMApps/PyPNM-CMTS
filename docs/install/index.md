@@ -94,6 +94,16 @@ Update to the latest GA or hot-fix tag (or pass a tag explicitly):
 ./install.sh --update-hot-fix v0.1.39.1
 ```
 
+Update `pypnm-docsis` in the active virtual environment:
+
+```bash
+./install.sh --update-development-pypnm-docsis
+./install.sh --update-development-pypnm-docsis v1.4.2.0
+```
+
+Without a tag, the installer upgrades to the latest prerelease. With a tag or
+version, it installs that exact `pypnm-docsis` release.
+
 Clean or uninstall local install artifacts:
 
 ```bash

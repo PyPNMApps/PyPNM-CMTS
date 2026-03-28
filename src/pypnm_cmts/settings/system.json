@@ -27,7 +27,7 @@
     "PnmBulkDataTransfer": {
         "method": "tftp",
         "tftp": {
-            "ip_v4": "192.168.0.10",
+            "ip_v4": "172.19.8.250",
             "ip_v6": "::1",
             "remote_dir": ""
         },
@@ -105,7 +105,7 @@
         }
     },
     "logging": {
-        "log_level": "INFO",
+        "log_level": "DEBUG",
         "log_dir": "logs",
         "log_filename": "pypnm-cmts.log"
     },

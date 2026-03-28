@@ -53,9 +53,15 @@ _SNMP_PORT_FLAG = "--snmp-port"
 _cmts_port_warned = False
 
 
-def _sanitize_pythonpath_for_serve() -> None:
+def _project_root() -> Path:
+    """Return the PyPNM-CMTS project root (parent of ``src/``)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _sanitize_pythonpath_for_serve(project_root: Path | None = None) -> None:
     """Restrict serve-time PYTHONPATH to this repo's src directory."""
-    src_path = str(Path.cwd() / "src")
+    root = project_root if project_root is not None else _project_root()
+    src_path = str(root / "src")
     existing_pythonpath = os.environ.get("PYTHONPATH", "")
     existing_entries = [entry for entry in existing_pythonpath.split(os.pathsep) if entry.strip() != ""]
 
@@ -69,6 +75,34 @@ def _sanitize_pythonpath_for_serve() -> None:
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
     os.environ["PYTHONPATH"] = src_path
+
+
+def _prepare_runtime_paths_for_serve(args: argparse.Namespace) -> None:
+    """Normalize serve-time user paths without changing the process cwd."""
+    original_cwd = Path.cwd()
+    project_root = _project_root()
+
+    if hasattr(args, "cert") and isinstance(args.cert, str) and args.cert.strip() != "":
+        cert_path = Path(args.cert)
+        if not cert_path.is_absolute():
+            args.cert = str((original_cwd / cert_path).resolve())
+
+    if hasattr(args, "key") and isinstance(args.key, str) and args.key.strip() != "":
+        key_path = Path(args.key)
+        if not key_path.is_absolute():
+            args.key = str((original_cwd / key_path).resolve())
+
+    if hasattr(args, "reload_dirs") and isinstance(args.reload_dirs, list):
+        resolved_reload_dirs: list[str] = []
+        for entry in args.reload_dirs:
+            entry_path = Path(str(entry))
+            if entry_path.is_absolute():
+                resolved_reload_dirs.append(str(entry_path))
+                continue
+            resolved_reload_dirs.append(str((original_cwd / entry_path).resolve()))
+        args.reload_dirs = resolved_reload_dirs
+
+    _sanitize_pythonpath_for_serve(project_root)
 
 
 def main() -> int:
@@ -695,7 +729,7 @@ def _run_cli() -> int:
         else:
             print(f"🌐 Launching FastAPI with HTTP on http://{args.host}:{args.port}")
 
-        _sanitize_pythonpath_for_serve()
+        _prepare_runtime_paths_for_serve(args)
         if str(args.cmts_hostname).strip() != "":
             os.environ[ENV_ADAPTER_HOSTNAME] = str(args.cmts_hostname).strip()
         if str(args.read_community).strip() != "":

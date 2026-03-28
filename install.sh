@@ -9,6 +9,7 @@ BANNER_PATH="${PROJECT_ROOT}/tools/banner.txt"
 VENV_DIR=".env"
 MODE="standard"
 UPDATE_TAG=""
+UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG=""
 CLEAN_MODE="0"
 PURGE_CACHE="0"
 UNINSTALL_MODE="0"
@@ -30,7 +31,7 @@ Usage:
   ./install.sh --development [venv_dir]
   ./install.sh --update-ga [TAG] [venv_dir]
   ./install.sh --update-hot-fix [TAG] [venv_dir]
-  ./install.sh --update-development-pypnm-docsis [venv_dir]
+  ./install.sh --update-development-pypnm-docsis [TAG] [venv_dir]
   ./install.sh --help
 
 Options:
@@ -38,8 +39,9 @@ Options:
   --update-ga [TAG]    Install the specified GA tag (latest GA if omitted).
   --update-hot-fix [TAG]
                        Install the specified hot-fix tag (latest hot-fix if omitted).
-  --update-development-pypnm-docsis
-                       Upgrade pypnm-docsis in the active venv to the latest pre-release.
+  --update-development-pypnm-docsis [TAG]
+                       Upgrade pypnm-docsis in the active venv to the specified tag/version
+                       (latest pre-release if omitted).
   --clean              Remove prior install artifacts before installing.
   --purge-cache        Purge pip cache after venv activation.
   --uninstall          Remove local install artifacts (cannot combine with other flags).
@@ -52,6 +54,7 @@ Examples:
   ./install.sh --update-ga v0.1.39.0
   ./install.sh --update-hot-fix v0.1.39.1
   ./install.sh --update-development-pypnm-docsis
+  ./install.sh --update-development-pypnm-docsis v1.4.2.0
 USAGE_EOF
 }
 
@@ -596,6 +599,7 @@ install_update_development_pypnm_docsis() {
   purge_pip_cache
   local current_version
   local target_version
+  local install_spec
   local confirm
 
   current_version="$(python - <<'PYCODE'
@@ -607,9 +611,15 @@ except PackageNotFoundError:
 PYCODE
 )"
 
-  target_version="$(python -m pip index versions pypnm-docsis --pre 2>/dev/null | sed -n 's/^Available versions: //p' | head -n 1 | cut -d',' -f1 | tr -d ' ')"
-  if [[ "${target_version}" == "" ]]; then
-    target_version="latest pre-release"
+  if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
+    target_version="${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG#v}"
+    install_spec="pypnm-docsis==${target_version}"
+  else
+    target_version="$(python -m pip index versions pypnm-docsis --pre 2>/dev/null | sed -n 's/^Available versions: //p' | head -n 1 | cut -d',' -f1 | tr -d ' ')"
+    if [[ "${target_version}" == "" ]]; then
+      target_version="latest pre-release"
+    fi
+    install_spec="pypnm-docsis"
   fi
 
   echo "pypnm-docsis local version: ${current_version}"
@@ -624,7 +634,11 @@ PYCODE
       ;;
   esac
 
-  python -m pip install --upgrade --pre pypnm-docsis
+  if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
+    python -m pip install --upgrade "${install_spec}"
+  else
+    python -m pip install --upgrade --pre "${install_spec}"
+  fi
   python - <<'PYCODE'
 import pypnm
 print(f"Installed pypnm-docsis v{pypnm.__version__}")
@@ -682,7 +696,13 @@ else
       --update-development-pypnm-docsis)
         UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE="1"
         MODE="update-development-pypnm-docsis"
-        shift
+        UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG="${2:-}"
+        if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" && "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != --* ]]; then
+          shift 2
+        else
+          UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG=""
+          shift
+        fi
         ;;
       --clean)
         CLEAN_MODE="1"
@@ -730,6 +750,9 @@ fi
 if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
   echo "PYPNM_CMTS_INSTALL_TEST_MODE=${MODE}"
   echo "PYPNM_CMTS_INSTALL_TEST_VENV_DIR=${VENV_DIR}"
+  if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
+    echo "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}"
+  fi
   if [[ "${PYPNM_CMTS_INSTALL_TEST_CREATE_VENV:-}" == "1" ]]; then
     python3 -m venv "${VENV_DIR}"
     rm -rf "${VENV_DIR}"

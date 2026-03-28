@@ -53,6 +53,28 @@ def test_install_script_update_ga_mode() -> None:
     assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-ga" in result.stdout
 
 
+def test_install_script_update_development_pypnm_docsis_mode() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    result = _run_install(script_path, ["--update-development-pypnm-docsis"], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-development-pypnm-docsis" in result.stdout
+    assert "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=" not in result.stdout
+
+
+def test_install_script_update_development_pypnm_docsis_mode_with_tag() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    result = _run_install(script_path, ["--update-development-pypnm-docsis", "v1.4.2.0"], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-development-pypnm-docsis" in result.stdout
+    assert "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=v1.4.2.0" in result.stdout
+
+
 def test_install_script_fallback_installs_full_docs_toolchain() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = repo_root / "install.sh"

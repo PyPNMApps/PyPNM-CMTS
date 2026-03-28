@@ -92,6 +92,16 @@ Optional: update from the latest GA or hot-fix tag:
   ./install.sh --update-hot-fix
   ```
 
+Optional: update `pypnm-docsis` in the active venv:
+
+  ```bash
+  ./install.sh --update-development-pypnm-docsis
+  ./install.sh --update-development-pypnm-docsis v1.4.2.0
+  ```
+
+Without a tag, the installer upgrades to the latest prerelease. With a tag or
+version, it installs that exact `pypnm-docsis` release.
+
 Cleanup and uninstall:
 
   ```bash
