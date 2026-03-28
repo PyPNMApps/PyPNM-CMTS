@@ -19,6 +19,7 @@ from pypnm.version import __version__ as pypnm_version
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from pypnm_cmts.api.health import CmtsHealthService, HealthResponseModel
 from pypnm_cmts.api.utils.auto_load import RouterRegistrar
 from pypnm_cmts.combined_mode import CombinedModeRunner, combined_mode_enabled
 from pypnm_cmts.config.runtime_flags import (
@@ -72,6 +73,7 @@ validate configuration state, and drive PNM workflows across fleets.
 
 _combined_runner: CombinedModeRunner | None = None
 _sgw_startup_service = SgwStartupService()
+_health_service = CmtsHealthService()
 _hard_muted_routes: list[APIRoute] = []
 
 
@@ -137,10 +139,10 @@ if not is_env_flag_enabled(ENV_MUTE_PYPNM_ENDPOINTS):
     app.include_router(pypnm_app.router, prefix="/cm")
 
 
-@app.get("/health", tags=["Health"])
-def health() -> dict[str, str]:
-    """Lightweight health endpoint for probes."""
-    return {"status": "ok", "version": __version__}
+@app.get("/health", tags=["Health"], response_model=HealthResponseModel)
+def health() -> HealthResponseModel:
+    """CMTS health endpoint for probes and WebUI status integration."""
+    return _health_service.build_response(__version__)
 
 app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE_BYTES)
 app.add_middleware(

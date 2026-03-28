@@ -4,7 +4,7 @@
 """Type aliases for PyPNM-CMTS."""
 from __future__ import annotations
 
-from typing import NewType
+from typing import Literal, NewType, TypeAlias
 
 from pypnm.lib.types import (
     HostNameStr,
@@ -15,6 +15,8 @@ from pypnm.lib.types import (
     MacAddressStr,
     PathLike,
     SnmpIndex,
+    String,
+    TimestampSec,
 )
 
 IntList                = list[int]
@@ -66,6 +68,16 @@ PnmRowStatus            = NewType("PnmRowStatus", int)
 PnmBaseUriStr           = NewType("PnmBaseUriStr", UriStr)
 PnmUsOfdmaRxMerNumAvgs  = NewType("PnmUsOfdmaRxMerNumAvgs", int)
 PnmUsOfdmaRxMerMeasStatus = NewType("PnmUsOfdmaRxMerMeasStatus", int)
+HealthStatus            = Literal["ok", "warning", "error", "unknown"]
+HealthMessageStr        = NewType("HealthMessageStr", String)
+HealthServiceName       = Literal["pypnm-docsis-cmts"]
+HealthVersionStr        = NewType("HealthVersionStr", String)
+HealthDataPathStr       = NewType("HealthDataPathStr", String)
+ByteCount               = NewType("ByteCount", int)
+PercentValue            = NewType("PercentValue", float)
+HealthDirectorySizes: TypeAlias = dict[String, ByteCount]
+HealthStartTime         = TimestampSec
+HealthUptimeSeconds     = NewType("HealthUptimeSeconds", int)
 
 
 __all__ = [
@@ -109,6 +121,16 @@ __all__ = [
     "PnmBaseUriStr",
     "PnmUsOfdmaRxMerNumAvgs",
     "PnmUsOfdmaRxMerMeasStatus",
+    "HealthStatus",
+    "HealthMessageStr",
+    "HealthServiceName",
+    "HealthVersionStr",
+    "HealthDataPathStr",
+    "ByteCount",
+    "PercentValue",
+    "HealthDirectorySizes",
+    "HealthStartTime",
+    "HealthUptimeSeconds",
     "UriStr",
     "HostNameStr",
     "InetAddressStr",
