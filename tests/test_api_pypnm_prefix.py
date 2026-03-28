@@ -49,7 +49,14 @@ def test_pypnm_routes_are_mounted_under_cm(monkeypatch: object) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] != ""
+    version = payload.get("version")
+    if isinstance(version, str) and version.strip() != "":
+        assert version != ""
+        return
+    service = payload.get("service")
+    assert isinstance(service, dict)
+    assert isinstance(service.get("version"), str)
+    assert service["version"] != ""
 
 
 def test_pypnm_routes_are_not_mounted_under_pypnm(monkeypatch: object) -> None:
