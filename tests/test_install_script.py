@@ -53,6 +53,29 @@ def test_install_script_update_ga_mode() -> None:
     assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-ga" in result.stdout
 
 
+def test_install_script_allows_local_project_pythonpath() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    env["PYPNM_CMTS_INSTALL_TEST_REPORT_PYTHONPATH"] = "1"
+    env["PYTHONPATH"] = f"{repo_root / 'src'}"
+    result = _run_install(script_path, [], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_PYTHONPATH_STATUS=0" in result.stdout
+
+
+def test_install_script_rejects_external_pythonpath() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "/home/dev01/Projects/PyPNM/src"
+    result = _run_install(script_path, [], env)
+    assert result.returncode == 1
+    assert "ERROR: PYTHONPATH is set to an external source path" in result.stderr
+    assert "unset PYTHONPATH" in result.stderr
+
+
 def test_install_script_update_development_pypnm_docsis_mode() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = repo_root / "install.sh"

@@ -20,6 +20,7 @@ EOF
 commit_msg="Update"
 do_push="false"
 skip_ruff="false"
+ruff_cmd="ruff"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +65,12 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 
+if command -v ruff >/dev/null 2>&1; then
+  ruff_cmd="ruff"
+elif [[ -x "${repo_root}/.env/bin/ruff" ]]; then
+  ruff_cmd="${repo_root}/.env/bin/ruff"
+fi
+
 current_branch="$(git rev-parse --abbrev-ref HEAD)"
 pending_changes="$(git status --short)"
 
@@ -87,12 +94,12 @@ if git diff --quiet && git diff --cached --quiet; then
 fi
 
 if [[ "${skip_ruff}" != "true" ]]; then
-  if ! command -v ruff >/dev/null 2>&1; then
-    echo "ERROR: ruff not found on PATH. Use --skip-ruff or install ruff." >&2
+  if [[ "${ruff_cmd}" == "ruff" ]] && ! command -v ruff >/dev/null 2>&1; then
+    echo "ERROR: ruff not found on PATH or ${repo_root}/.env/bin/ruff. Use --skip-ruff or install ruff." >&2
     exit 1
   fi
   echo "Running ruff checks..."
-  ruff check . --fix
+  "${ruff_cmd}" check . --fix
 fi
 
 echo "Staging changes..."

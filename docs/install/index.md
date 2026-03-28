@@ -10,6 +10,18 @@ Run the installer from the repo root:
 ./install.sh
 ```
 
+Before running the installer, make sure `PYTHONPATH` is not pointing at another
+PyPNM source checkout. A leaked value such as `/home/user/Projects/PyPNM/src`
+can cause PyPNM-CMTS to import the wrong lower-layer runtime, which redirects
+logs, `.data`, and operation state outside this repo.
+
+Check and clear it from a clean shell if needed:
+
+```bash
+echo "$PYTHONPATH"
+unset PYTHONPATH
+```
+
 ## Post-install quickstart
 
 Activate the virtual environment:
@@ -84,6 +96,10 @@ Development mode:
 
 Development mode attempts to install gitleaks via the system package manager and
 falls back to a GitHub release download when the package is unavailable.
+
+The installer now stops early if `PYTHONPATH` points at an external source tree.
+This is intentional and protects the runtime from silently importing the wrong
+`pypnm` package.
 
 Update to the latest GA or hot-fix tag (or pass a tag explicitly):
 

@@ -31,6 +31,9 @@ It complements AGENTS.md and does not replace it.
 - Avoid generic `str` for semantic identifiers or paths in public models and APIs; use an existing semantic type or add a new alias in `src/pypnm/lib/types.py`.
 - When working with MAC or inet strings, validate using `MacAddress()` or `Inet()` instead of assuming `str(...)` formatting is valid.
 - Request override defaults: missing or null means use `system.json` defaults; blank strings are invalid.
+- Treat external `PYTHONPATH` entries as install/runtime hazards.
+- Do not run install or serve commands with `PYTHONPATH` pointing at a sibling PyPNM source checkout.
+- If install/runtime behavior suggests the wrong lower-layer package is being imported, check `PYTHONPATH` first and prefer `unset PYTHONPATH` before deeper debugging.
 
 ## Timestamp Conventions
 

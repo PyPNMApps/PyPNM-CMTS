@@ -373,6 +373,30 @@ ensure_venv() {
   fi
 }
 
+ensure_safe_pythonpath() {
+  local allowed_src
+  local entry
+
+  if [[ "${PYTHONPATH:-}" == "" ]]; then
+    return
+  fi
+
+  allowed_src="${PROJECT_ROOT}/src"
+  IFS=':' read -r -a pythonpath_entries <<<"${PYTHONPATH}"
+  for entry in "${pythonpath_entries[@]}"; do
+    if [[ "${entry}" == "" ]]; then
+      continue
+    fi
+    if [[ "${entry}" == "${allowed_src}" ]]; then
+      continue
+    fi
+    echo "ERROR: PYTHONPATH is set to an external source path: ${entry}" >&2
+    echo "This can cause PyPNM-CMTS to import a different pypnm runtime than the one installed in ${VENV_DIR}." >&2
+    echo "Please run 'unset PYTHONPATH' and restart the install from a clean shell." >&2
+    exit 1
+  done
+}
+
 activate_venv() {
   # shellcheck source=/dev/null
   source "${VENV_DIR}/bin/activate"
@@ -750,6 +774,17 @@ fi
 if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
   echo "PYPNM_CMTS_INSTALL_TEST_MODE=${MODE}"
   echo "PYPNM_CMTS_INSTALL_TEST_VENV_DIR=${VENV_DIR}"
+  if [[ "${PYPNM_CMTS_INSTALL_TEST_REPORT_PYTHONPATH:-}" == "1" ]]; then
+    if [[ "${PYTHONPATH:-}" == "" ]]; then
+      echo "PYPNM_CMTS_INSTALL_TEST_PYTHONPATH_OK=1"
+    else
+      set +e
+      ensure_safe_pythonpath
+      status=$?
+      set -e
+      echo "PYPNM_CMTS_INSTALL_TEST_PYTHONPATH_STATUS=${status}"
+    fi
+  fi
   if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
     echo "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}"
   fi
@@ -768,6 +803,7 @@ else
 fi
 
 print_banner
+ensure_safe_pythonpath
 ensure_python
 check_python_version
 ensure_git
