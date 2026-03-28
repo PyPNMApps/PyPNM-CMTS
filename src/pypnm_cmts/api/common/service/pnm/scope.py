@@ -29,6 +29,10 @@ class PnmOperationScopeResolver:
         """Return the active SGW store reference."""
         return self._sgw_store
 
+    def resolve_store(self) -> SgwCacheStore | None:
+        """Return the active SGW store, loading it from runtime state if needed."""
+        return self._resolve_store()
+
     def resolve_modem_scope(
         self,
         requested_sg_ids: list[ServiceGroupId],
@@ -115,4 +119,3 @@ class PnmOperationScopeResolver:
 __all__ = [
     "PnmOperationScopeResolver",
 ]
-

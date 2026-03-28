@@ -8,12 +8,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 from pypnm.api.routes.common.classes.common_endpoint_classes.common.enum import (
     OutputType,
 )
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
 from pypnm.lib.types import (
+    ChannelId,
     FileNameStr,
     InetAddressStr,
     IPv4Str,
@@ -59,11 +61,12 @@ from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.schemas import (
 from pypnm_cmts.api.routes.pnm.sg.ds.ofdm.rxmer.service import (
     RxMerServiceGroupOperationService,
 )
-from pypnm_cmts.lib.constants import OperationStage, OperationState
+from pypnm_cmts.lib.constants import OperationStage, OperationState, RfChannelType
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 from pypnm_cmts.sgw.models import (
     SgwCableModemModel,
     SgwCacheEntryModel,
+    SgwRfChannelModel,
     SgwSnapshotModel,
 )
 from pypnm_cmts.sgw.store import SgwCacheStore
@@ -92,12 +95,18 @@ def _build_service(
 def _build_request(
     mac_count: int = 0,
     execution: RxMerServiceGroupExecutionModel | None = None,
+    channel_ids: list[ChannelId] | None = None,
 ) -> RxMerServiceGroupStartCaptureRequest:
     macs = [MacAddressStr(f"aa:bb:cc:dd:ee:{index:02x}") for index in range(mac_count)]
     return RxMerServiceGroupStartCaptureRequest(
         cmts=CmtsRequestEnvelopeModel(
             serving_group=CmtsServingGroupFilterModel(id=[ServiceGroupId(1)]),
-            cable_modem=CmtsCableModemFilterModel(mac_address=macs),
+            cable_modem=CmtsCableModemFilterModel(
+                mac_address=macs,
+                pnm_parameters=CmtsPnmParametersModel(
+                    capture=CmtsPnmCaptureParametersModel(channel_ids=channel_ids),
+                ) if channel_ids is not None else None,
+            ),
         ),
         execution=execution or RxMerServiceGroupExecutionModel(),
     )
@@ -117,6 +126,33 @@ def _build_sgw_store(entries: list[tuple[ServiceGroupId, list[MacAddressStr]]]) 
         snapshot = SgwSnapshotModel(
             sg_id=sg_id,
             cable_modems=cable_modems,
+        )
+        store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
+    return store
+
+
+def _build_sgw_store_with_ofdm_channels(
+    entries: list[tuple[ServiceGroupId, list[MacAddressStr]]],
+    ds_ofdm_channel_ids: list[ChannelId],
+) -> SgwCacheStore:
+    store = SgwCacheStore()
+    rf_channels = [
+        SgwRfChannelModel(channel_id=int(channel_id), channel_type=RfChannelType.OFDM)
+        for channel_id in ds_ofdm_channel_ids
+    ]
+    for sg_id, mac_addresses in entries:
+        cable_modems = [
+            SgwCableModemModel(
+                mac=mac_address,
+                ipv4=IPv4Str("192.168.0.100"),
+                ipv6=IPv6Str(""),
+            )
+            for mac_address in mac_addresses
+        ]
+        snapshot = SgwSnapshotModel(
+            sg_id=sg_id,
+            cable_modems=cable_modems,
+            ds_rf_channels=list(rf_channels),
         )
         store.upsert_entry(SgwCacheEntryModel(sg_id=sg_id, snapshot=snapshot))
     return store
@@ -183,6 +219,21 @@ def test_rxmer_start_capture_creates_state(tmp_path: Path) -> None:
 
     state_path = tmp_path / str(operation.operation_id) / "state.json"
     assert state_path.exists()
+
+
+def test_rxmer_start_capture_rejects_invalid_ofdm_channel_id(tmp_path: Path) -> None:
+    sgw_store = _build_sgw_store_with_ofdm_channels(
+        [(ServiceGroupId(1), [MacAddressStr("aa:bb:cc:dd:ee:00")])],
+        ds_ofdm_channel_ids=[ChannelId(100)],
+    )
+    service = _build_service(tmp_path, sgw_store=sgw_store)
+    request = _build_request(mac_count=1, channel_ids=[ChannelId(999)])
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.start_capture(request)
+
+    assert exc_info.value.status_code == 422
+    assert "invalid downstream OFDM channel ids" in str(exc_info.value.detail)
 
 
 def test_rxmer_status_reads_state(tmp_path: Path) -> None:

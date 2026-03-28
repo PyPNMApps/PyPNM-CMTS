@@ -6,9 +6,10 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 
+from fastapi import HTTPException, status
 from pydantic import BaseModel
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
-from pypnm.lib.types import MacAddressStr
+from pypnm.lib.types import ChannelId, MacAddressStr
 
 from pypnm_cmts.api.common.operations.logging import short_op_id
 from pypnm_cmts.api.common.operations.models import (
@@ -24,7 +25,7 @@ from pypnm_cmts.api.common.service.pnm.scope import (
     PnmOperationScopeResolver,
     RuntimeStoreLoader,
 )
-from pypnm_cmts.lib.constants import OperationState
+from pypnm_cmts.lib.constants import OperationState, RfChannelType
 from pypnm_cmts.lib.types import PnmCaptureOperationId, ServiceGroupId
 from pypnm_cmts.sgw.runtime_state import get_sgw_store
 from pypnm_cmts.sgw.store import SgwCacheStore
@@ -150,6 +151,49 @@ class PnmServiceGroupOperationServiceBase(ABC):
         if self._sgw_store is None and resolved_store is not None:
             self._sgw_store = resolved_store
         return scope
+
+    def _validate_requested_downstream_ofdm_channel_ids(
+        self,
+        requested_channel_ids: list[ChannelId],
+        serving_group_ids: list[ServiceGroupId],
+    ) -> None:
+        """Reject requested downstream OFDM channel ids not present in SGW inventory."""
+        if not requested_channel_ids or not serving_group_ids:
+            return
+
+        store = self._scope_resolver.resolve_store()
+        if store is None:
+            return
+        if self._sgw_store is None:
+            self._sgw_store = store
+
+        valid_channel_ids: list[ChannelId] = []
+        for sg_id in serving_group_ids:
+            entry = store.get_entry(sg_id)
+            if entry is None:
+                continue
+            for channel in entry.snapshot.ds_rf_channels:
+                if channel.channel_type != RfChannelType.OFDM:
+                    continue
+                candidate = ChannelId(int(channel.channel_id))
+                if candidate not in valid_channel_ids:
+                    valid_channel_ids.append(candidate)
+
+        if not valid_channel_ids:
+            return
+
+        invalid_channel_ids = [
+            channel_id for channel_id in requested_channel_ids if channel_id not in valid_channel_ids
+        ]
+        if not invalid_channel_ids:
+            return
+
+        detail = (
+            "cmts.cable_modem.pnm_parameters.capture.channel_ids contains invalid downstream OFDM "
+            f"channel ids: {[int(channel_id) for channel_id in invalid_channel_ids]}. "
+            f"Valid ids for the selected serving groups: {[int(channel_id) for channel_id in valid_channel_ids]}"
+        )
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
 
     def _log_start_capture(self, state: OperationStateModel) -> None:
         self.logger.info(

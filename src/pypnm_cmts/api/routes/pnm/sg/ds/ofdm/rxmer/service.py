@@ -392,6 +392,7 @@ class RxMerServiceGroupOperationService(PnmServiceGroupOperationServiceBase):
         requested_sg_ids = list(cmts.serving_group.id)
         requested_mac_addresses = list(cmts.cable_modem.mac_address)
         serving_group_ids, mac_addresses = self._resolve_modem_scope(requested_sg_ids, requested_mac_addresses)
+        self._validate_requested_downstream_ofdm_channel_ids(channel_ids, serving_group_ids)
         self.logger.info(
             build_request_scope_log(
                 operation_name="RxMer",
