@@ -42,7 +42,7 @@ Start the FastAPI service:
 pypnm-cmts serve
 ```
 
-The service binds to `127.0.0.1:8000` by default and loads CMTS adapter
+The service binds to `127.0.0.1:8080` by default and loads CMTS adapter
 settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname` and `--read-community`
 as overrides.
@@ -56,7 +56,7 @@ python -m pytest -v
 Run docs locally:
 
 ```bash
-python -m mkdocs serve
+python -m mkdocs serve -a 127.0.0.1:8081
 ```
 
 ```mermaid

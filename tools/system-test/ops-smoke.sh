@@ -6,7 +6,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_NAME="$(basename "$0")"
-DEFAULT_BASE_URL="http://127.0.0.1:8000"
+DEFAULT_BASE_URL="http://127.0.0.1:8080"
 
 usage() {
   cat <<EOF
@@ -18,7 +18,7 @@ Options:
   -h, --help         Show this help and exit
 
 Example:
-  ${SCRIPT_NAME} --base-url http://127.0.0.1:8000
+  ${SCRIPT_NAME} --base-url http://127.0.0.1:8080
 EOF
 }
 

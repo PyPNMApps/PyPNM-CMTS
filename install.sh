@@ -782,4 +782,4 @@ run_tests
 echo "Next steps:"
 echo "  source ${VENV_DIR}/bin/activate"
 echo "  pypnm-cmts serve --help"
-echo "  mkdocs serve"
+echo "  mkdocs serve -a 127.0.0.1:8081"

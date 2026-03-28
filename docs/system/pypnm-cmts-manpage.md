@@ -104,7 +104,7 @@ pypnm-cmts config-menu [options]
 ## serve Options
 
 - `--host`: Host to bind (default: `127.0.0.1`).
-- `--port`: Port to bind (default: `8000`).
+- `--port`: Port to bind (default: `8080`).
 - `--ssl`: Enable HTTPS (requires cert and key).
 - `--cert`: Path to SSL certificate (PEM).
 - `--key`: Path to SSL private key (PEM).

@@ -119,7 +119,7 @@ If you used the installer defaults, activate the `.env` environment:
   pypnm-cmts serve
   ```
 
-The service binds to `127.0.0.1:8000` by default and reads CMTS adapter
+The service binds to `127.0.0.1:8080` by default and reads CMTS adapter
 settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname`/`--read-community`
 overrides at runtime.

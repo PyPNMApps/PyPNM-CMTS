@@ -88,7 +88,7 @@ pypnm-cmts serve [options]
 Options:
 
 - `--host` Bind host (default `127.0.0.1`).
-- `--port` Bind port (default `8000`).
+- `--port` Bind port (default `8080`).
 - `--ssl` Enable HTTPS.
 - `--cert` TLS certificate path.
 - `--key` TLS private key path.

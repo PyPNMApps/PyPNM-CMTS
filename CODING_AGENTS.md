@@ -37,6 +37,12 @@ It complements AGENTS.md and does not replace it.
 - All stored timestamps are epoch seconds.
 - Convert to ISO-8601 only at display or external response boundaries.
 
+## Default Ports
+
+- PyPNM-CMTS FastAPI default port is `8080`.
+- PyPNM-CMTS MkDocs default local docs port is `8081`.
+- When updating scripts, docs, examples, aliases, or smoke helpers, treat `8080` and `8081` as the defaults unless the user explicitly asks otherwise.
+
 ## Commit Message Output Style
 
 - If request via chat request starts with commit-msg, then preface command ./tools/git/git-save.sh with commit-msg "<commit-msg>"

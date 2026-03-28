@@ -30,20 +30,20 @@ FastAPI Endpoint Documentation For PyPNM-CMTS Lives Here.
 Start the FastAPI service using the CLI:
 
 ```bash
-pypnm-cmts serve --host 127.0.0.1 --port 8000
+pypnm-cmts serve --host 127.0.0.1 --port 8080
 ```
 
 Example health checks:
 
 ```bash
-curl http://127.0.0.1:8000/ops/health
-curl http://127.0.0.1:8000/ops/ready
+curl http://127.0.0.1:8080/ops/health
+curl http://127.0.0.1:8080/ops/ready
 ```
 
 PyPNM endpoints from `pypnm-docsis` are mounted under the `/cm` prefix by default. Example:
 
 ```bash
-curl http://127.0.0.1:8000/cm/health
+curl http://127.0.0.1:8080/cm/health
 ```
 
 To suppress those legacy PyPNM endpoints at startup, run:
@@ -152,7 +152,7 @@ No request body or query parameters are required.
 Example request:
 
 ```bash
-curl -X GET "http://127.0.0.1:8000/cmts/system/sysDescr"
+curl -X GET "http://127.0.0.1:8080/cmts/system/sysDescr"
 ```
 
 

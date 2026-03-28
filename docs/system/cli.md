@@ -34,7 +34,7 @@ Use the `pypnm-cmts serve` command to start the FastAPI service with development
 pypnm-cmts serve
 ```
 
-The service binds to `127.0.0.1:8000` by default and reads CMTS adapter
+The service binds to `127.0.0.1:8080` by default and reads CMTS adapter
 settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname` and `--read-community`
 as overrides.
@@ -254,7 +254,7 @@ These options apply to `pypnm-cmts serve`.
 ```text
 -v, --version Show PyPNM-CMTS version and exit.
 --host Host to bind (default: 127.0.0.1)
---port Port to bind (default: 8000)
+--port Port to bind (default: 8080)
 --ssl Enable HTTPS (requires cert and key)
 --cert Path to SSL certificate (default: ./certs/cert.pem)
 --key Path to SSL private key (default: ./certs/key.pem)
