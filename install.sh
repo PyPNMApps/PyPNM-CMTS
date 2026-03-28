@@ -402,6 +402,54 @@ activate_venv() {
   source "${VENV_DIR}/bin/activate"
 }
 
+verify_installed_runtime_paths() {
+  local expected_venv_root
+  local import_path
+  local config_path
+  local runtime_output
+
+  if [[ "${VENV_DIR}" = /* ]]; then
+    expected_venv_root="${VENV_DIR}"
+  else
+    expected_venv_root="${PROJECT_ROOT}/${VENV_DIR}"
+  fi
+  if [[ -e "${expected_venv_root}" ]]; then
+    expected_venv_root="$(cd "${expected_venv_root}" && pwd -P)"
+  fi
+
+  if [[ "${PYPNM_CMTS_INSTALL_TEST_RUNTIME_IMPORT_PATH:-}" != "" || "${PYPNM_CMTS_INSTALL_TEST_RUNTIME_CONFIG_PATH:-}" != "" ]]; then
+    import_path="${PYPNM_CMTS_INSTALL_TEST_RUNTIME_IMPORT_PATH:-}"
+    config_path="${PYPNM_CMTS_INSTALL_TEST_RUNTIME_CONFIG_PATH:-}"
+  else
+    runtime_output="$(python - <<'PYCODE'
+import pypnm
+from pypnm.config.system_config_settings import SystemConfigSettings
+
+print(pypnm.__file__)
+print(SystemConfigSettings.get_config_path())
+PYCODE
+)"
+    import_path="$(printf '%s\n' "${runtime_output}" | sed -n '1p')"
+    config_path="$(printf '%s\n' "${runtime_output}" | sed -n '2p')"
+  fi
+
+  if [[ "${import_path}" != "${expected_venv_root}"/* ]]; then
+    echo "ERROR: Installed runtime import check failed." >&2
+    echo "pypnm imported from: ${import_path}" >&2
+    echo "Expected under: ${expected_venv_root}" >&2
+    echo "Check for leaked PYTHONPATH or another active source checkout." >&2
+    exit 1
+  fi
+
+  if [[ "${config_path}" != "${expected_venv_root}"/* ]]; then
+    echo "ERROR: Installed runtime config check failed." >&2
+    echo "pypnm config resolved to: ${config_path}" >&2
+    echo "Expected under: ${expected_venv_root}" >&2
+    echo "Check for leaked PYTHONPATH or another active source checkout." >&2
+    exit 1
+  fi
+}
+
 purge_pip_cache() {
   if [[ "${PURGE_CACHE}" == "1" ]]; then
     python -m pip cache purge
@@ -785,6 +833,13 @@ if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
       echo "PYPNM_CMTS_INSTALL_TEST_PYTHONPATH_STATUS=${status}"
     fi
   fi
+  if [[ "${PYPNM_CMTS_INSTALL_TEST_REPORT_RUNTIME_CHECK:-}" == "1" ]]; then
+    set +e
+    verify_installed_runtime_paths
+    status=$?
+    set -e
+    echo "PYPNM_CMTS_INSTALL_TEST_RUNTIME_CHECK_STATUS=${status}"
+  fi
   if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
     echo "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}"
   fi
@@ -835,6 +890,7 @@ else
   fi
 fi
 
+verify_installed_runtime_paths
 verify_mkdocs
 run_tests
 

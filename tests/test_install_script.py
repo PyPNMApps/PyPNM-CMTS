@@ -76,6 +76,36 @@ def test_install_script_rejects_external_pythonpath() -> None:
     assert "unset PYTHONPATH" in result.stderr
 
 
+def test_install_script_runtime_check_accepts_installed_paths() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    env["PYPNM_CMTS_INSTALL_TEST_REPORT_RUNTIME_CHECK"] = "1"
+    env["PYPNM_CMTS_INSTALL_TEST_RUNTIME_IMPORT_PATH"] = str(
+        repo_root / ".env" / "lib" / "python3.12" / "site-packages" / "pypnm" / "__init__.py"
+    )
+    env["PYPNM_CMTS_INSTALL_TEST_RUNTIME_CONFIG_PATH"] = str(
+        repo_root / ".env" / "lib" / "python3.12" / "site-packages" / "pypnm" / "settings" / "system.json"
+    )
+    result = _run_install(script_path, [], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_RUNTIME_CHECK_STATUS=0" in result.stdout
+
+
+def test_install_script_runtime_check_rejects_external_paths() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    env["PYPNM_CMTS_INSTALL_TEST_REPORT_RUNTIME_CHECK"] = "1"
+    env["PYPNM_CMTS_INSTALL_TEST_RUNTIME_IMPORT_PATH"] = "/home/dev01/Projects/PyPNM/src/pypnm/__init__.py"
+    env["PYPNM_CMTS_INSTALL_TEST_RUNTIME_CONFIG_PATH"] = "/home/dev01/Projects/PyPNM/src/pypnm/settings/system.json"
+    result = _run_install(script_path, [], env)
+    assert result.returncode == 1
+    assert "ERROR: Installed runtime import check failed." in result.stderr
+
+
 def test_install_script_update_development_pypnm_docsis_mode() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = repo_root / "install.sh"
