@@ -204,7 +204,7 @@ def _run_sgw_refresh_loop(
 
             def _after_cycle(result: object) -> bool:
                 nonlocal current_manager, guard_controller, consecutive_error_cycles, restart_requested
-                snapshot_time_epoch = float(getattr(result, "snapshot_time_epoch", 0.0))
+                snapshot_time_epoch = _normalize_epoch_seconds(getattr(result, "snapshot_time_epoch", 0.0))
                 _record_sgw_refresh_epoch(snapshot_time_epoch)
 
                 errors = list(getattr(result, "errors", []))
@@ -216,7 +216,7 @@ def _run_sgw_refresh_loop(
                 decision = _evaluate_guard_decision(
                     manager=current_manager,
                     controller=guard_controller,
-                    now_epoch=TimestampSec(snapshot_time_epoch),
+                    now_epoch=snapshot_time_epoch,
                     consecutive_error_cycles=consecutive_error_cycles,
                 )
                 if decision is None:
@@ -224,7 +224,7 @@ def _run_sgw_refresh_loop(
 
                 restarted_manager = _restart_sgw_runtime_manager(
                     current_manager,
-                    TimestampSec(snapshot_time_epoch),
+                    snapshot_time_epoch,
                     "; ".join(decision.reasons),
                 )
                 if restarted_manager is None:
@@ -319,6 +319,11 @@ def _record_sgw_refresh_epoch(now_epoch: TimestampSec) -> None:
     """Record the epoch timestamp of the most recent SGW refresh cycle."""
     global _sgw_status
     _sgw_status = _sgw_status.model_copy(update={"last_refresh_epoch": TimestampSec(now_epoch)})
+
+
+def _normalize_epoch_seconds(value: object) -> TimestampSec:
+    """Normalize epoch-like values to whole-second `TimestampSec`."""
+    return TimestampSec(int(float(value)))
 
 
 def compute_sgw_cache_ready(

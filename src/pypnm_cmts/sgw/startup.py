@@ -8,6 +8,8 @@ import logging
 import os
 import time
 
+from pypnm.lib.types import TimestampSec
+
 from pypnm_cmts.config.orchestrator_config import (
     DEFAULT_SGW_DISCOVERY_MODE,
     CmtsOrchestratorSettings,
@@ -112,8 +114,8 @@ class SgwStartupService:
             self.logger.exception("SGW startup failed: %s", message)
 
     @staticmethod
-    def _now_epoch() -> float:
-        return float(time.time())
+    def _now_epoch() -> TimestampSec:
+        return TimestampSec(int(time.time()))
 
     @staticmethod
     def _pytest_running() -> bool:
