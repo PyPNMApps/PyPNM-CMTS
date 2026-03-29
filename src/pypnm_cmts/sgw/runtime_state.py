@@ -7,11 +7,17 @@ import threading
 from collections.abc import Callable
 
 from pydantic import BaseModel, Field
+from pypnm.lib.types import TimestampSec
 
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import SGW_LAST_ERROR_MAX_LENGTH
 from pypnm_cmts.sgw.manager import SgwManager
 from pypnm_cmts.sgw.store import SgwCacheStore
+from pypnm_cmts.support.worker_guard import (
+    WorkerGuardController,
+    WorkerGuardObservationModel,
+    read_process_rss_bytes,
+)
 
 DEFAULT_SGW_STARTUP_ERROR = "sgw startup failed"
 DEFAULT_SGW_REFRESH_STOP_TIMEOUT_SECONDS = 5.0
@@ -24,9 +30,12 @@ class SgwStartupStatusModel(BaseModel):
     startup_completed: bool = Field(default=False, description="Whether SGW startup has completed.")
     discovery_ok: bool = Field(default=False, description="Whether SG discovery completed successfully.")
     discovered_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Discovered service group identifiers.")
-    last_refresh_epoch: float | None = Field(default=None, ge=0.0, description="Epoch timestamp for the last SGW refresh.")
+    last_refresh_epoch: TimestampSec | None = Field(default=None, ge=0.0, description="Epoch timestamp for the last SGW refresh.")
     error_message: str = Field(default="", max_length=SGW_LAST_ERROR_MAX_LENGTH, description="Bounded startup error message.")
     prime_failed: bool = Field(default=False, description="Whether SGW priming failed after discovery.")
+    guard_restart_count: int = Field(default=0, ge=0, description="Number of guard-triggered SGW restarts in this process.")
+    last_guard_reason: str = Field(default="", max_length=SGW_LAST_ERROR_MAX_LENGTH, description="Most recent guard restart reason.")
+    last_guard_restart_epoch: TimestampSec | None = Field(default=None, ge=0.0, description="Epoch timestamp of the most recent guard restart.")
 
 
 _sgw_status = SgwStartupStatusModel()
@@ -50,7 +59,7 @@ def set_sgw_startup_success(
     discovered_sg_ids: list[ServiceGroupId],
     store: SgwCacheStore,
     manager: SgwManager,
-    last_refresh_epoch: float,
+    last_refresh_epoch: TimestampSec,
 ) -> None:
     """Record a successful SGW startup outcome."""
     global _sgw_status, _sgw_store, _sgw_manager
@@ -60,9 +69,12 @@ def set_sgw_startup_success(
         startup_completed=True,
         discovery_ok=True,
         discovered_sg_ids=list(discovered_sg_ids),
-        last_refresh_epoch=float(last_refresh_epoch),
+        last_refresh_epoch=TimestampSec(last_refresh_epoch),
         error_message="",
         prime_failed=False,
+        guard_restart_count=0,
+        last_guard_reason="",
+        last_guard_restart_epoch=None,
     )
 
 
@@ -82,6 +94,9 @@ def set_sgw_startup_failure(error_message: str) -> None:
         last_refresh_epoch=None,
         error_message=bounded,
         prime_failed=False,
+        guard_restart_count=0,
+        last_guard_reason="",
+        last_guard_restart_epoch=None,
     )
 
 
@@ -104,6 +119,9 @@ def set_sgw_startup_prime_failure(
         last_refresh_epoch=None,
         error_message=bounded,
         prime_failed=True,
+        guard_restart_count=0,
+        last_guard_reason="",
+        last_guard_restart_epoch=None,
     )
 
 
@@ -177,12 +195,130 @@ def _run_sgw_refresh_loop(
     clock: Callable[[], float] | None,
 ) -> None:
     global _sgw_refresh_thread, _sgw_refresh_running
+    current_manager = manager
+    guard_controller: WorkerGuardController | None = _build_guard_controller(current_manager)
+    consecutive_error_cycles = 0
     try:
-        manager.refresh_forever(clock=clock)
+        while True:
+            restart_requested = False
+
+            def _after_cycle(result: object) -> bool:
+                nonlocal current_manager, guard_controller, consecutive_error_cycles, restart_requested
+                snapshot_time_epoch = float(getattr(result, "snapshot_time_epoch", 0.0))
+                _record_sgw_refresh_epoch(snapshot_time_epoch)
+
+                errors = list(getattr(result, "errors", []))
+                if errors:
+                    consecutive_error_cycles += 1
+                else:
+                    consecutive_error_cycles = 0
+
+                decision = _evaluate_guard_decision(
+                    manager=current_manager,
+                    controller=guard_controller,
+                    now_epoch=TimestampSec(snapshot_time_epoch),
+                    consecutive_error_cycles=consecutive_error_cycles,
+                )
+                if decision is None:
+                    return False
+
+                restarted_manager = _restart_sgw_runtime_manager(
+                    current_manager,
+                    TimestampSec(snapshot_time_epoch),
+                    "; ".join(decision.reasons),
+                )
+                if restarted_manager is None:
+                    return False
+
+                if guard_controller is not None:
+                    guard_controller.record_restart()
+                current_manager.stop()
+                current_manager = restarted_manager
+                guard_controller = _build_guard_controller(current_manager)
+                consecutive_error_cycles = 0
+                restart_requested = True
+                return True
+
+            current_manager.refresh_forever(clock=clock, after_cycle=_after_cycle)
+            if restart_requested:
+                continue
+            break
     finally:
         with _sgw_refresh_lock:
             _sgw_refresh_running = False
             _sgw_refresh_thread = None
+
+
+def _build_guard_controller(manager: SgwManager) -> WorkerGuardController | None:
+    settings = manager.get_settings().sgw.guard
+    if not bool(settings.enabled):
+        return None
+    return WorkerGuardController(
+        min_restart_interval_seconds=int(settings.min_restart_interval_seconds),
+        max_restarts_per_window=int(settings.max_restarts_per_hour),
+    )
+
+
+def _evaluate_guard_decision(
+    manager: SgwManager,
+    controller: WorkerGuardController | None,
+    now_epoch: TimestampSec,
+    consecutive_error_cycles: int,
+) -> object | None:
+    if controller is None:
+        return None
+    guard_settings = manager.get_settings().sgw.guard
+    if not bool(guard_settings.enabled):
+        return None
+    rss_bytes = read_process_rss_bytes()
+    rss_threshold_bytes = None
+    if int(guard_settings.rss_restart_threshold_mb) > 0:
+        rss_threshold_bytes = int(guard_settings.rss_restart_threshold_mb) * 1024 * 1024
+    observation = WorkerGuardObservationModel(
+        worker_name="sgw-refresh",
+        now_epoch=TimestampSec(now_epoch),
+        rss_bytes=rss_bytes,
+        consecutive_error_cycles=int(consecutive_error_cycles),
+    )
+    decision = controller.evaluate(
+        observation,
+        rss_restart_threshold_bytes=rss_threshold_bytes,
+        max_consecutive_error_cycles=int(guard_settings.max_consecutive_error_cycles),
+    )
+    if not bool(decision.restart_required):
+        return None
+    return decision
+
+
+def _restart_sgw_runtime_manager(
+    manager: SgwManager,
+    now_epoch: TimestampSec,
+    reason: str,
+) -> SgwManager | None:
+    global _sgw_status, _sgw_store, _sgw_manager
+    bounded_reason = reason.strip()[:SGW_LAST_ERROR_MAX_LENGTH]
+    try:
+        new_store = SgwCacheStore()
+        restarted_manager = manager.clone_for_restart(store=new_store)
+    except Exception:
+        return None
+    _sgw_store = new_store
+    _sgw_manager = restarted_manager
+    _sgw_status = _sgw_status.model_copy(
+        update={
+            "last_refresh_epoch": TimestampSec(now_epoch),
+            "guard_restart_count": int(_sgw_status.guard_restart_count) + 1,
+            "last_guard_reason": bounded_reason,
+            "last_guard_restart_epoch": TimestampSec(now_epoch),
+        }
+    )
+    return restarted_manager
+
+
+def _record_sgw_refresh_epoch(now_epoch: TimestampSec) -> None:
+    """Record the epoch timestamp of the most recent SGW refresh cycle."""
+    global _sgw_status
+    _sgw_status = _sgw_status.model_copy(update={"last_refresh_epoch": TimestampSec(now_epoch)})
 
 
 def compute_sgw_cache_ready(

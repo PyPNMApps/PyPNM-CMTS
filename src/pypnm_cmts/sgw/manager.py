@@ -53,6 +53,7 @@ HeavyPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings], SgwSnapshotPa
 LightPoller = Callable[[ServiceGroupId, CmtsOrchestratorSettings, list[SgwCableModemModel]], list[SgwCableModemModel]]
 Clock = Callable[[], float]
 TScopedResult = TypeVar("TScopedResult")
+AfterCycleCallback = Callable[[SgwRefreshResultModel], bool]
 
 
 class SgwManager:
@@ -116,6 +117,22 @@ class SgwManager:
         Return the cache store associated with this manager.
         """
         return self._store
+
+    def get_settings(self) -> CmtsOrchestratorSettings:
+        """Return the current SGW settings object."""
+        return self._settings
+
+    def clone_for_restart(self, store: SgwCacheStore | None = None) -> SgwManager:
+        """Build a fresh manager instance that preserves runtime dependencies."""
+        return SgwManager(
+            settings=self._settings,
+            store=self._store if store is None else store,
+            service_groups=self.get_service_groups(),
+            jitter_provider=self._jitter_provider,
+            heavy_poller=self._heavy_poller,
+            light_poller=self._light_poller,
+            metrics=self._metrics,
+        )
 
     def get_worker_process_snapshot(self, now_epoch: float) -> list[SgwWorkerProcessDebugModel]:
         """
@@ -305,6 +322,7 @@ class SgwManager:
         self,
         clock: Clock | None = None,
         max_cycles: int | None = None,
+        after_cycle: AfterCycleCallback | None = None,
     ) -> list[SgwRefreshResultModel]:
         """
         Execute refresh cycles until stopped or max_cycles is reached.
@@ -339,6 +357,8 @@ class SgwManager:
             if max_cycles is not None:
                 results.append(result)
             cycles += 1
+            if after_cycle is not None and bool(after_cycle(result)):
+                break
             if max_cycles is not None and cycles >= int(max_cycles):
                 break
             if self._stop_requested:
@@ -364,6 +384,7 @@ class SgwManager:
 
         heavy_refreshed: list[ServiceGroupId] = []
         light_refreshed: list[ServiceGroupId] = []
+        stale_sg_ids: list[ServiceGroupId] = []
         errors: list[SgwRefreshErrorModel] = []
         with self._lock:
             service_groups = list(self._service_groups)
@@ -445,6 +466,7 @@ class SgwManager:
             if metadata.refresh_state != SgwRefreshState.ERROR:
                 if self._store.compute_staleness(age_seconds, int(self._settings.sgw.cache_max_age_seconds)):
                     stale = True
+                    stale_sg_ids.append(sg_id)
                     metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.STALE})
                 else:
                     metadata = metadata.model_copy(update={"refresh_state": SgwRefreshState.OK})
@@ -487,6 +509,7 @@ class SgwManager:
             snapshot_time_epoch=float(now_epoch),
             heavy_refreshed_sg_ids=heavy_refreshed,
             light_refreshed_sg_ids=light_refreshed,
+            stale_sg_ids=stale_sg_ids,
             errors=errors,
         )
 

@@ -37,6 +37,11 @@ DEFAULT_SGW_POLL_HEAVY_SECONDS = 900
 DEFAULT_SGW_REFRESH_JITTER_SECONDS = 30
 DEFAULT_SGW_CACHE_MAX_AGE_SECONDS = 1200
 DEFAULT_SGW_MAX_WORKERS = 0
+DEFAULT_SGW_GUARD_ENABLED = True
+DEFAULT_SGW_GUARD_RSS_RESTART_THRESHOLD_MB = 0
+DEFAULT_SGW_GUARD_MAX_CONSECUTIVE_ERROR_CYCLES = 0
+DEFAULT_SGW_GUARD_MIN_RESTART_INTERVAL_SECONDS = 300
+DEFAULT_SGW_GUARD_MAX_RESTARTS_PER_HOUR = 6
 SGW_DISCOVERY_MODE_STATIC = "static"
 SGW_DISCOVERY_MODE_SNMP = "snmp"
 SGW_DISCOVERY_MODE_OPTIONS = (SGW_DISCOVERY_MODE_STATIC, SGW_DISCOVERY_MODE_SNMP)
@@ -93,6 +98,40 @@ class SgwDiscoverySettings(BaseModel):
         return self
 
 
+class SgwWorkerGuardSettings(BaseModel):
+    """Shared restart governor settings for long-running SGW workers."""
+
+    enabled: bool = Field(default=DEFAULT_SGW_GUARD_ENABLED, description="Enable shared worker guard checks and supervised SGW restarts.")
+    rss_restart_threshold_mb: int = Field(
+        default=DEFAULT_SGW_GUARD_RSS_RESTART_THRESHOLD_MB,
+        description="Restart SGW when process RSS reaches this threshold in MiB (0 disables RSS-based restart).",
+    )
+    max_consecutive_error_cycles: int = Field(
+        default=DEFAULT_SGW_GUARD_MAX_CONSECUTIVE_ERROR_CYCLES,
+        description="Restart SGW after this many consecutive refresh cycles with one or more errors (0 disables).",
+    )
+    min_restart_interval_seconds: int = Field(
+        default=DEFAULT_SGW_GUARD_MIN_RESTART_INTERVAL_SECONDS,
+        description="Minimum seconds between SGW guard-triggered restarts.",
+    )
+    max_restarts_per_hour: int = Field(
+        default=DEFAULT_SGW_GUARD_MAX_RESTARTS_PER_HOUR,
+        description="Maximum number of SGW guard-triggered restarts allowed per hour.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_guard_settings(self) -> SgwWorkerGuardSettings:
+        if int(self.rss_restart_threshold_mb) < 0:
+            raise ValueError("sgw.guard.rss_restart_threshold_mb must be non-negative.")
+        if int(self.max_consecutive_error_cycles) < 0:
+            raise ValueError("sgw.guard.max_consecutive_error_cycles must be non-negative.")
+        if int(self.min_restart_interval_seconds) < 0:
+            raise ValueError("sgw.guard.min_restart_interval_seconds must be non-negative.")
+        if int(self.max_restarts_per_hour) <= 0:
+            raise ValueError("sgw.guard.max_restarts_per_hour must be greater than zero.")
+        return self
+
+
 class SgwSettings(BaseModel):
     """Serving group worker settings constrained by light/heavy refresh and cache age bounds."""
 
@@ -103,6 +142,7 @@ class SgwSettings(BaseModel):
     max_workers: int = Field(default=DEFAULT_SGW_MAX_WORKERS, description="Maximum SGW workers (0 means derive from discovery).")
     refresh_jitter_seconds: int = Field(default=DEFAULT_SGW_REFRESH_JITTER_SECONDS, description="Jitter to stagger SGW refresh cycles.")
     cache_max_age_seconds: int = Field(default=DEFAULT_SGW_CACHE_MAX_AGE_SECONDS, description="Maximum cache age before reporting stale.")
+    guard: SgwWorkerGuardSettings = Field(default_factory=SgwWorkerGuardSettings, description="Shared worker guard policy for SGW supervision.")
 
     @model_validator(mode="after")
     def _validate_sgw_settings(self) -> SgwSettings:

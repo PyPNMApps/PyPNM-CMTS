@@ -93,6 +93,26 @@ def test_orchestrator_settings_negative_worker_cap_raises() -> None:
         )
 
 
+def test_orchestrator_settings_negative_sgw_guard_rss_threshold_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                "adapter": {"hostname": "cmts.example", "community": "public"},
+                "sgw": {"guard": {"rss_restart_threshold_mb": -1}},
+            }
+        )
+
+
+def test_orchestrator_settings_zero_sgw_guard_restart_budget_raises() -> None:
+    with pytest.raises(ValueError):
+        CmtsOrchestratorSettings.model_validate(
+            {
+                "adapter": {"hostname": "cmts.example", "community": "public"},
+                "sgw": {"guard": {"max_restarts_per_hour": 0}},
+            }
+        )
+
+
 def test_cli_snmp_port_override_passed_to_launcher(monkeypatch: object) -> None:
     captured: dict[str, int | None] = {}
 

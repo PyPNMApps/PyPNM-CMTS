@@ -16,6 +16,7 @@ Key fields:
 - `adapter` - CMTS adapter selection (kind, cmts_index, label).
 - `service_groups` - Optional list of service group descriptors.
 - `default_tests` - Optional list of test names. If missing or empty, defaults to `["ds_ofdm_rxmer"]`.
+- `sgw.guard` - Shared worker restart policy for SGW supervision.
 
 ## Service launcher
 

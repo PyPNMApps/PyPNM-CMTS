@@ -127,6 +127,7 @@ class SgwRefreshResultModel(BaseModel):
     snapshot_time_epoch: float = Field(default=0.0, ge=0.0, description="Snapshot timestamp in epoch seconds.")
     heavy_refreshed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups refreshed via heavy refresh.")
     light_refreshed_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups refreshed via light refresh.")
+    stale_sg_ids: list[ServiceGroupId] = Field(default_factory=list, description="Service groups that remained stale after refresh evaluation.")
     errors: list[SgwRefreshErrorModel] = Field(default_factory=list, description="Errors captured during refresh.")
 
 

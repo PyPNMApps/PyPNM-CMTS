@@ -15,6 +15,7 @@ Service Group Worker Assignment And Scale-Out Behavior.
 - [Scaling Model](#scaling-model)
 - [Failure Handling](#failure-handling)
 - [Configuration Expectations](#configuration-expectations)
+- [Worker Guarding](#worker-guarding)
 - [SGW Discovery Modes](#sgw-discovery-modes)
 - [Implementation Notes](#implementation-notes)
 
@@ -184,6 +185,40 @@ Zero-Touch Still Requires A Minimal Configuration Baseline:
 - A Coordination State Directory (or future shared backend) accessible to participating workers.
 - SNMP connectivity and CMTS inventory discovery prerequisites for production-grade SG enumeration.
 
+## Worker Guarding
+
+PyPNM-CMTS Now Centralizes Long-Running Worker Guard Logic In A Shared Support Module:
+
+- Shared Guard Implementation: `src/pypnm_cmts/support/worker_guard.py`
+- SGW Runtime Supervisor: `src/pypnm_cmts/sgw/runtime_state.py`
+- SGW Guard Policy: `CmtsOrchestrator.sgw.guard`
+
+The Design Goal Is To Keep Restart Policy In One Reusable Place Instead Of Re-Implementing RSS Or Failure Checks In
+Every Worker Loop.
+
+### Guard Model
+
+- A Supervisor Evaluates A Shared Guard Observation After Each SGW Refresh Cycle.
+- The Guard Can Trigger A Controlled SGW Restart When Configured Thresholds Are Crossed.
+- Restart Decisions Are Rate-Limited To Avoid Fast Restart Loops.
+
+### Current SGW Restart Triggers
+
+- Process RSS reaches `sgw.guard.rss_restart_threshold_mb`.
+- Consecutive refresh cycles with one or more errors reaches `sgw.guard.max_consecutive_error_cycles`.
+
+### Restart Behavior
+
+- The Existing SGW Refresh Loop Stops At A Cycle Boundary.
+- Runtime State Swaps In A Fresh `SgwManager` And A Fresh `SgwCacheStore`.
+- SGW Startup Status Records:
+  - `guard_restart_count`
+  - `last_guard_reason`
+  - `last_guard_restart_epoch`
+
+This Is An In-Process Supervisor. It Is Useful For Recovering From Runaway State, Churn, Or Guardrail Breaches, But It
+Does Not Replace A Process-Level Supervisor For Hard Faults In Native Code Or Uninterruptible Blocking Calls.
+
 ## SGW Discovery Modes
 
 This Section Defines How PyPNM-CMTS Determines The Initial Service Group Set At Startup.
@@ -225,6 +260,7 @@ To Reach And Maintain The 0T End-State, These Design Rules Apply:
 - Treat Coordination Output As The Source Of Truth For Work Eligibility.
 - Separate "Enabled Inventory" (what could be worked) From "Acquired Assignment" (what is worked this tick).
 - Keep Persistence Strictly Lease-Gated To Avoid Duplicate Or Conflicting Outputs.
+- Keep Guard Threshold Evaluation In Shared Support Code So Future Workers Reuse The Same Supervisor Contract.
 
 ## Startup Integration
 
