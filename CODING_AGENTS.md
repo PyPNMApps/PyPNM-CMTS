@@ -150,6 +150,9 @@ Before introducing new types, constants, validators, or storage patterns:
 - Log only required troubleshooting context fields (for example `sg_id`, `mac`, `ip`, `community`) and avoid redundant keys.
 - Do not expose SNMP community values in INFO, WARNING, or ERROR logs.
 - SNMP community values may appear only at DEBUG level, using inline conditional formatting in a single log call.
+- Before any scheduled or unscheduled restart of a process, worker, supervisor loop, or background runtime, emit a log line that states the restart is about to happen and why.
+- Use `INFO` for planned or non-memory restarts.
+- Use `WARNING` for restarts triggered by memory growth, memory creep, RSS threshold breaches, or similar resource pressure.
 
 ## PNM Data Type Placement Rule
 

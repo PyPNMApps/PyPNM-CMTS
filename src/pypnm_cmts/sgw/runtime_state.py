@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 
@@ -22,6 +23,7 @@ from pypnm_cmts.support.worker_guard import (
 DEFAULT_SGW_STARTUP_ERROR = "sgw startup failed"
 DEFAULT_SGW_REFRESH_STOP_TIMEOUT_SECONDS = 5.0
 SGW_REFRESH_THREAD_NAME = "pypnm-cmts-sgw-refresh"
+logger = logging.getLogger("SgwRuntimeState")
 
 
 class SgwStartupStatusModel(BaseModel):
@@ -230,6 +232,7 @@ def _run_sgw_refresh_loop(
                 if restarted_manager is None:
                     return False
 
+                _log_guard_restart(decision.reasons, snapshot_time_epoch)
                 if guard_controller is not None:
                     guard_controller.record_restart()
                 current_manager.stop()
@@ -324,6 +327,27 @@ def _record_sgw_refresh_epoch(now_epoch: TimestampSec) -> None:
 def _normalize_epoch_seconds(value: object) -> TimestampSec:
     """Normalize epoch-like values to whole-second `TimestampSec`."""
     return TimestampSec(int(float(value)))
+
+
+def _log_guard_restart(reasons: list[str], now_epoch: TimestampSec) -> None:
+    """Log a guard-triggered SGW restart before the supervisor recycles the worker."""
+    message = "; ".join(reason.strip() for reason in reasons if reason.strip() != "")
+    if message == "":
+        message = "guard threshold exceeded"
+    if "rss_bytes=" in message:
+        logger.warning(
+            "[GUARD_RESTART] worker=%s reason=%s restart_epoch=%s",
+            SGW_REFRESH_THREAD_NAME,
+            message,
+            int(now_epoch),
+        )
+        return
+    logger.info(
+        "[GUARD_RESTART] worker=%s reason=%s restart_epoch=%s",
+        SGW_REFRESH_THREAD_NAME,
+        message,
+        int(now_epoch),
+    )
 
 
 def compute_sgw_cache_ready(
