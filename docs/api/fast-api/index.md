@@ -78,6 +78,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 ## Current Endpoints
 
 - `GET /cmts/system/sysDescr` - CMTS sysDescr lookup.
+- `POST /cmts/system/webService/reload` - Write the configured reload sentinel for an external watcher.
 - `GET /cmts/servingGroup/operations/get/ids` - SG cache summary and discovered IDs.
 - `GET /cmts/servingGroup/operations/get/status` - SGW startup status and cache readiness.
 - `POST /cmts/servingGroup/operations/get/cableModems` - SG cache modem membership (paginated).
@@ -153,6 +154,26 @@ Example request:
 
 ```bash
 curl -X GET "http://127.0.0.1:8080/cmts/system/sysDescr"
+```
+
+## POST /cmts/system/webService/reload
+
+This endpoint is production-safe because it does not try to self-restart the process.
+It writes a configured sentinel file that an external watcher or supervisor should
+observe and use to restart the web service.
+
+Example request:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/cmts/system/webService/reload"
+```
+
+Example watcher:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "systemctl restart pypnm-cmts"
 ```
 
 

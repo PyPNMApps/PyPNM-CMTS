@@ -161,6 +161,7 @@ Phase 7 Focuses On CMTS Endpoint Calls Backed By SGWs. The SGW Layer Continuousl
 Notes:
 - Cache metadata is modeled under orchestrator models and reused by SGW cache entry models.
 - last_error is bounded and validation-tested.
+- Production web-service reload should use an external watcher contract, not Uvicorn `--reload`. PyPNM-CMTS writes a configured reload sentinel file and lets a supervisor recycle the process.
 
 #### Phase 7.2 SGW Manager Skeleton
 

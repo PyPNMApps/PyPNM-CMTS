@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from pypnm.api.routes.common.service.status_codes import ServiceStatusCode
@@ -17,6 +19,7 @@ from pypnm_cmts.config.orchestrator_config import (
     ENV_ADAPTER_HOSTNAME,
     ENV_ADAPTER_READ_COMMUNITY,
 )
+from pypnm_cmts.config.runtime_flags import ENV_WEB_SERVICE_RELOAD_SENTINEL
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 
@@ -100,3 +103,23 @@ def test_system_sysdescr_accepts_empty_query_params(monkeypatch: pytest.MonkeyPa
         payload = response.json()
         assert payload["status"] == ServiceStatusCode.SUCCESS.value
         assert payload["hostname"] == "192.168.0.100"
+
+
+@pytest.mark.unit
+def test_system_webservice_reload_writes_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _disable_startup(monkeypatch)
+    sentinel_path = tmp_path / "runtime" / "webservice.reload"
+    monkeypatch.setenv(ENV_WEB_SERVICE_RELOAD_SENTINEL, str(sentinel_path))
+
+    with TestClient(app) as client:
+        response = client.post("/cmts/system/webService/reload")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ServiceStatusCode.SUCCESS.value
+    assert payload["reload_requested"] is True
+    assert payload["sentinel_path"] == str(sentinel_path)
+    assert sentinel_path.exists()

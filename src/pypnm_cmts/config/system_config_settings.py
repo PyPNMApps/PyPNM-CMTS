@@ -17,6 +17,8 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
 
     _CMTS_ROOT_KEY: str = "pypnm-cmts"
     _CMTS_LIST_KEY: str = "cmts"
+    _CMTS_SERVICE_KEY: str = "service"
+    _CMTS_WEB_SERVICE_KEY: str = "webService"
 
     _CMTS_DEVICE_KEY: str = "device"
     _CMTS_SNMP_KEY: str = "SNMP"
@@ -258,6 +260,20 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
             cls._CMTS_SNMP_V3_KEY,
             "username",
         )
+
+    @classmethod
+    def web_service_reload_sentinel_path(cls) -> Path:
+        """Return the configured web-service reload sentinel path."""
+        configured_path = cls._get_nested_str(
+            "",
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "reloadSentinelPath",
+        )
+        if configured_path.strip() != "":
+            return Path(configured_path).expanduser()
+        return cls.coordination_state_dir() / "webservice.reload"
 
     @classmethod
     def cmts_snmp_v3_security_level(cls, index: int) -> str:

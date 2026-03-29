@@ -27,3 +27,11 @@ class CmtsSysDescrResponse(BaseModel):
     message: str = Field(default="", description="Informational or error message.")
     results: CmtsSysDescrModel = Field(default_factory=CmtsSysDescrModel.empty, description="Parsed CMTS sysDescr data.")
 
+
+class CmtsWebServiceReloadResponse(BaseModel):
+    """Response model for CMTS web-service reload requests."""
+
+    status: ServiceStatusCode = Field(default=ServiceStatusCode.SUCCESS, description="Result status code.")
+    message: str = Field(default="", description="Informational or error message.")
+    reload_requested: bool = Field(default=True, description="True when the reload sentinel was written.")
+    sentinel_path: str = Field(default="", description="Configured sentinel file path for the external watcher.")

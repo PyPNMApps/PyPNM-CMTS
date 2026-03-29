@@ -11,10 +11,12 @@ from pypnm.lib.types import InetAddressStr
 from pypnm_cmts.api.routes.system.schemas import (
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
+    CmtsWebServiceReloadResponse,
 )
 from pypnm_cmts.docsis.cmts_operation import CmtsOperation
 from pypnm_cmts.docsis.data_type.cmts_sysdescr import CmtsSysDescrModel
 from pypnm_cmts.lib.cmts_hostname_resolver import resolve_cmts_inet
+from pypnm_cmts.support.web_service_reload import request_web_service_reload
 
 logger = logging.getLogger("SystemCmtsSnmpService")
 
@@ -83,4 +85,22 @@ class SystemCmtsSnmpService:
             status=ServiceStatusCode.SUCCESS,
             message="",
             results=system_description,
+        )
+
+
+class SystemWebServiceControlService:
+    """Service class for web-service control endpoints."""
+
+    @staticmethod
+    def request_reload() -> CmtsWebServiceReloadResponse:
+        """Write the reload sentinel file for the external service watcher."""
+        sentinel_path = request_web_service_reload(
+            reason="api_reload_request",
+            actor="cmts.system.webService.reload",
+        )
+        return CmtsWebServiceReloadResponse(
+            status=ServiceStatusCode.SUCCESS,
+            message="Web-service reload requested via sentinel file.",
+            reload_requested=True,
+            sentinel_path=str(sentinel_path),
         )

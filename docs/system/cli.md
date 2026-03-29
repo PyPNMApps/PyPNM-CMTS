@@ -75,6 +75,15 @@ pypnm-cmts serve --reload
 pypnm-cmts serve --reload --reload-dir src --reload-dir tools
 ```
 
+For production-triggered web-service recycle, do not use `--reload`. Use the
+`POST /cmts/system/webService/reload` endpoint together with the sentinel watcher:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "systemctl restart pypnm-cmts"
+```
+
 ### HTTPS
 
 ```bash

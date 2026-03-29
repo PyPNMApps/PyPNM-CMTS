@@ -12,8 +12,12 @@ from fastapi import APIRouter, HTTPException
 from pypnm_cmts.api.routes.system.schemas import (
     CmtsSysDescrRequest,
     CmtsSysDescrResponse,
+    CmtsWebServiceReloadResponse,
 )
-from pypnm_cmts.api.routes.system.service import SystemCmtsSnmpService
+from pypnm_cmts.api.routes.system.service import (
+    SystemCmtsSnmpService,
+    SystemWebServiceControlService,
+)
 from pypnm_cmts.api.utils.fastapi_responses import JSON_ONLY_FAST_API_RESPONSE
 
 
@@ -56,6 +60,29 @@ class SystemRouter:
                 raise HTTPException(
                     status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                     detail="Failed to retrieve CMTS sysDescr.",
+                ) from exc
+
+        @self.router.post(
+            "/webService/reload",
+            response_model=CmtsWebServiceReloadResponse,
+            summary="Request CMTS web-service reload",
+            description="Writes the configured reload sentinel file so an external watcher can restart the web service.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
+        )
+        def request_web_service_reload() -> CmtsWebServiceReloadResponse:
+            """
+            **Request CMTS Web-Service Reload**
+
+            This endpoint does not restart the API process directly. It writes a configured
+            sentinel file that an external watcher or supervisor must observe and act on.
+            """
+            try:
+                return SystemWebServiceControlService.request_reload()
+            except Exception as exc:
+                self.logger.error(f"CMTS web-service reload request failed: {exc}", exc_info=True)
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="Failed to request CMTS web-service reload.",
                 ) from exc
 
 router = SystemRouter().router

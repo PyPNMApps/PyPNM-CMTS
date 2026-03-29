@@ -85,6 +85,7 @@ def test_cmts_system_config_settings_reads_cmts_values(tmp_path: Path) -> None:
         assert CmtsSystemConfigSettings.cmts_snmp_v3_priv_protocol(0) == "AES"
         assert CmtsSystemConfigSettings.cmts_snmp_v3_priv_password(0) == "priv-pass"
         assert CmtsSystemConfigSettings.cmts_snmp_v3_retries(0) == 3
+        assert CmtsSystemConfigSettings.web_service_reload_sentinel_path() == CmtsSystemConfigSettings.coordination_state_dir() / "webservice.reload"
         assert CmtsSystemConfigSettings.data_root_dir() == Path(CmtsSystemConfigSettings.pnm_dir()).parent
         assert CmtsSystemConfigSettings.coordination_state_dir() == CmtsSystemConfigSettings.data_root_dir() / "coordination"
         assert CmtsSystemConfigSettings.sg_operations_dir() == CmtsSystemConfigSettings.data_root_dir() / "sg_operations"

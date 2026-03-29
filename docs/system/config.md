@@ -67,6 +67,46 @@ Operational notes:
 - SGW restart state is surfaced through SGW startup status fields such as `guard_restart_count` and `last_guard_reason`.
 - This guard is process-local. Use an external process supervisor as well if you need recovery from hard crashes or blocked native calls.
 
+## Web-service reload sentinel
+
+`GET /cmts/system` endpoints are safe to call in production, but web-service reload is handled through an external watcher contract rather than Uvicorn `--reload`.
+
+Configuration sources, in precedence order:
+
+- `PYPNM_CMTS_WEB_SERVICE_RELOAD_SENTINEL`
+- `pypnm-cmts.service.webService.reloadSentinelPath` in `system.json`
+- default: `<coordination_state_dir>/webservice.reload`
+
+Example `system.json` fragment:
+
+```json
+{
+  "pypnm-cmts": {
+    "service": {
+      "webService": {
+        "reloadSentinelPath": "/run/pypnm-cmts/webservice.reload"
+      }
+    }
+  }
+}
+```
+
+Operational notes:
+
+- `POST /cmts/system/webService/reload` writes the sentinel file and returns immediately.
+- An external watcher or supervisor must observe that file and restart `pypnm-cmts`.
+- The API logs the restart request before it writes the sentinel file.
+- A repo-local watcher helper is available at `tools/support/watch_reload_sentinel.py`.
+
+Example watcher:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "systemctl restart pypnm-cmts" \
+  --poll-seconds 1
+```
+
 ### pypnm-cmts config init
 
 Creates or overwrites system.json with the CMTS template merged in.
