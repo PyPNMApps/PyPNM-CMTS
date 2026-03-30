@@ -31,6 +31,74 @@ Response shape:
 }
 ```
 
+### GET /ops/health/memoryDetail
+
+Operational Memory Detail.
+Returns lightweight counters that help explain process RSS growth without doing a deep heap walk.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8000/ops/health/memoryDetail
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "standalone",
+    "election_name": "",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "process_rss_bytes": 329695232,
+  "sgw_cache": {
+    "service_group_count": 1,
+    "modem_count": 20,
+    "sysdescr_count": 20,
+    "sysdescr_text_bytes": 2563,
+    "ds_rf_channel_count": 33,
+    "us_rf_channel_count": 6,
+    "mac_text_bytes": 340,
+    "ipv4_text_bytes": 249,
+    "ipv6_text_bytes": 40,
+    "entry_dict_shallow_bytes": 224
+  },
+  "operations": {
+    "operation_dir_count": 17,
+    "result_file_count": 25,
+    "state_file_count": 17,
+    "cancel_flag_count": 4,
+    "total_bytes": 177564,
+    "base_dir": ".data/sg_operations"
+  },
+  "pnm_runners": [
+    {
+      "service_name": "RxMerServiceGroupOperationService",
+      "thread_count": 1,
+      "alive_thread_count": 1,
+      "tracked_operation_count": 1,
+      "total_pending_futures": 0,
+      "total_abandoned_futures": 0,
+      "total_retry_queue_items": 0,
+      "total_queue_items": 0
+    }
+  ],
+  "message": ""
+}
+```
+
+Field notes:
+
+- `process_rss_bytes` is the current process resident set size from `/proc/self/status`.
+- `sgw_cache` reports live SGW cache counts and small text-byte estimates only. It is meant for correlation, not exact heap accounting.
+- `operations` reports filesystem-backed operation store counts under the resolved `sg_operations` directory.
+- `pnm_runners` reports live in-memory PNM operation-service runner state.
+- `total_abandoned_futures` is especially important when investigating per-modem timeout leaks because it shows timed-out futures still being tracked by active runners.
+
 ### GET /ops/ready
 
 Readiness Probe.
