@@ -145,7 +145,7 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/results` - Get serving group PreEqualization operation results.
 - `POST /cmts/pnm/sg/us/ofdma/preEqualization/cancel` - Cancel serving group PreEqualization operation.
 - `GET /ops/health` - Liveness probe.
-- `GET /ops/health/memoryDetail` - Lightweight process, SGW cache, and PNM runner memory-debug counters.
+- `GET /ops/health/memoryDetail` - Lightweight process, SGW cache, runner, thread, and Python object-family memory-debug counters.
 - `GET /ops/ready` - Readiness probe.
 - `GET /ops/version` - Service identity and version.
 - `GET /ops/status` - Operational process status snapshot.
