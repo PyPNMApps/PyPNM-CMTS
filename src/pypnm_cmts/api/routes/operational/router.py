@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
     MemoryDetailResponseModel,
+    MemoryReleaseResponseModel,
     OperationalStatusResponseModel,
     ReadyResponseModel,
     SgwPollIntervalResponseModel,
@@ -74,6 +75,21 @@ class OperationalRouter:
             Returns lightweight counters to help explain process RSS growth.
             """
             return self._service.memory_detail()
+
+        @self.router.post(
+            "/health/releaseMemory",
+            response_model=MemoryReleaseResponseModel,
+            summary="Operational memory-release action",
+            description="Triggers gc.collect() and best-effort malloc_trim(), then reports before/after RSS.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
+        )
+        def release_memory() -> MemoryReleaseResponseModel:
+            """
+            **Operational Memory Release**
+
+            Triggers best-effort process memory reclamation and returns before/after RSS.
+            """
+            return self._service.release_memory()
 
         @self.router.get(
             "/ready",

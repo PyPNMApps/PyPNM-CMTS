@@ -333,6 +333,28 @@ def test_ops_memory_detail_reports_sgw_and_operation_stats(tmp_path: Path, monke
     assert payload["pnm_runners"][0]["total_abandoned_futures"] == 3
 
 
+def test_ops_release_memory_reports_rss_delta(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "state"
+    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    rss_values = iter([500, 320])
+    monkeypatch.setattr(OperationalService, "_read_process_rss_bytes", staticmethod(lambda: next(rss_values)))
+    called: list[str] = []
+    monkeypatch.setattr(OperationalService, "_release_unused_memory", staticmethod(lambda: called.append("released")))
+
+    client = _client(app)
+    response = client.post("/ops/health/releaseMemory")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["rss_before_bytes"] == 500
+    assert payload["rss_after_bytes"] == 320
+    assert payload["reclaimed_bytes"] == 180
+    assert called == ["released"]
+
+
 class _FakePnmService:
     def __init__(self, stats: dict[str, int | str]) -> None:
         self._stats = stats

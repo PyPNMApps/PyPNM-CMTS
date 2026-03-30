@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+from pypnm.lib.memory import ProcessMemory
 from pypnm.lib.types import TimeStamp
 from pypnm.lib.utils import Generate, TimeUnit
 
@@ -30,6 +31,7 @@ from pypnm_cmts.api.routes.operational.schemas import (
     MemoryDetailResponseModel,
     MemoryOperationDebugModel,
     MemoryPnmRunnerDebugModel,
+    MemoryReleaseResponseModel,
     MemorySgwCacheDebugModel,
     OperationalIdentityModel,
     OperationalProcessInfoModel,
@@ -275,6 +277,33 @@ class OperationalService:
             message="",
         )
 
+    def release_memory(self) -> MemoryReleaseResponseModel:
+        """Trigger best-effort process memory reclamation and report before/after RSS."""
+        meta = self.build_identity()
+        rss_before_bytes = self._read_process_rss_bytes()
+        self.logger.info(
+            "[MEMORY_RELEASE] action=before rss_bytes=%s",
+            rss_before_bytes,
+        )
+        self._release_unused_memory()
+        rss_after_bytes = self._read_process_rss_bytes()
+        reclaimed_bytes = max(0, int(rss_before_bytes) - int(rss_after_bytes))
+        self.logger.info(
+            "[MEMORY_RELEASE] action=after rss_before_bytes=%s rss_after_bytes=%s reclaimed_bytes=%s",
+            rss_before_bytes,
+            rss_after_bytes,
+            reclaimed_bytes,
+        )
+        return MemoryReleaseResponseModel(
+            status=OperationalStatus.OK,
+            timestamp=self._utc_now(),
+            meta=meta,
+            rss_before_bytes=rss_before_bytes,
+            rss_after_bytes=rss_after_bytes,
+            reclaimed_bytes=reclaimed_bytes,
+            message="Triggered gc.collect() and best-effort malloc_trim().",
+        )
+
     def version(self) -> VersionResponseModel:
         """
         Build the operational version response.
@@ -462,6 +491,11 @@ class OperationalService:
         ]
         models.sort(key=lambda item: item.service_name)
         return models
+
+    @staticmethod
+    def _release_unused_memory() -> None:
+        """Trigger lower-layer best-effort process memory reclamation."""
+        ProcessMemory.release_unused_memory()
 
     def sgw_reset(self, payload: SgwResetRequestModel) -> SgwResetResponseModel:
         """

@@ -156,6 +156,18 @@ class MemoryDetailResponseModel(BaseModel):
     message: str = Field(default="", description="Optional informational message.")
 
 
+class MemoryReleaseResponseModel(BaseModel):
+    """Operational memory-release response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="Memory-release status indicator.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    rss_before_bytes: int = Field(default=0, ge=0, description="Process RSS in bytes before the release attempt.")
+    rss_after_bytes: int = Field(default=0, ge=0, description="Process RSS in bytes after the release attempt.")
+    reclaimed_bytes: int = Field(default=0, ge=0, description="Observed RSS reduction in bytes after the release attempt.")
+    message: str = Field(default="", description="Informational result message.")
+
+
 class SgwRestartRequestModel(BaseModel):
     """SGW restart request payload."""
 
@@ -201,6 +213,7 @@ __all__ = [
     "MemoryOperationDebugModel",
     "MemoryPnmRunnerDebugModel",
     "MemoryDetailResponseModel",
+    "MemoryReleaseResponseModel",
     "SgwRestartRequestModel",
     "SgwRestartResponseModel",
     "SgwResetRequestModel",
