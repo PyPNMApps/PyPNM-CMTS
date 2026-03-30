@@ -9,6 +9,7 @@ Use the `pypnm-cmts serve` command to start the FastAPI service with development
 - [Usage](#usage)
 - [Discovery (CMTS Inventory)](#discovery-cmts-inventory)
 - [SGW Startup Discovery Modes](#sgw-startup-discovery-modes)
+- [SGW Web Worker Safety](#sgw-web-worker-safety)
 - [Orchestrator Run Modes](#orchestrator-run-modes)
 - [Worker Result Persistence](#worker-result-persistence)
 - [Coordination Flags](#coordination-flags)
@@ -38,6 +39,16 @@ The service binds to `127.0.0.1:8080` by default and reads CMTS adapter
 settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname` and `--read-community`
 as overrides.
+
+Worker count and `limit-max-requests` now follow the same hardware-aware
+runtime profile logic used by `pypnm-docsis`. When you do not pass explicit
+`--workers` or `--limit-max-requests`, PyPNM-CMTS first checks the seeded
+worker profile env file from the installed `pypnm-docsis` runtime and then
+falls back to CPU/RAM auto-detection.
+
+For the shared sizing policy and hardware table, see the PyPNM worker-sizing doc:
+
+- [PyPNM Worker Sizing](https://github.com/PyPNMApps/PyPNM/blob/main/docs/system/worker-sizing.md)
 
 To suppress legacy PyPNM endpoints mounted under `/cm`:
 
@@ -69,6 +80,9 @@ pypnm-cmts serve --host 0.0.0.0 --port 8080
 pypnm-cmts serve --reload
 ```
 
+`--reload` is development-only and always forces `workers=1`, even if the
+hardware profile would normally choose a higher worker count.
+
 ### Reload with custom watch paths
 
 ```bash
@@ -89,6 +103,60 @@ For production-triggered web-service recycle, do not use `--reload`. Use the
 ```bash
 pypnm-cmts serve --ssl --cert ./certs/cert.pem --key ./certs/key.pem
 ```
+
+### Production Worker Profile
+
+Use plain `pypnm-cmts serve` for normal production startup when you want the
+same worker auto-selection behavior as `pypnm-docsis`:
+
+```bash
+pypnm-cmts serve --host 0.0.0.0 --port 8080
+```
+
+Use explicit overrides only when you need to pin a specific runtime profile:
+
+```bash
+pypnm-cmts serve --host 0.0.0.0 --port 8080 --workers 4 --limit-max-requests 2000
+```
+
+When SGW is enabled, PyPNM-CMTS forces `workers=1` even if the hardware profile
+or explicit CLI flags would select more. SGW currently uses per-process in-memory
+cache and background refresh state, so multiple web workers would each build
+their own SGW cache and poll the same CMTS in parallel.
+
+`--with-runner` intentionally forces `workers=1` because combined mode hosts the
+API and in-process controller/worker runner in the same process:
+
+```bash
+pypnm-cmts serve --with-runner
+```
+
+## SGW Web Worker Safety
+
+PyPNM-CMTS currently treats SGW as a single-process service when you launch the
+web API with `serve`.
+
+- Only one web worker can safely own SGW today.
+- Additional web workers would each create their own SGW cache and refresh loop.
+- That would duplicate SNMP load and make SGW-backed API state inconsistent across workers.
+
+```mermaid
+flowchart TD
+    A[pypnm-cmts serve] --> B{SGW enabled?}
+    B -- No --> C[Apply hardware worker profile]
+    C --> D[Start N web workers]
+    B -- Yes --> E[Force workers=1]
+    E --> F[Start one web worker]
+    F --> G[Run SGW startup and background refresh]
+    D --> H[API-only multi-worker service]
+```
+
+Current advantage of forcing `workers=1` with SGW enabled:
+
+- avoids duplicate SG discovery and polling
+- avoids multiple in-memory SGW caches drifting apart
+- keeps SGW-backed endpoints consistent
+- reduces unnecessary memory and SNMP load
 
 ## Discovery (CMTS Inventory)
 

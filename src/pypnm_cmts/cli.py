@@ -8,11 +8,19 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from time import time
 from typing import TYPE_CHECKING
 
 import uvicorn
 from pydantic import ValidationError
+from pypnm.cli import _runtime_profile_selection_message
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+from pypnm.support.worker_profile import (
+    WorkerProfile,
+    default_profile_env_path,
+    detect_worker_profile,
+    load_seeded_profile,
+)
 
 from pypnm_cmts.config.request_defaults import (
     ENV_CM_SNMPV2C_WRITE_COMMUNITY,
@@ -47,6 +55,7 @@ LOG_LEVEL_DEFAULT = "info"
 DEFAULT_WORKERS = 1
 TIMEOUT_KEEP_ALIVE_SECONDS = 120
 TIMEOUT_GRACEFUL_SHUTDOWN_SECONDS = 5
+DEFAULT_LIMIT_MAX_REQUESTS = 0
 DEFAULT_SNMP_PORT = 161
 _DEPRECATED_CMTS_PORT_FLAG = "--cmts-port"
 _SNMP_PORT_FLAG = "--snmp-port"
@@ -103,6 +112,40 @@ def _prepare_runtime_paths_for_serve(args: argparse.Namespace) -> None:
         args.reload_dirs = resolved_reload_dirs
 
     _sanitize_pythonpath_for_serve(project_root)
+
+
+def _log_runtime_profile_selection(workers: int, limit_max_requests: int) -> None:
+    print(f"[INFO] {_runtime_profile_selection_message(workers, limit_max_requests)}")
+
+
+def _resolve_runtime_worker_profile(args: argparse.Namespace) -> tuple[int, int]:
+    profile_env_path = Path(os.environ.get("PYPNM_SERVE_ENV_FILE", str(default_profile_env_path())))
+
+    if args.workers is not None and args.limit_max_requests is not None:
+        os.environ["PYPNM_ACTIVE_RUNTIME_SOURCE"] = "explicit_cli"
+        return args.workers, args.limit_max_requests
+
+    profile: WorkerProfile | None = load_seeded_profile(profile_env_path)
+    if profile is not None:
+        os.environ["PYPNM_ACTIVE_RUNTIME_SOURCE"] = "seeded_profile"
+    else:
+        profile = detect_worker_profile()
+        os.environ["PYPNM_ACTIVE_RUNTIME_SOURCE"] = "hardware_auto"
+
+    workers = args.workers if args.workers is not None else profile.workers
+    limit_max_requests = (
+        args.limit_max_requests
+        if args.limit_max_requests is not None
+        else profile.limit_max_requests
+    )
+    return workers, limit_max_requests
+
+
+def _sgw_enabled(settings: object) -> bool:
+    sgw_settings = getattr(settings, "sgw", None)
+    if sgw_settings is None:
+        return False
+    return bool(getattr(sgw_settings, "enabled", False))
 
 
 def main() -> int:
@@ -369,8 +412,18 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--workers",
         type=int,
-        default=DEFAULT_WORKERS,
-        help="Number of worker processes (default: 1).",
+        default=None,
+        help="Number of worker processes (default: auto-select from hardware profile).",
+    )
+
+    serve_parser.add_argument(
+        "--limit-max-requests",
+        type=int,
+        default=None,
+        help=(
+            "Restart a worker after serving this many requests. "
+            "Default: auto-select from hardware profile."
+        ),
     )
 
     serve_parser.add_argument(
@@ -730,6 +783,9 @@ def _run_cli() -> int:
             print(f"🌐 Launching FastAPI with HTTP on http://{args.host}:{args.port}")
 
         _prepare_runtime_paths_for_serve(args)
+        if args.limit_max_requests is not None and args.limit_max_requests < 0:
+            print("[ERROR] --limit-max-requests must be >= 0")
+            return EXIT_CODE_USAGE
         if str(args.cmts_hostname).strip() != "":
             os.environ[ENV_ADAPTER_HOSTNAME] = str(args.cmts_hostname).strip()
         if str(args.read_community).strip() != "":
@@ -750,7 +806,7 @@ def _run_cli() -> int:
             os.environ[ENV_MUTE_TAGS_HARD] = "1"
 
         try:
-            CmtsOrchestratorSettings.from_system_config()
+            settings = CmtsOrchestratorSettings.from_system_config()
         except ValidationError as exc:
             _print_validation_errors(exc)
             print(
@@ -760,6 +816,10 @@ def _run_cli() -> int:
             _print_serve_usage(parser)
             return EXIT_CODE_USAGE
 
+        os.environ.setdefault("PYPNM_SERVE_ENV_FILE", str(default_profile_env_path()))
+        resolved_workers, resolved_limit_max_requests = _resolve_runtime_worker_profile(args)
+        sgw_enabled = _sgw_enabled(settings)
+
         uvicorn_args = {
             "app": "pypnm_cmts.api.main:app",
             "host": args.host,
@@ -767,12 +827,20 @@ def _run_cli() -> int:
             "timeout_keep_alive": TIMEOUT_KEEP_ALIVE_SECONDS,
             "timeout_graceful_shutdown": TIMEOUT_GRACEFUL_SHUTDOWN_SECONDS,
             "log_level": args.log_level,
-            "workers": args.workers,
+            "workers": resolved_workers,
             "access_log": not args.no_access_log,
         }
+        if resolved_limit_max_requests > 0:
+            uvicorn_args["limit_max_requests"] = resolved_limit_max_requests
+
+        if sgw_enabled and resolved_workers != DEFAULT_WORKERS:
+            print(
+                "[WARN] SGW is enabled and uses per-process in-memory cache; forcing workers=1 to avoid duplicate SGW polling and incomplete SGW state across web workers."
+            )
+            uvicorn_args["workers"] = DEFAULT_WORKERS
 
         if args.reload:
-            if args.workers != DEFAULT_WORKERS:
+            if resolved_workers != DEFAULT_WORKERS:
                 print("[WARN] --workers is ignored when --reload is enabled; using workers=1 for dev reload.")
                 uvicorn_args["workers"] = DEFAULT_WORKERS
 
@@ -791,7 +859,7 @@ def _run_cli() -> int:
             os.environ[COMBINED_MODE_ENV] = "1"
             print("🔁 Combined mode runner enabled (controller + worker).")
             uvicorn_args["lifespan"] = "on"
-            if args.workers != DEFAULT_WORKERS:
+            if resolved_workers != DEFAULT_WORKERS:
                 print(
                     "[WARN] --workers is ignored when --with-runner is enabled; using workers=1 for combined mode."
                 )
@@ -804,6 +872,16 @@ def _run_cli() -> int:
                     "ssl_keyfile": args.key,
                 }
             )
+
+        effective_workers = int(uvicorn_args["workers"])
+        effective_limit_max_requests = int(uvicorn_args.get("limit_max_requests", 0))
+        os.environ.setdefault("PYPNM_SERVE_SESSION_ID", f"{os.getpid()}-{int(time())}")
+        os.environ["PYPNM_ACTIVE_WORKERS"] = str(effective_workers)
+        os.environ["PYPNM_ACTIVE_LIMIT_MAX_REQUESTS"] = str(effective_limit_max_requests)
+        _log_runtime_profile_selection(
+            workers=effective_workers,
+            limit_max_requests=effective_limit_max_requests,
+        )
 
         try:
             uvicorn.run(**uvicorn_args)

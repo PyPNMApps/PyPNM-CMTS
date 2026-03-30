@@ -33,6 +33,22 @@ Start the FastAPI service using the CLI:
 pypnm-cmts serve --host 127.0.0.1 --port 8080
 ```
 
+By default, `pypnm-cmts serve` now reuses the same worker-profile selection
+logic as `pypnm-docsis`:
+
+- seeded worker profile when available
+- otherwise CPU/RAM auto-detection
+
+The two intentional exceptions are:
+
+- `--reload` forces `workers=1`
+- `--with-runner` forces `workers=1`
+- `sgw.enabled=true` forces `workers=1`
+
+For the shared sizing policy and hardware scenarios, see:
+
+- [PyPNM Worker Sizing](https://github.com/PyPNMApps/PyPNM/blob/main/docs/system/worker-sizing.md)
+
 Example health checks:
 
 ```bash

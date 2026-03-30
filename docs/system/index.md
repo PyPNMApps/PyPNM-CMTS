@@ -23,6 +23,12 @@ Key fields:
 - [CLI service launcher](cli.md)
 - [CLI option reference](cli-options.md)
 
+PyPNM-CMTS `serve` now reuses the `pypnm-docsis` worker-profile policy for
+default worker count and `limit-max-requests`. For the shared hardware sizing
+guidance, see:
+
+- [PyPNM Worker Sizing](https://github.com/PyPNMApps/PyPNM/blob/main/docs/system/worker-sizing.md)
+
 ## PyPNM-CMTS config menu
 
 Use `pypnm-cmts config-menu` to edit the active `system.json` for CMTS settings,
