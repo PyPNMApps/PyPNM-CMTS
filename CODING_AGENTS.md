@@ -131,6 +131,7 @@ Before introducing new types, constants, validators, or storage patterns:
   - Allow GET only where already present or clearly appropriate (health, readiness, version, status).
 - Reuse shared models under the existing `src/pypnm_cmts/api/common/` structure (inspect current tree before adding anything new).
 - Do not block request paths with `time.sleep()`.
+- Do not use `-` in endpoint URL path segments. Prefer existing repo-style camelCase such as `webService`, `servingGroupWorker`, and `resetCounters`.
 
 ## Logger Naming Rule
 

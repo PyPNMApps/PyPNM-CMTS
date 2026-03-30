@@ -16,8 +16,21 @@ from pathlib import Path
 from pypnm.lib.types import TimeStamp
 from pypnm.lib.utils import Generate, TimeUnit
 
+from pypnm_cmts.api.common.operations.store import (
+    CANCEL_FLAG_NAME,
+    FALLBACK_BASE_DIR,
+    RESULTS_DIR_NAME,
+    STATE_FILE_NAME,
+)
+from pypnm_cmts.api.common.service.pnm.operation_service import (
+    PnmServiceGroupOperationServiceBase,
+)
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
+    MemoryDetailResponseModel,
+    MemoryOperationDebugModel,
+    MemoryPnmRunnerDebugModel,
+    MemorySgwCacheDebugModel,
     OperationalIdentityModel,
     OperationalProcessInfoModel,
     OperationalStatusResponseModel,
@@ -32,6 +45,7 @@ from pypnm_cmts.api.routes.operational.schemas import (
 )
 from pypnm_cmts.combined_mode import combined_mode_enabled
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.lib.constants import CacheRefreshMode, OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import CoordinationElectionName, ServiceGroupId
 from pypnm_cmts.orchestrator.pidfile_manager import PidFileRecord
@@ -242,6 +256,25 @@ class OperationalService:
             missing_sg_ids=missing_sg_ids,
         )
 
+    def memory_detail(self) -> MemoryDetailResponseModel:
+        """Build lightweight memory-debug counters for SGW cache and operation store state."""
+        meta = self.build_identity()
+        store = get_sgw_store()
+        sgw_cache = MemorySgwCacheDebugModel()
+        if store is not None:
+            sgw_cache = MemorySgwCacheDebugModel.model_validate(store.get_memory_debug_stats())
+        operations = MemoryOperationDebugModel.model_validate(self._operation_store_debug_stats())
+        return MemoryDetailResponseModel(
+            status=OperationalStatus.OK,
+            timestamp=self._utc_now(),
+            meta=meta,
+            process_rss_bytes=self._read_process_rss_bytes(),
+            sgw_cache=sgw_cache,
+            operations=operations,
+            pnm_runners=self._pnm_runner_debug_models(),
+            message="",
+        )
+
     def version(self) -> VersionResponseModel:
         """
         Build the operational version response.
@@ -357,6 +390,78 @@ class OperationalService:
             sg_id=sg_id,
             message=message,
         )
+
+    @staticmethod
+    def _read_process_rss_bytes() -> int:
+        """Read current process RSS from /proc/self/status."""
+        status_path = Path("/proc/self/status")
+        if not status_path.is_file():
+            return 0
+        for line in status_path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("VmRSS:"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                return 0
+            return int(parts[1]) * 1024
+        return 0
+
+    @staticmethod
+    def _operation_store_base_dir() -> Path:
+        try:
+            return CmtsSystemConfigSettings.sg_operations_dir()
+        except Exception:
+            return FALLBACK_BASE_DIR
+
+    def _operation_store_debug_stats(self) -> dict[str, int | str]:
+        """Return cheap filesystem counters for the operation-store base directory."""
+        base_dir = self._operation_store_base_dir()
+        if not base_dir.exists():
+            return {
+                "operation_dir_count": 0,
+                "result_file_count": 0,
+                "state_file_count": 0,
+                "cancel_flag_count": 0,
+                "total_bytes": 0,
+                "base_dir": str(base_dir),
+            }
+        operation_dir_count = 0
+        result_file_count = 0
+        state_file_count = 0
+        cancel_flag_count = 0
+        total_bytes = 0
+        for entry in base_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            operation_dir_count += 1
+            for path in entry.rglob("*"):
+                if not path.is_file():
+                    continue
+                total_bytes += int(path.stat().st_size)
+                if path.name == STATE_FILE_NAME:
+                    state_file_count += 1
+                elif path.name == CANCEL_FLAG_NAME:
+                    cancel_flag_count += 1
+                elif path.parent.name == RESULTS_DIR_NAME:
+                    result_file_count += 1
+        return {
+            "operation_dir_count": operation_dir_count,
+            "result_file_count": result_file_count,
+            "state_file_count": state_file_count,
+            "cancel_flag_count": cancel_flag_count,
+            "total_bytes": total_bytes,
+            "base_dir": str(base_dir),
+        }
+
+    @staticmethod
+    def _pnm_runner_debug_models() -> list[MemoryPnmRunnerDebugModel]:
+        """Return live runner counters from registered PNM operation services."""
+        models = [
+            MemoryPnmRunnerDebugModel.model_validate(service.get_debug_stats())
+            for service in PnmServiceGroupOperationServiceBase.get_registered_services()
+        ]
+        models.sort(key=lambda item: item.service_name)
+        return models
 
     def sgw_reset(self, payload: SgwResetRequestModel) -> SgwResetResponseModel:
         """

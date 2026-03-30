@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
 
 from pypnm_cmts.config.orchestrator_config import (
     CmtsOrchestratorSettings,
@@ -15,6 +16,11 @@ from pypnm_cmts.config.orchestrator_config import (
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.manager import SgwManager
+from pypnm_cmts.sgw.models import (
+    SgwCableModemModel,
+    SgwCacheEntryModel,
+    SgwSnapshotModel,
+)
 from pypnm_cmts.sgw.runtime_state import (
     reset_sgw_runtime_state,
     set_sgw_startup_success,
@@ -256,6 +262,83 @@ def test_ops_status_skips_fallback_without_election(tmp_path: Path, monkeypatch:
     assert response.status_code == 200
     payload = response.json()
     assert payload["fallback_used"] is False
+
+
+def test_ops_memory_detail_reports_sgw_and_operation_stats(tmp_path: Path, monkeypatch: object) -> None:
+    state_dir = tmp_path / "coordination"
+    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
+    reset_sgw_runtime_state()
+    store = SgwCacheStore()
+    entry = SgwCacheEntryModel(
+        sg_id=ServiceGroupId(1),
+        snapshot=SgwSnapshotModel(
+            sg_id=ServiceGroupId(1),
+            cable_modems=[
+                SgwCableModemModel(
+                    mac="00:11:22:33:44:55",
+                    ipv4="192.0.2.10",
+                    sysdescr=SystemDescriptorModel(sysDescr="Docsis Modem"),
+                )
+            ],
+        ),
+    )
+    store.upsert_entry(entry)
+    manager = SgwManager(settings=settings, store=store, service_groups=[ServiceGroupId(1)])
+    set_sgw_startup_success([ServiceGroupId(1)], store, manager, 0.0)
+
+    operations_dir = tmp_path / "sg_operations" / "op-1" / "results"
+    operations_dir.mkdir(parents=True, exist_ok=True)
+    (operations_dir.parent / "state.json").write_text("{}", encoding="utf-8")
+    (operations_dir / "sg-1.jsonl").write_text("{\"ok\":true}\n", encoding="utf-8")
+
+    app = _load_app(settings, monkeypatch)
+    from pypnm_cmts.api.common.service.pnm.operation_service import (
+        PnmServiceGroupOperationServiceBase,
+    )
+    from pypnm_cmts.api.routes.operational.service import OperationalService
+
+    monkeypatch.setattr(OperationalService, "_operation_store_base_dir", staticmethod(lambda: tmp_path / "sg_operations"))
+    monkeypatch.setattr(
+        PnmServiceGroupOperationServiceBase,
+        "get_registered_services",
+        classmethod(
+            lambda cls: [
+                _FakePnmService(
+                    {
+                        "service_name": "FakePnmService",
+                        "thread_count": 1,
+                        "alive_thread_count": 1,
+                        "tracked_operation_count": 1,
+                        "total_pending_futures": 2,
+                        "total_abandoned_futures": 3,
+                        "total_retry_queue_items": 4,
+                        "total_queue_items": 5,
+                    }
+                )
+            ]
+        ),
+    )
+    client = _client(app)
+    response = client.get("/ops/health/memoryDetail")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == OperationalStatus.OK.value
+    assert payload["sgw_cache"]["service_group_count"] == 1
+    assert payload["sgw_cache"]["modem_count"] == 1
+    assert payload["sgw_cache"]["sysdescr_count"] == 1
+    assert payload["operations"]["operation_dir_count"] == 1
+    assert payload["operations"]["state_file_count"] == 1
+    assert payload["operations"]["result_file_count"] == 1
+    assert payload["pnm_runners"][0]["service_name"] == "FakePnmService"
+    assert payload["pnm_runners"][0]["total_abandoned_futures"] == 3
+
+
+class _FakePnmService:
+    def __init__(self, stats: dict[str, int | str]) -> None:
+        self._stats = stats
+
+    def get_debug_stats(self) -> dict[str, int | str]:
+        return self._stats
 
 
 def test_ops_status_worker_sorting(tmp_path: Path, monkeypatch: object) -> None:

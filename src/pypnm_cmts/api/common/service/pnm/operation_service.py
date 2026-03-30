@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from weakref import WeakSet
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel
@@ -37,6 +38,8 @@ NOT_FOUND_MESSAGE = "operation not found"
 class PnmServiceGroupOperationServiceBase(ABC):
     """Reusable SG-level operation lifecycle and scope resolution helpers."""
 
+    _registry: WeakSet[PnmServiceGroupOperationServiceBase] = WeakSet()
+
     def __init__(
         self,
         store: OperationStore | None = None,
@@ -54,6 +57,7 @@ class PnmServiceGroupOperationServiceBase(ABC):
         self._runner: OperationRunner | None = None
         self._max_inline_records = max_inline_records
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self._registry.add(self)
 
     def start_capture(self, request: BaseModel) -> BaseModel:
         """Create a new SG-level operation and start background execution."""
@@ -202,6 +206,35 @@ class PnmServiceGroupOperationServiceBase(ABC):
             len(state.request_summary.serving_group_ids),
             len(state.request_summary.mac_addresses),
         )
+
+    @classmethod
+    def get_registered_services(cls) -> list[PnmServiceGroupOperationServiceBase]:
+        """Return live registered PNM operation service instances."""
+        return list(cls._registry)
+
+    def get_debug_stats(self) -> dict[str, int | str]:
+        """Return lightweight in-memory debug counters for this service instance."""
+        runner_stats = {
+            "thread_count": 0,
+            "alive_thread_count": 0,
+            "tracked_operation_count": 0,
+            "total_pending_futures": 0,
+            "total_abandoned_futures": 0,
+            "total_retry_queue_items": 0,
+            "total_queue_items": 0,
+        }
+        if self._runner is not None:
+            runner_stats = self._runner.get_debug_stats()
+        return {
+            "service_name": self.__class__.__name__,
+            "thread_count": int(runner_stats["thread_count"]),
+            "alive_thread_count": int(runner_stats["alive_thread_count"]),
+            "tracked_operation_count": int(runner_stats["tracked_operation_count"]),
+            "total_pending_futures": int(runner_stats["total_pending_futures"]),
+            "total_abandoned_futures": int(runner_stats["total_abandoned_futures"]),
+            "total_retry_queue_items": int(runner_stats["total_retry_queue_items"]),
+            "total_queue_items": int(runner_stats["total_queue_items"]),
+        }
 
     @abstractmethod
     def _build_request_summary(self, request: BaseModel) -> OperationRequestSummaryModel:

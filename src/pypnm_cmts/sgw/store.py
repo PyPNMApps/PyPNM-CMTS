@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import threading
+from sys import getsizeof
 
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.orchestrator.models import (
@@ -77,6 +78,45 @@ class SgwCacheStore:
             new_entry = entry.model_copy(update={"snapshot": snapshot})
             self._entries[sg_id] = new_entry.model_copy(deep=True)
             return metadata
+
+    def get_memory_debug_stats(self) -> dict[str, int]:
+        """Return lightweight SGW cache counts and byte estimates."""
+        with self._lock:
+            sg_count = len(self._entries)
+            modem_count = 0
+            sysdescr_count = 0
+            sysdescr_text_bytes = 0
+            ds_rf_channel_count = 0
+            us_rf_channel_count = 0
+            mac_text_bytes = 0
+            ipv4_text_bytes = 0
+            ipv6_text_bytes = 0
+            for entry in self._entries.values():
+                snapshot = entry.snapshot
+                ds_rf_channel_count += len(snapshot.ds_rf_channels)
+                us_rf_channel_count += len(snapshot.us_rf_channels)
+                modems = snapshot.cable_modems
+                modem_count += len(modems)
+                for modem in modems:
+                    mac_text_bytes += len(str(modem.mac))
+                    ipv4_text_bytes += len(str(modem.ipv4))
+                    ipv6_text_bytes += len(str(modem.ipv6))
+                    sysdescr_text = str(modem.sysdescr)
+                    if sysdescr_text.strip() != "":
+                        sysdescr_count += 1
+                        sysdescr_text_bytes += len(sysdescr_text.encode("utf-8"))
+            return {
+                "service_group_count": sg_count,
+                "modem_count": modem_count,
+                "sysdescr_count": sysdescr_count,
+                "sysdescr_text_bytes": sysdescr_text_bytes,
+                "ds_rf_channel_count": ds_rf_channel_count,
+                "us_rf_channel_count": us_rf_channel_count,
+                "mac_text_bytes": mac_text_bytes,
+                "ipv4_text_bytes": ipv4_text_bytes,
+                "ipv6_text_bytes": ipv6_text_bytes,
+                "entry_dict_shallow_bytes": getsizeof(self._entries),
+            }
 
     @staticmethod
     def _normalize_error_message(message: str) -> str:

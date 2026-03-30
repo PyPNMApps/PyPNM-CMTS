@@ -73,6 +73,7 @@ class OperationRunner:
         self._poll_interval_seconds = poll_interval_seconds
         self._lock = threading.Lock()
         self._threads: dict[PnmCaptureOperationId, threading.Thread] = {}
+        self._debug_snapshots: dict[PnmCaptureOperationId, dict[str, int]] = {}
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
 
     def start(self, operation_id: PnmCaptureOperationId) -> bool:
@@ -195,6 +196,13 @@ class OperationRunner:
                     item, start_time = pending.pop(future)
                     abandoned[future] = (item, start_time)
                     future.cancel()
+                    self._update_debug_snapshot(
+                        operation_id=operation_id,
+                        pending_count=len(pending),
+                        abandoned_count=len(abandoned),
+                        retry_count=len(retry_queue),
+                        queue_count=len(queue),
+                    )
                     result = self._timeout_result()
                     state = self._handle_result(operation_id, state, item, result, execution, retry_queue)
                     if state.state in {OperationState.CANCELLED, OperationState.FAILED}:
@@ -215,8 +223,22 @@ class OperationRunner:
                     else:
                         result = self._resolve_future_result(future)
                     state = self._handle_result(operation_id, state, item, result, execution, retry_queue)
+                    self._update_debug_snapshot(
+                        operation_id=operation_id,
+                        pending_count=len(pending),
+                        abandoned_count=len(abandoned),
+                        retry_count=len(retry_queue),
+                        queue_count=len(queue),
+                    )
                     if state.state in {OperationState.CANCELLED, OperationState.FAILED}:
                         return
+                self._update_debug_snapshot(
+                    operation_id=operation_id,
+                    pending_count=len(pending),
+                    abandoned_count=len(abandoned),
+                    retry_count=len(retry_queue),
+                    queue_count=len(queue),
+                )
         finally:
             if cancelled:
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -558,9 +580,47 @@ class OperationRunner:
     def _now_epoch() -> TimestampSec:
         return TimestampSec(Generate.time_stamp(unit=TimeUnit.SECONDS))
 
+    def get_debug_stats(self) -> dict[str, int]:
+        """Return aggregate debug counters for active runner state."""
+        with self._lock:
+            thread_count = len(self._threads)
+            alive_thread_count = sum(1 for thread in self._threads.values() if thread.is_alive())
+            tracked_operation_count = len(self._debug_snapshots)
+            total_pending_futures = sum(snapshot.get("pending_count", 0) for snapshot in self._debug_snapshots.values())
+            total_abandoned_futures = sum(snapshot.get("abandoned_count", 0) for snapshot in self._debug_snapshots.values())
+            total_retry_queue_items = sum(snapshot.get("retry_count", 0) for snapshot in self._debug_snapshots.values())
+            total_queue_items = sum(snapshot.get("queue_count", 0) for snapshot in self._debug_snapshots.values())
+        return {
+            "thread_count": thread_count,
+            "alive_thread_count": alive_thread_count,
+            "tracked_operation_count": tracked_operation_count,
+            "total_pending_futures": total_pending_futures,
+            "total_abandoned_futures": total_abandoned_futures,
+            "total_retry_queue_items": total_retry_queue_items,
+            "total_queue_items": total_queue_items,
+        }
+
+    def _update_debug_snapshot(
+        self,
+        operation_id: PnmCaptureOperationId,
+        pending_count: int,
+        abandoned_count: int,
+        retry_count: int,
+        queue_count: int,
+    ) -> None:
+        """Update aggregate debug counters for an active operation."""
+        with self._lock:
+            self._debug_snapshots[operation_id] = {
+                "pending_count": int(pending_count),
+                "abandoned_count": int(abandoned_count),
+                "retry_count": int(retry_count),
+                "queue_count": int(queue_count),
+            }
+
     def _cleanup(self, operation_id: PnmCaptureOperationId) -> None:
         with self._lock:
             self._threads.pop(operation_id, None)
+            self._debug_snapshots.pop(operation_id, None)
 
     def _log_terminal_state(self, state: OperationStateModel) -> None:
         self.logger.info(

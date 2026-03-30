@@ -104,6 +104,58 @@ class SgwPollIntervalResponseModel(BaseModel):
     message: str = Field(default="", description="Optional error message when unavailable.")
 
 
+class MemorySgwCacheDebugModel(BaseModel):
+    """Lightweight SGW cache memory-debug counters."""
+
+    service_group_count: int = Field(default=0, ge=0, description="Number of SG cache entries.")
+    modem_count: int = Field(default=0, ge=0, description="Number of cached cable modem rows across all SGs.")
+    sysdescr_count: int = Field(default=0, ge=0, description="Number of cached modem sysDescr payloads with non-empty text.")
+    sysdescr_text_bytes: int = Field(default=0, ge=0, description="Approximate UTF-8 bytes across cached sysDescr text.")
+    ds_rf_channel_count: int = Field(default=0, ge=0, description="Number of cached downstream RF channel rows.")
+    us_rf_channel_count: int = Field(default=0, ge=0, description="Number of cached upstream RF channel rows.")
+    mac_text_bytes: int = Field(default=0, ge=0, description="Approximate bytes used by cached MAC address text.")
+    ipv4_text_bytes: int = Field(default=0, ge=0, description="Approximate bytes used by cached IPv4 text.")
+    ipv6_text_bytes: int = Field(default=0, ge=0, description="Approximate bytes used by cached IPv6 text.")
+    entry_dict_shallow_bytes: int = Field(default=0, ge=0, description="Shallow size of the SGW cache entry dictionary.")
+
+
+class MemoryOperationDebugModel(BaseModel):
+    """Filesystem-backed operation-store debug counters."""
+
+    operation_dir_count: int = Field(default=0, ge=0, description="Number of operation directories on disk.")
+    result_file_count: int = Field(default=0, ge=0, description="Number of operation result files on disk.")
+    state_file_count: int = Field(default=0, ge=0, description="Number of operation state files on disk.")
+    cancel_flag_count: int = Field(default=0, ge=0, description="Number of operation cancel-flag files on disk.")
+    total_bytes: int = Field(default=0, ge=0, description="Approximate total bytes under the operation store base directory.")
+    base_dir: str = Field(default="", description="Resolved operation store base directory.")
+
+
+class MemoryPnmRunnerDebugModel(BaseModel):
+    """Live PNM operation-service and runner counters."""
+
+    service_name: str = Field(default="", description="PNM operation service class name.")
+    thread_count: int = Field(default=0, ge=0, description="Tracked background runner thread count for the service.")
+    alive_thread_count: int = Field(default=0, ge=0, description="Alive background runner thread count for the service.")
+    tracked_operation_count: int = Field(default=0, ge=0, description="Active operation debug snapshot count for the service.")
+    total_pending_futures: int = Field(default=0, ge=0, description="Aggregate pending futures across active operations.")
+    total_abandoned_futures: int = Field(default=0, ge=0, description="Aggregate timed-out futures still tracked as abandoned.")
+    total_retry_queue_items: int = Field(default=0, ge=0, description="Aggregate queued retries across active operations.")
+    total_queue_items: int = Field(default=0, ge=0, description="Aggregate queued work items across active operations.")
+
+
+class MemoryDetailResponseModel(BaseModel):
+    """Operational memory-debug response."""
+
+    status: OperationalStatus = Field(default=OperationalStatus.OK, description="Memory-debug status indicator.")
+    timestamp: TimeStamp = Field(default=TimeStamp(0), description="Unix timestamp in seconds for the response.")
+    meta: OperationalIdentityModel = Field(default_factory=OperationalIdentityModel, description="Runtime identity metadata.")
+    process_rss_bytes: int = Field(default=0, ge=0, description="Current process RSS in bytes.")
+    sgw_cache: MemorySgwCacheDebugModel = Field(default_factory=MemorySgwCacheDebugModel, description="SGW cache counters and byte estimates.")
+    operations: MemoryOperationDebugModel = Field(default_factory=MemoryOperationDebugModel, description="Operation-store disk counters.")
+    pnm_runners: list[MemoryPnmRunnerDebugModel] = Field(default_factory=list, description="Live in-memory PNM operation-service runner counters.")
+    message: str = Field(default="", description="Optional informational message.")
+
+
 class SgwRestartRequestModel(BaseModel):
     """SGW restart request payload."""
 
@@ -145,6 +197,10 @@ __all__ = [
     "VersionResponseModel",
     "SgwProcessResponseModel",
     "SgwPollIntervalResponseModel",
+    "MemorySgwCacheDebugModel",
+    "MemoryOperationDebugModel",
+    "MemoryPnmRunnerDebugModel",
+    "MemoryDetailResponseModel",
     "SgwRestartRequestModel",
     "SgwRestartResponseModel",
     "SgwResetRequestModel",

@@ -11,6 +11,7 @@ from starlette.responses import JSONResponse
 
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
+    MemoryDetailResponseModel,
     OperationalStatusResponseModel,
     ReadyResponseModel,
     SgwPollIntervalResponseModel,
@@ -58,6 +59,21 @@ class OperationalRouter:
             Returns liveness status and runtime identity metadata.
             """
             return self._service.health()
+
+        @self.router.get(
+            "/health/memoryDetail",
+            response_model=MemoryDetailResponseModel,
+            summary="Operational memory-detail probe",
+            description="Returns lightweight process, SGW cache, and operation-store memory-debug counters.",
+            responses=JSON_ONLY_FAST_API_RESPONSE,
+        )
+        def memory_detail() -> MemoryDetailResponseModel:
+            """
+            **Operational Memory Detail**
+
+            Returns lightweight counters to help explain process RSS growth.
+            """
+            return self._service.memory_detail()
 
         @self.router.get(
             "/ready",
