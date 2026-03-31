@@ -15,11 +15,7 @@ import uvicorn
 from pydantic import ValidationError
 from pypnm.cli import _runtime_profile_selection_message
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
-from pypnm.support.serve_background import (
-    BACKGROUND_CHILD_ENV,
-    BACKGROUND_PIDFILE_ENV,
-    launch_background_serve,
-)
+from pypnm.support import serve_background
 from pypnm.support.worker_profile import (
     WorkerProfile,
     default_profile_env_path,
@@ -66,6 +62,13 @@ DEFAULT_SNMP_PORT = 161
 _DEPRECATED_CMTS_PORT_FLAG = "--cmts-port"
 _SNMP_PORT_FLAG = "--snmp-port"
 _cmts_port_warned = False
+BACKGROUND_CHILD_ENV = serve_background.BACKGROUND_CHILD_ENV
+BACKGROUND_PIDFILE_ENV = getattr(
+    serve_background,
+    "BACKGROUND_PIDFILE_ENV",
+    "PYPNM_BACKGROUND_PIDFILE",
+)
+launch_background_serve = serve_background.launch_background_serve
 
 
 def _project_root() -> Path:
