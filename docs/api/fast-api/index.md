@@ -33,6 +33,12 @@ Start the FastAPI service using the CLI:
 pypnm-cmts serve --host 127.0.0.1 --port 8080
 ```
 
+To keep the service alive after logout:
+
+```bash
+pypnm-cmts serve --run-background
+```
+
 By default, `pypnm-cmts serve` now reuses the same worker-profile selection
 logic as `pypnm-docsis`:
 

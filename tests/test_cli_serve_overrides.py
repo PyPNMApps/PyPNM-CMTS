@@ -753,3 +753,125 @@ def test_cli_serve_sgw_enabled_forces_single_worker_even_when_explicit(
     assert called["workers"] == cli_module.DEFAULT_WORKERS
     assert called["limit_max_requests"] == 2000
     assert "forcing workers=1" in captured.out
+
+
+def test_cli_serve_run_background_launches_detached_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Args:
+        command = "serve"
+        host = HOST
+        port = PORT
+        ssl = False
+        cert = "./certs/cert.pem"
+        key = "./certs/key.pem"
+        with_runner = False
+        log_level = "info"
+        workers = None
+        limit_max_requests = None
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+        run_background = True
+        background_log_file = "/tmp/pypnm-cmts.log"
+        background_pidfile = "/tmp/pypnm-cmts.pid"
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        cm_snmpv2c_write_community = ""
+        cm_tftp_ipv4 = ""
+        cm_tftp_ipv6 = ""
+        mute_pypnm_endpoints = False
+        mute_tags = ""
+        mute_tags_hard = False
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+    monkeypatch.setattr(
+        orchestrator_config.CmtsOrchestratorSettings,
+        "from_system_config",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setattr(cli_module.CmtsSystemConfigSettings, "runtime_dir", classmethod(lambda cls: "/tmp/pypnm-cmts-runtime"))
+
+    called: dict[str, object] = {}
+
+    def _fake_launch_background_serve(**kwargs: object) -> int:
+        called.update(kwargs)
+        return cli_module.SUCCESS_EXIT_CODE
+
+    uvicorn_called = {"value": False}
+
+    def _fake_run(**_kwargs: object) -> None:
+        uvicorn_called["value"] = True
+
+    monkeypatch.setattr(cli_module, "launch_background_serve", _fake_launch_background_serve)
+    monkeypatch.setattr(cli_module.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(cli_module, "_print_serve_usage", lambda _parser: None)
+
+    exit_code = cli_module._run_cli()
+
+    assert exit_code == cli_module.SUCCESS_EXIT_CODE
+    assert uvicorn_called["value"] is False
+    assert called["module_name"] == "pypnm_cmts.cli"
+    assert called["app_slug"] == "pypnm-cmts"
+    assert called["runtime_dir"] == "/tmp/pypnm-cmts-runtime"
+    assert called["log_file"] == "/tmp/pypnm-cmts.log"
+    assert called["pidfile"] == "/tmp/pypnm-cmts.pid"
+
+
+def test_cli_serve_run_background_rejects_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Args:
+        command = "serve"
+        host = HOST
+        port = PORT
+        ssl = False
+        cert = "./certs/cert.pem"
+        key = "./certs/key.pem"
+        with_runner = False
+        log_level = "info"
+        workers = None
+        limit_max_requests = None
+        no_access_log = False
+        reload = True
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+        run_background = True
+        background_log_file = ""
+        background_pidfile = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        cm_snmpv2c_write_community = ""
+        cm_tftp_ipv4 = ""
+        cm_tftp_ipv6 = ""
+        mute_pypnm_endpoints = False
+        mute_tags = ""
+        mute_tags_hard = False
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+
+    uvicorn_called = {"value": False}
+
+    def _fake_run(**_kwargs: object) -> None:
+        uvicorn_called["value"] = True
+
+    monkeypatch.setattr(cli_module.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(cli_module, "_print_serve_usage", lambda _parser: None)
+
+    exit_code = cli_module._run_cli()
+
+    assert exit_code == cli_module.EXIT_CODE_USAGE
+    assert uvicorn_called["value"] is False

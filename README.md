@@ -134,6 +134,20 @@ settings from `system.json`. Use `pypnm-cmts config-menu` to set the CMTS
 hostname and SNMP communities, or pass `--cmts-hostname`/`--read-community`
 overrides at runtime.
 
+To keep the service running after logout, launch it in the background:
+
+  ```bash
+  pypnm-cmts serve --run-background
+  ```
+
+Optional explicit log and pidfile paths:
+
+  ```bash
+  pypnm-cmts serve --run-background \
+    --background-log-file /var/log/pypnm-cmts.log \
+    --background-pidfile /var/run/pypnm-cmts.pid
+  ```
+
 ### Tested CMTS platforms
 
 | Vendor | Model | Status |

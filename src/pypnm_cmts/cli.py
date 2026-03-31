@@ -15,6 +15,7 @@ import uvicorn
 from pydantic import ValidationError
 from pypnm.cli import _runtime_profile_selection_message
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
+from pypnm.support.serve_background import launch_background_serve
 from pypnm.support.worker_profile import (
     WorkerProfile,
     default_profile_env_path,
@@ -32,6 +33,7 @@ from pypnm_cmts.config.runtime_flags import (
     ENV_MUTE_TAGS,
     ENV_MUTE_TAGS_HARD,
 )
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.lib.types import (
     CoordinationElectionName,
     OwnerId,
@@ -461,6 +463,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=["*.pyc", "*__pycache__*", "*.tmp", "*.log"],
         help="Glob pattern(s) to exclude from reload (repeatable).",
     )
+    serve_parser.add_argument(
+        "--run-background",
+        action="store_true",
+        help="Detach the FastAPI service into the background and return the child PID.",
+    )
+    serve_parser.add_argument(
+        "--background-log-file",
+        default="",
+        help="Optional log file path for --run-background.",
+    )
+    serve_parser.add_argument(
+        "--background-pidfile",
+        default="",
+        help="Optional pidfile path for --run-background.",
+    )
     parser._serve_parser = serve_parser
 
     config_menu_parser = subparsers.add_parser(
@@ -771,9 +788,19 @@ def _run_cli() -> int:
             CmtsOrchestratorSettings,
         )
 
+        run_background = bool(getattr(args, "run_background", False))
+        background_log_file = str(getattr(args, "background_log_file", "")).strip()
+        background_pidfile = str(getattr(args, "background_pidfile", "")).strip()
+
         if args.with_runner and args.reload:
             print(
                 "ERROR: --with-runner cannot be used with --reload.",
+                file=sys.stderr,
+            )
+            return EXIT_CODE_USAGE
+        if run_background and args.reload:
+            print(
+                "ERROR: --run-background cannot be used with --reload.",
                 file=sys.stderr,
             )
             return EXIT_CODE_USAGE
@@ -783,6 +810,15 @@ def _run_cli() -> int:
             print(f"🌐 Launching FastAPI with HTTP on http://{args.host}:{args.port}")
 
         _prepare_runtime_paths_for_serve(args)
+        if run_background:
+            return launch_background_serve(
+                module_name="pypnm_cmts.cli",
+                app_slug="pypnm-cmts",
+                runtime_dir=CmtsSystemConfigSettings.runtime_dir(),
+                argv=sys.argv[1:],
+                log_file=background_log_file,
+                pidfile=background_pidfile,
+            )
         if args.limit_max_requests is not None and args.limit_max_requests < 0:
             print("[ERROR] --limit-max-requests must be >= 0")
             return EXIT_CODE_USAGE

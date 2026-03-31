@@ -74,6 +74,24 @@ pypnm-cmts serve --mute-tags "Orchestrator,Operational" --mute-tags-hard
 pypnm-cmts serve --host 0.0.0.0 --port 8080
 ```
 
+### Run in background
+
+```bash
+pypnm-cmts serve --run-background
+```
+
+Optional explicit paths:
+
+```bash
+pypnm-cmts serve --run-background \
+  --background-log-file /var/log/pypnm-cmts.log \
+  --background-pidfile /var/run/pypnm-cmts.pid
+```
+
+`--run-background` detaches the service from the current shell, writes a pidfile,
+and redirects stdout/stderr to the background log file. Do not combine it with
+`--reload`.
+
 ### Reload on changes
 
 ```bash
