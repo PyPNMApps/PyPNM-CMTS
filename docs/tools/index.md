@@ -46,6 +46,7 @@ Options:
 ### tools/maintenance/kill-pypnm-cmts.py
 
 Lists active `pypnm-cmts` processes in a numbered table and supports terminating by table line number.
+This includes detached `pypnm-cmts serve --run-background` processes discovered from the runtime pidfile.
 
 ```bash
 ./tools/maintenance/kill-pypnm-cmts.py
@@ -76,6 +77,7 @@ Process:
 Display notes:
 - If `tabulate` is installed, the script uses markdown-style table rendering
 - If `tabulate` is not installed, the script falls back to plain fixed-width formatting
+- The `SOURCE` column shows whether a row came from a live process scan or the detached serve pidfile
 
 ## Security
 

@@ -11,6 +11,11 @@ import signal
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+from pypnm.support.serve_background import background_pidfile_path
+
+from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 
 
 @dataclass(frozen=True)
@@ -19,6 +24,7 @@ class ProcessRow:
     pid: int
     ppid: int
     etime: str
+    source: str
     command: str
 
 
@@ -71,6 +77,7 @@ def collect_processes() -> list[ProcessRow]:
 
     rows: list[ProcessRow] = []
     current_pid = os.getpid()
+    seen_pids: set[int] = set()
     line_no = 0
     for raw_line in completed.stdout.splitlines():
         line = raw_line.strip()
@@ -89,6 +96,7 @@ def collect_processes() -> list[ProcessRow]:
             continue
         if pid == current_pid:
             continue
+        seen_pids.add(pid)
         line_no += 1
         rows.append(
             ProcessRow(
@@ -96,7 +104,21 @@ def collect_processes() -> list[ProcessRow]:
                 pid=pid,
                 ppid=ppid,
                 etime=etime,
+                source="process_scan",
                 command=command,
+            )
+        )
+    background_row = _background_serve_row(current_pid)
+    if background_row is not None and background_row.pid not in seen_pids:
+        line_no += 1
+        rows.append(
+            ProcessRow(
+                line_no=line_no,
+                pid=background_row.pid,
+                ppid=background_row.ppid,
+                etime=background_row.etime,
+                source=background_row.source,
+                command=background_row.command,
             )
         )
     return rows
@@ -122,17 +144,17 @@ def print_table(rows: list[ProcessRow]) -> None:
         return
 
     table_rows = [
-        [row.line_no, row.pid, row.ppid, row.etime, row.command]
+        [row.line_no, row.pid, row.ppid, row.etime, row.source, row.command]
         for row in rows
     ]
     print(
         tabulate(
             table_rows,
-            headers=["LINE", "PID", "PPID", "ELAPSED", "COMMAND"],
+            headers=["LINE", "PID", "PPID", "ELAPSED", "SOURCE", "COMMAND"],
             tablefmt="github",
             numalign="left",
             stralign="left",
-            colalign=("left", "left", "left", "left", "left"),
+            colalign=("left", "left", "left", "left", "left", "left"),
         )
     )
 
@@ -142,12 +164,14 @@ def _print_table_plain(rows: list[ProcessRow]) -> None:
     pid_width = max(7, max(len(str(row.pid)) for row in rows))
     ppid_width = max(7, max(len(str(row.ppid)) for row in rows))
     etime_width = max(7, max(len(row.etime) for row in rows))
+    source_width = max(6, max(len(row.source) for row in rows))
 
     header = (
         f"{'LINE':<{line_width}}  "
         f"{'PID':<{pid_width}}  "
         f"{'PPID':<{ppid_width}}  "
         f"{'ELAPSED':<{etime_width}}  "
+        f"{'SOURCE':<{source_width}}  "
         "COMMAND"
     )
     print(header)
@@ -158,9 +182,61 @@ def _print_table_plain(rows: list[ProcessRow]) -> None:
             f"{row.pid:<{pid_width}}  "
             f"{row.ppid:<{ppid_width}}  "
             f"{row.etime:<{etime_width}}  "
+            f"{row.source:<{source_width}}  "
             f"{row.command}"
         )
         print(line)
+
+
+def _background_serve_row(current_pid: int) -> ProcessRow | None:
+    pidfile_path = _background_pidfile()
+    if not pidfile_path.exists():
+        return None
+    try:
+        pid = int(pidfile_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0 or pid == current_pid:
+        return None
+    ps_stat = _ps_stat(pid)
+    if ps_stat is None:
+        return None
+    ppid, etime, command = ps_stat
+    return ProcessRow(
+        line_no=0,
+        pid=pid,
+        ppid=ppid,
+        etime=etime,
+        source="background_pidfile",
+        command=f"{command} [pidfile={pidfile_path}]",
+    )
+
+
+def _background_pidfile() -> Path:
+    return background_pidfile_path(CmtsSystemConfigSettings.runtime_dir(), "pypnm-cmts")
+
+
+def _ps_stat(pid: int) -> tuple[int, str, str] | None:
+    try:
+        completed = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "ppid=,etime=,args="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    line = completed.stdout.strip()
+    if line == "":
+        return None
+    parts = line.split(maxsplit=2)
+    if len(parts) < 3:
+        return None
+    try:
+        ppid = int(parts[0])
+    except ValueError:
+        return None
+    return (ppid, parts[1], parts[2])
 
 
 def select_rows(rows: list[ProcessRow], line_numbers: list[int]) -> tuple[list[ProcessRow], list[int]]:
