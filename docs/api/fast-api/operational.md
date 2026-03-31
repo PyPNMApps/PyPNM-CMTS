@@ -34,7 +34,8 @@ Response shape:
 ### GET /ops/health/memoryDetail
 
 Operational Memory Detail.
-Returns lightweight counters that help explain process RSS growth without doing a deep heap walk.
+Returns lightweight counters that help explain process RSS growth, including
+live thread inventory and a bounded Python GC object-family summary.
 
 Example:
 
@@ -87,6 +88,22 @@ Response shape:
       "total_queue_items": 0
     }
   ],
+  "threads": [
+    {
+      "name": "MainThread",
+      "ident": 123456,
+      "native_id": 7890,
+      "daemon": false,
+      "alive": true
+    }
+  ],
+  "python_gc": [
+    {
+      "type_name": "builtins.dict",
+      "count": 84826,
+      "shallow_bytes": 30595584
+    }
+  ],
   "message": ""
 }
 ```
@@ -97,6 +114,8 @@ Field notes:
 - `sgw_cache` reports live SGW cache counts and small text-byte estimates only. It is meant for correlation, not exact heap accounting.
 - `operations` reports filesystem-backed operation store counts under the resolved `sg_operations` directory.
 - `pnm_runners` reports live in-memory PNM operation-service runner state.
+- `threads` reports the live Python thread inventory for the process.
+- `python_gc` reports the top GC-tracked Python object families by count and shallow byte size. It is intentionally bounded and is not a full heap dump.
 - `total_abandoned_futures` is especially important when investigating per-modem timeout leaks because it shows timed-out futures still being tracked by active runners.
 
 ### GET /ops/ready

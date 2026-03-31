@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import contextlib
+import gc
 import logging
 import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
+from collections import defaultdict
 from pathlib import Path
 
 from pypnm.lib.memory import ProcessMemory
@@ -29,10 +32,12 @@ from pypnm_cmts.api.common.service.pnm.operation_service import (
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
     MemoryDetailResponseModel,
+    MemoryObjectTypeDebugModel,
     MemoryOperationDebugModel,
     MemoryPnmRunnerDebugModel,
     MemoryReleaseResponseModel,
     MemorySgwCacheDebugModel,
+    MemoryThreadDebugModel,
     OperationalIdentityModel,
     OperationalProcessInfoModel,
     OperationalStatusResponseModel,
@@ -69,6 +74,7 @@ class OperationalService:
     READY_PROBE_DIR_NAME = ".ready_check"
     READY_PROBE_FILE_PREFIX = "ready.check"
     READY_SUBDIRS = (PidFileRecord.PID_DIR_NAME, "logs", "inventory")
+    MAX_OBJECT_TYPE_DEBUG_ROWS = 20
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
@@ -274,6 +280,8 @@ class OperationalService:
             sgw_cache=sgw_cache,
             operations=operations,
             pnm_runners=self._pnm_runner_debug_models(),
+            threads=self._thread_debug_models(),
+            python_gc=self._python_gc_debug_models(),
             message="",
         )
 
@@ -491,6 +499,51 @@ class OperationalService:
         ]
         models.sort(key=lambda item: item.service_name)
         return models
+
+    @staticmethod
+    def _thread_debug_models() -> list[MemoryThreadDebugModel]:
+        """Return a sorted snapshot of live Python threads."""
+        models = [
+            MemoryThreadDebugModel(
+                name=str(thread.name),
+                ident=thread.ident,
+                native_id=getattr(thread, "native_id", None),
+                daemon=bool(thread.daemon),
+                alive=bool(thread.is_alive()),
+            )
+            for thread in threading.enumerate()
+        ]
+        models.sort(key=lambda item: (item.name, item.ident if item.ident is not None else -1))
+        return models
+
+    @classmethod
+    def _python_gc_debug_models(cls) -> list[MemoryObjectTypeDebugModel]:
+        """Return top GC-tracked object families by count and shallow size."""
+        counts: dict[str, int] = defaultdict(int)
+        shallow_bytes: dict[str, int] = defaultdict(int)
+        for obj in gc.get_objects():
+            obj_type = type(obj)
+            type_name = f"{obj_type.__module__}.{obj_type.__qualname__}"
+            counts[type_name] += 1
+            with contextlib.suppress(TypeError, ValueError):
+                shallow_bytes[type_name] += int(sys.getsizeof(obj))
+
+        ranked = sorted(
+            counts.keys(),
+            key=lambda type_name: (
+                -counts[type_name],
+                -shallow_bytes[type_name],
+                type_name,
+            ),
+        )
+        return [
+            MemoryObjectTypeDebugModel(
+                type_name=type_name,
+                count=counts[type_name],
+                shallow_bytes=shallow_bytes[type_name],
+            )
+            for type_name in ranked[: cls.MAX_OBJECT_TYPE_DEBUG_ROWS]
+        ]
 
     @staticmethod
     def _release_unused_memory() -> None:

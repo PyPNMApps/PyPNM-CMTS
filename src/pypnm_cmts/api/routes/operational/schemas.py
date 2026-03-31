@@ -143,6 +143,24 @@ class MemoryPnmRunnerDebugModel(BaseModel):
     total_queue_items: int = Field(default=0, ge=0, description="Aggregate queued work items across active operations.")
 
 
+class MemoryThreadDebugModel(BaseModel):
+    """Live Python thread inventory snapshot."""
+
+    name: str = Field(default="", description="Python thread name.")
+    ident: int | None = Field(default=None, description="Python thread identifier when available.")
+    native_id: int | None = Field(default=None, description="Native thread identifier when available.")
+    daemon: bool = Field(default=False, description="Whether the thread is daemonized.")
+    alive: bool = Field(default=False, description="Whether the thread is alive.")
+
+
+class MemoryObjectTypeDebugModel(BaseModel):
+    """Bounded Python object-family summary."""
+
+    type_name: str = Field(default="", description="Qualified type name for the object family.")
+    count: int = Field(default=0, ge=0, description="Number of live GC-tracked objects for the type.")
+    shallow_bytes: int = Field(default=0, ge=0, description="Approximate shallow bytes across sampled objects for the type.")
+
+
 class MemoryDetailResponseModel(BaseModel):
     """Operational memory-debug response."""
 
@@ -153,6 +171,8 @@ class MemoryDetailResponseModel(BaseModel):
     sgw_cache: MemorySgwCacheDebugModel = Field(default_factory=MemorySgwCacheDebugModel, description="SGW cache counters and byte estimates.")
     operations: MemoryOperationDebugModel = Field(default_factory=MemoryOperationDebugModel, description="Operation-store disk counters.")
     pnm_runners: list[MemoryPnmRunnerDebugModel] = Field(default_factory=list, description="Live in-memory PNM operation-service runner counters.")
+    threads: list[MemoryThreadDebugModel] = Field(default_factory=list, description="Live Python thread inventory.")
+    python_gc: list[MemoryObjectTypeDebugModel] = Field(default_factory=list, description="Top GC-tracked Python object families by count and shallow size.")
     message: str = Field(default="", description="Optional informational message.")
 
 
@@ -212,6 +232,8 @@ __all__ = [
     "MemorySgwCacheDebugModel",
     "MemoryOperationDebugModel",
     "MemoryPnmRunnerDebugModel",
+    "MemoryThreadDebugModel",
+    "MemoryObjectTypeDebugModel",
     "MemoryDetailResponseModel",
     "MemoryReleaseResponseModel",
     "SgwRestartRequestModel",

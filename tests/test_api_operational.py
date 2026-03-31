@@ -318,6 +318,34 @@ def test_ops_memory_detail_reports_sgw_and_operation_stats(tmp_path: Path, monke
             ]
         ),
     )
+    monkeypatch.setattr(
+        OperationalService,
+        "_thread_debug_models",
+        staticmethod(
+            lambda: [
+                {
+                    "name": "MainThread",
+                    "ident": 101,
+                    "native_id": 202,
+                    "daemon": False,
+                    "alive": True,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        OperationalService,
+        "_python_gc_debug_models",
+        classmethod(
+            lambda cls: [
+                {
+                    "type_name": "builtins.dict",
+                    "count": 10,
+                    "shallow_bytes": 640,
+                }
+            ]
+        ),
+    )
     client = _client(app)
     response = client.get("/ops/health/memoryDetail")
     assert response.status_code == 200
@@ -331,6 +359,10 @@ def test_ops_memory_detail_reports_sgw_and_operation_stats(tmp_path: Path, monke
     assert payload["operations"]["result_file_count"] == 1
     assert payload["pnm_runners"][0]["service_name"] == "FakePnmService"
     assert payload["pnm_runners"][0]["total_abandoned_futures"] == 3
+    assert payload["threads"][0]["name"] == "MainThread"
+    assert payload["threads"][0]["alive"] is True
+    assert payload["python_gc"][0]["type_name"] == "builtins.dict"
+    assert payload["python_gc"][0]["count"] == 10
 
 
 def test_ops_release_memory_reports_rss_delta(tmp_path: Path, monkeypatch: object) -> None:

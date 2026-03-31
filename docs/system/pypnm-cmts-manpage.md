@@ -158,6 +158,7 @@ pypnm-cmts run-forever --mode standalone --tick-interval-seconds 1 --max-ticks 5
 pypnm-cmts discover --cmts-hostname 192.168.0.100 --read-community public
 pypnm-cmts serve --host 0.0.0.0 --port 8080
 pypnm-cmts serve --reload
+pypnm-cmts serve --run-background
 pypnm-cmts config init --print
 pypnm-cmts config validate
 pypnm-cmts config show --pretty
@@ -166,6 +167,7 @@ pypnm-cmts config show --pretty
 ## Configuration Notes
 
 - `serve` uses `CmtsOrchestrator` settings for SGW discovery; `--cmts-hostname`, `--read-community`, and `--write-community` override adapter values at startup.
+- `serve --run-background` detaches the API from the current shell, writes a pidfile, and redirects output to a log file.
 - `sgw.discovery.mode` controls how SG IDs are obtained (`snmp` by default, `static` for fixed lists).
 - For MAC or IP examples in docs, use `aa:bb:cc:dd:ee:ff` and `192.168.0.100`.
 
