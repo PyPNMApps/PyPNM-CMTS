@@ -875,3 +875,65 @@ def test_cli_serve_run_background_rejects_reload(
 
     assert exit_code == cli_module.EXIT_CODE_USAGE
     assert uvicorn_called["value"] is False
+
+
+def test_cli_serve_background_child_rewrites_pidfile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pidfile = tmp_path / "pypnm-cmts.serve.pid"
+
+    class _Args:
+        command = "serve"
+        host = HOST
+        port = PORT
+        ssl = False
+        cert = "./certs/cert.pem"
+        key = "./certs/key.pem"
+        with_runner = False
+        log_level = "info"
+        workers = None
+        limit_max_requests = None
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+        run_background = False
+        background_log_file = ""
+        background_pidfile = ""
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        cm_snmpv2c_write_community = ""
+        cm_tftp_ipv4 = ""
+        cm_tftp_ipv6 = ""
+        mute_pypnm_endpoints = False
+        mute_tags = ""
+        mute_tags_hard = False
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+    monkeypatch.setattr(
+        orchestrator_config.CmtsOrchestratorSettings,
+        "from_system_config",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setenv(cli_module.BACKGROUND_CHILD_ENV, "1")
+    monkeypatch.setenv(cli_module.BACKGROUND_PIDFILE_ENV, str(pidfile))
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda **_kwargs: None)
+    monkeypatch.setattr(cli_module, "_print_serve_usage", lambda _parser: None)
+    monkeypatch.setattr(cli_module, "_prepare_runtime_paths_for_serve", lambda _args: None)
+    monkeypatch.setattr(
+        cli_module,
+        "detect_worker_profile",
+        lambda: cli_module.WorkerProfile(cpu_count=4, total_memory_gib=16.0, workers=2, limit_max_requests=1000),
+    )
+
+    exit_code = cli_module._run_cli()
+
+    assert exit_code == cli_module.SUCCESS_EXIT_CODE
+    assert pidfile.read_text(encoding="utf-8").strip() == str(os.getpid())
