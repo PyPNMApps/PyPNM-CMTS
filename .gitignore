@@ -25,6 +25,8 @@ dist/
 .data
 .data/
 .data/*
+.data.bak-*/
+.data.bak*
 data/
 output/*
 pypnm-cmts-version-control/*
