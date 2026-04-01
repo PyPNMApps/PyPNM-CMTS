@@ -13,7 +13,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from pypnm.support.serve_background import background_pidfile_path
+try:
+    from pypnm.support.serve_background import background_pidfile_path
+except ModuleNotFoundError:
+    def background_pidfile_path(runtime_dir: str | Path, service_name: str) -> Path:
+        """Compatibility fallback when pypnm.support.serve_background is unavailable."""
+        return Path(runtime_dir) / f"{service_name}.serve.pid"
 
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 
@@ -213,7 +218,14 @@ def _background_serve_row(current_pid: int) -> ProcessRow | None:
 
 
 def _background_pidfile() -> Path:
-    return background_pidfile_path(CmtsSystemConfigSettings.runtime_dir(), "pypnm-cmts")
+    return background_pidfile_path(_resolve_runtime_dir(), "pypnm-cmts")
+
+
+def _resolve_runtime_dir() -> Path:
+    runtime_dir = getattr(CmtsSystemConfigSettings, "runtime_dir", None)
+    if callable(runtime_dir):
+        return Path(runtime_dir())
+    return Path(CmtsSystemConfigSettings.coordination_state_dir())
 
 
 def _ps_stat(pid: int) -> tuple[int, str, str] | None:

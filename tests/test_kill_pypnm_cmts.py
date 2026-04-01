@@ -27,7 +27,7 @@ def test_collect_processes_includes_background_pidfile_row(
     pidfile = runtime_dir / "pypnm-cmts.serve.pid"
     pidfile.write_text("4242\n", encoding="utf-8")
 
-    monkeypatch.setattr(kill_script.CmtsSystemConfigSettings, "runtime_dir", classmethod(lambda cls: str(runtime_dir)))
+    monkeypatch.setattr(kill_script, "_resolve_runtime_dir", lambda: runtime_dir)
     monkeypatch.setattr(kill_script, "_ps_stat", lambda pid: (111, "00:42", "python /tmp/fake-pypnm-cmts"))
     monkeypatch.setattr(
         kill_script.subprocess,
