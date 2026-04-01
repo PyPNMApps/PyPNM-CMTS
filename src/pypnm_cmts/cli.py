@@ -39,6 +39,7 @@ from pypnm_cmts.lib.types import (
     OwnerId,
     ServiceGroupId,
 )
+from pypnm_cmts.support.serve_launch_state import build_launch_state, write_launch_state
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
 
@@ -934,6 +935,13 @@ def _run_cli() -> int:
             workers=effective_workers,
             limit_max_requests=effective_limit_max_requests,
         )
+        launch_state_path = write_launch_state(
+            build_launch_state(
+                executable=sys.executable,
+                argv=list(sys.argv[1:]),
+            )
+        )
+        print(f"[INFO] Recorded serve launch state: {launch_state_path}")
         _record_background_parent_pid()
 
         try:

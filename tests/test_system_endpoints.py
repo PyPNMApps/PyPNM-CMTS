@@ -123,3 +123,14 @@ def test_system_webservice_reload_writes_sentinel(
     assert payload["reload_requested"] is True
     assert payload["sentinel_path"] == str(sentinel_path)
     assert sentinel_path.exists()
+    first_payload = sentinel_path.read_text(encoding="utf-8")
+    assert "requested_at=" in first_payload
+    assert "request_id=" in first_payload
+    assert "actor=cmts.system.webService.reload" in first_payload
+    assert "reason=api_reload_request" in first_payload
+
+    with TestClient(app) as client:
+        second = client.post("/cmts/system/webService/reload")
+    assert second.status_code == 200
+    second_payload = sentinel_path.read_text(encoding="utf-8")
+    assert second_payload != first_payload

@@ -116,6 +116,15 @@ Example watcher:
   --poll-seconds 1
 ```
 
+Non-systemd watcher with launch-state replay:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "./tools/support/restart_from_launch_state.py" \
+  --poll-seconds 1
+```
+
 ### pypnm-cmts config init
 
 Creates or overwrites system.json with the CMTS template merged in.

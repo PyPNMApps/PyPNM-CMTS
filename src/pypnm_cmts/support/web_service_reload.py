@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from pypnm_cmts.config.runtime_flags import ENV_WEB_SERVICE_RELOAD_SENTINEL
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
@@ -25,11 +27,23 @@ def request_web_service_reload(reason: str, actor: str) -> Path:
     """Persist a reload request to the configured sentinel path."""
     sentinel_path = resolve_reload_sentinel_path()
     sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    request_id = uuid4().hex
+    payload = (
+        f"requested_at={timestamp}\n"
+        f"request_id={request_id}\n"
+        f"actor={actor}\n"
+        f"reason={reason}\n"
+    )
     logger.info(
         "[WEBSERVICE_RELOAD_REQUEST] actor=%s reason=%s sentinel=%s",
         actor,
         reason,
         sentinel_path,
     )
-    sentinel_path.touch()
+    # Recreate the sentinel file on each request so both mtime-based and
+    # write/create-based external watchers observe the reload request.
+    if sentinel_path.exists():
+        sentinel_path.unlink()
+    sentinel_path.write_text(payload, encoding="utf-8")
     return sentinel_path

@@ -79,6 +79,27 @@ Display notes:
 - If `tabulate` is not installed, the script falls back to plain fixed-width formatting
 - The `SOURCE` column shows whether a row came from a live process scan or the detached serve pidfile
 
+## Support
+
+### tools/support/watch_reload_sentinel.py
+
+Watches the configured web-service reload sentinel and runs a restart command.
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "./tools/support/restart_from_launch_state.py"
+```
+
+### tools/support/restart_from_launch_state.py
+
+Restarts `pypnm-cmts serve` using the latest recorded launch-state file written
+by the active serve process.
+
+```bash
+./tools/support/restart_from_launch_state.py --dry-run
+```
+
 ## Security
 
 ### tools/security/scan-mac-addresses.py

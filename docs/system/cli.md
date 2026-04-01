@@ -116,6 +116,21 @@ For production-triggered web-service recycle, do not use `--reload`. Use the
   --restart-cmd "systemctl restart pypnm-cmts"
 ```
 
+For non-systemd environments, use the recorded serve launch-state replay helper:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "./tools/support/restart_from_launch_state.py"
+```
+
+`pypnm-cmts serve` records the latest runtime launch settings in:
+
+- `<runtime_dir>/pypnm-cmts-serve-launch.json`
+
+The restart helper reads that file, stops the recorded serve PID, and relaunches
+with the same executable/arguments/environment snapshot.
+
 ### HTTPS
 
 ```bash

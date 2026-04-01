@@ -199,6 +199,14 @@ Example watcher:
   --restart-cmd "systemctl restart pypnm-cmts"
 ```
 
+Non-systemd example:
+
+```bash
+./tools/support/watch_reload_sentinel.py \
+  --sentinel /run/pypnm-cmts/webservice.reload \
+  --restart-cmd "./tools/support/restart_from_launch_state.py"
+```
+
 
 ## Next Steps
 
