@@ -6,9 +6,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 BANNER_PATH="${PROJECT_ROOT}/tools/banner.txt"
+INSTALL_CONFIG_HELPER_PATH="${PROJECT_ROOT}/tools/support/install_config_carry_over.sh"
 VENV_DIR=".env"
 MODE="standard"
 UPDATE_TAG=""
+UPDATE_TARGET=""
 UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG=""
 CLEAN_MODE="0"
 PURGE_CACHE="0"
@@ -16,12 +18,10 @@ UNINSTALL_MODE="0"
 DEVELOPMENT_MODE="0"
 UPDATE_GA_MODE="0"
 UPDATE_HOT_FIX_MODE="0"
+UPDATE_MODE="0"
 UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE="0"
 PM="none"
 GITLEAKS_VERSION="8.18.1"
-PREVIOUS_SYSTEM_CONFIG_PATH=""
-SYSTEM_CONFIG_BACKUP_FILE=""
-RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="0"
 
 usage() {
   cat <<'USAGE_EOF'
@@ -32,6 +32,7 @@ Usage:
   ./install.sh --clean [--purge-cache] [venv_dir]
   ./install.sh --uninstall [venv_dir]
   ./install.sh --development [venv_dir]
+  ./install.sh --update [TARGET] [venv_dir]
   ./install.sh --update-ga [TAG] [venv_dir]
   ./install.sh --update-hot-fix [TAG] [venv_dir]
   ./install.sh --update-development-pypnm-docsis [TAG] [venv_dir]
@@ -39,6 +40,7 @@ Usage:
 
 Options:
   --development        Install dev prerequisites and run local verification.
+  --update [TARGET]    Update from latest main by default, or install a specific tag/ref.
   --update-ga [TAG]    Install the specified GA tag (latest GA if omitted).
   --update-hot-fix [TAG]
                        Install the specified hot-fix tag (latest hot-fix if omitted).
@@ -54,6 +56,8 @@ Examples:
   ./install.sh
   ./install.sh .env-dev
   ./install.sh --development
+  ./install.sh --update
+  ./install.sh --update v0.1.39.0
   ./install.sh --update-ga v0.1.39.0
   ./install.sh --update-hot-fix v0.1.39.1
   ./install.sh --update-development-pypnm-docsis
@@ -595,29 +599,40 @@ install_standard() {
   python -m pip install pytest mkdocs mkdocs-material mkdocs-mermaid2-plugin pymdown-extensions
 }
 
-install_from_tag() {
-  local tag_value="$1"
+install_from_ref() {
+  local ref_value="$1"
   local label="$2"
   local version_value
   local worktree_dir
   local cleanup_done
+  local verify_version="0"
 
-  if [[ "${tag_value}" == "" ]]; then
+  if [[ "${label}" == "main" ]]; then
+    ref_value="${ref_value:-origin/main}"
+  elif [[ "${ref_value}" == "" ]]; then
     if [[ "${label}" == "GA" ]]; then
-      tag_value="$(select_latest_tag ga)"
+      ref_value="$(select_latest_tag ga)"
     else
-      tag_value="$(select_latest_tag hotfix)"
+      ref_value="$(select_latest_tag hotfix)"
     fi
   fi
-  if [[ "${tag_value}" == "" ]]; then
-    echo "ERROR: No matching tags found for ${label} update." >&2
+  if [[ "${ref_value}" == "" ]]; then
+    echo "ERROR: No matching refs found for ${label} update." >&2
     exit 1
   fi
 
-  ensure_git_tag "${tag_value}"
-  version_value="$(resolve_tag_version "${tag_value}")"
+  if [[ "${ref_value}" == v* ]]; then
+    ensure_git_tag "${ref_value}"
+    version_value="$(resolve_tag_version "${ref_value}")"
+    verify_version="1"
+  else
+    if ! git -C "${PROJECT_ROOT}" rev-parse "${ref_value}" >/dev/null 2>&1; then
+      echo "ERROR: Ref not found: ${ref_value}" >&2
+      exit 1
+    fi
+  fi
 
-  echo "✅ Updating to ${label} tag ${tag_value}"
+  echo "✅ Updating to ${label} ref ${ref_value}"
   worktree_dir="$(mktemp -d)"
   cleanup_done="0"
 
@@ -631,20 +646,22 @@ install_from_tag() {
   }
 
   trap cleanup_worktree EXIT
-  git -C "${PROJECT_ROOT}" worktree add --detach "${worktree_dir}" "${tag_value}"
+  git -C "${PROJECT_ROOT}" worktree add --detach "${worktree_dir}" "${ref_value}"
 
   ensure_venv
   activate_venv
   python -m pip install --upgrade pip setuptools wheel
   purge_pip_cache
   python -m pip install --upgrade --force-reinstall "${worktree_dir}"
-  python - <<PYCODE
+  if [[ "${verify_version}" == "1" ]]; then
+    python - <<PYCODE
 import pypnm_cmts
 version = pypnm_cmts.__version__
 if version != "${version_value}":
-    raise SystemExit(f"Installed version {version} does not match tag ${tag_value}")
-print(f"Installed PyPNM-CMTS v{version}")
+    raise SystemExit(f"Installed version {version} does not match ref ${ref_value}")
+print(f"Installed PyPNM-CMTS v{version} from ${ref_value}")
 PYCODE
+  fi
 
   cleanup_worktree
   trap - EXIT
@@ -736,102 +753,6 @@ run_tests() {
   (cd "${PROJECT_ROOT}" && python -m pytest -v)
 }
 
-resolve_system_config_path_from_python() {
-  local python_bin="$1"
-  if [[ ! -x "${python_bin}" ]]; then
-    return
-  fi
-  "${python_bin}" - <<'PYCODE' 2>/dev/null || true
-from pypnm.config.system_config_settings import SystemConfigSettings
-print(SystemConfigSettings.get_config_path())
-PYCODE
-}
-
-resolve_existing_system_config_path() {
-  local path_candidate=""
-
-  path_candidate="$(resolve_system_config_path_from_python "${PROJECT_ROOT}/${VENV_DIR}/bin/python" | tail -n 1)"
-  if [[ "${path_candidate}" != "" && -f "${path_candidate}" ]]; then
-    echo "${path_candidate}"
-    return
-  fi
-
-  path_candidate="${PROJECT_ROOT}/.data/system.json"
-  if [[ -f "${path_candidate}" ]]; then
-    echo "${path_candidate}"
-    return
-  fi
-}
-
-resolve_install_target_system_config_path() {
-  local path_candidate=""
-  path_candidate="$(resolve_system_config_path_from_python "${PROJECT_ROOT}/${VENV_DIR}/bin/python" | tail -n 1)"
-  if [[ "${path_candidate}" != "" ]]; then
-    echo "${path_candidate}"
-    return
-  fi
-  echo "${PROJECT_ROOT}/.data/system.json"
-}
-
-prepare_system_config_carry_over() {
-  local existing_path
-  local carry_answer
-
-  existing_path="$(resolve_existing_system_config_path)"
-  if [[ "${existing_path}" == "" ]]; then
-    return
-  fi
-
-  PREVIOUS_SYSTEM_CONFIG_PATH="${existing_path}"
-  echo "⚠️  Previous installation detected."
-  echo "⚠️  This install can overwrite runtime configuration files."
-  echo "Detected existing system config: ${PREVIOUS_SYSTEM_CONFIG_PATH}"
-
-  if [[ -t 0 ]]; then
-    read -r -p "Carry over existing system config after install? [Y/n]: " carry_answer
-  else
-    carry_answer="y"
-    echo "ℹ️  Non-interactive shell detected; defaulting to carry-over: yes."
-  fi
-
-  case "${carry_answer}" in
-    ""|y|Y|yes|YES)
-      SYSTEM_CONFIG_BACKUP_FILE="$(mktemp)"
-      cp "${PREVIOUS_SYSTEM_CONFIG_PATH}" "${SYSTEM_CONFIG_BACKUP_FILE}"
-      RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="1"
-      echo "✅ Backed up existing system config for post-install restore."
-      ;;
-    *)
-      RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="0"
-      echo "ℹ️  Continuing without carrying over existing system config."
-      ;;
-  esac
-}
-
-restore_carried_system_config() {
-  local target_path=""
-  if [[ "${RESTORE_SYSTEM_CONFIG_AFTER_INSTALL}" != "1" ]]; then
-    return
-  fi
-  if [[ "${SYSTEM_CONFIG_BACKUP_FILE}" == "" || ! -f "${SYSTEM_CONFIG_BACKUP_FILE}" ]]; then
-    return
-  fi
-
-  target_path="$(resolve_install_target_system_config_path)"
-  if [[ "${target_path}" == "" ]]; then
-    target_path="${PREVIOUS_SYSTEM_CONFIG_PATH}"
-  fi
-  if [[ "${target_path}" == "" ]]; then
-    target_path="${PROJECT_ROOT}/.data/system.json"
-  fi
-
-  mkdir -p "$(dirname "${target_path}")"
-  cp "${SYSTEM_CONFIG_BACKUP_FILE}" "${target_path}"
-  rm -f "${SYSTEM_CONFIG_BACKUP_FILE}"
-  SYSTEM_CONFIG_BACKUP_FILE=""
-  echo "✅ Restored carried-over system config to: ${target_path}"
-}
-
 if [[ $# -eq 0 ]]; then
   MODE="standard"
 else
@@ -850,6 +771,17 @@ else
           shift 2
         else
           UPDATE_TAG=""
+          shift
+        fi
+        ;;
+      --update)
+        UPDATE_MODE="1"
+        MODE="update"
+        UPDATE_TARGET="${2:-}"
+        if [[ "${UPDATE_TARGET}" != "" && "${UPDATE_TARGET}" != --* ]]; then
+          shift 2
+        else
+          UPDATE_TARGET=""
           shift
         fi
         ;;
@@ -918,6 +850,14 @@ if [[ "${UNINSTALL_MODE}" == "1" ]]; then
   fi
 fi
 
+if [[ -f "${INSTALL_CONFIG_HELPER_PATH}" ]]; then
+  # shellcheck source=/dev/null
+  source "${INSTALL_CONFIG_HELPER_PATH}"
+else
+  echo "ERROR: Missing install helper: ${INSTALL_CONFIG_HELPER_PATH}" >&2
+  exit 1
+fi
+
 if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
   echo "PYPNM_CMTS_INSTALL_TEST_MODE=${MODE}"
   echo "PYPNM_CMTS_INSTALL_TEST_VENV_DIR=${VENV_DIR}"
@@ -942,6 +882,9 @@ if [[ "${PYPNM_CMTS_INSTALL_TEST:-}" == "1" ]]; then
   if [[ "${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}" != "" ]]; then
     echo "PYPNM_CMTS_INSTALL_TEST_PYPNM_DOCSIS_TAG=${UPDATE_DEVELOPMENT_PYPNM_DOCSIS_TAG}"
   fi
+  if [[ "${UPDATE_TARGET}" != "" ]]; then
+    echo "PYPNM_CMTS_INSTALL_TEST_UPDATE_TARGET=${UPDATE_TARGET}"
+  fi
   if [[ "${PYPNM_CMTS_INSTALL_TEST_CREATE_VENV:-}" == "1" ]]; then
     python3 -m venv "${VENV_DIR}"
     rm -rf "${VENV_DIR}"
@@ -962,8 +905,8 @@ ensure_python
 check_python_version
 ensure_git
 ensure_venv_support
-if [[ "${MODE}" == "standard" || "${MODE}" == "development" || "${MODE}" == "update-ga" || "${MODE}" == "update-hot-fix" ]]; then
-  prepare_system_config_carry_over
+if [[ "${MODE}" == "standard" || "${MODE}" == "development" || "${MODE}" == "update-ga" || "${MODE}" == "update-hot-fix" || "${MODE}" == "update" ]]; then
+  prepare_system_config_carry_over "${PROJECT_ROOT}" "${VENV_DIR}"
 fi
 
 if [[ "${CLEAN_MODE}" == "1" || "${UNINSTALL_MODE}" == "1" ]]; then
@@ -985,13 +928,24 @@ else
   else
     ensure_git_clean
     if [[ "${MODE}" == "update-ga" ]]; then
-      install_from_tag "${UPDATE_TAG}" "GA"
+      echo "⚠️  --update-ga is deprecated; use --update <tag>."
+      install_from_ref "${UPDATE_TAG}" "GA"
+    elif [[ "${MODE}" == "update-hot-fix" ]]; then
+      echo "⚠️  --update-hot-fix is deprecated; use --update <tag>."
+      install_from_ref "${UPDATE_TAG}" "hot-fix"
+    elif [[ "${MODE}" == "update" ]]; then
+      git -C "${PROJECT_ROOT}" fetch origin main --tags
+      if [[ "${UPDATE_TARGET}" == "" || "${UPDATE_TARGET}" == "main" || "${UPDATE_TARGET}" == "latest" ]]; then
+        install_from_ref "origin/main" "main"
+      else
+        install_from_ref "${UPDATE_TARGET}" "update"
+      fi
     else
-      install_from_tag "${UPDATE_TAG}" "hot-fix"
+      install_from_ref "${UPDATE_TAG}" "hot-fix"
     fi
   fi
 fi
-restore_carried_system_config
+restore_carried_system_config "${PROJECT_ROOT}" "${VENV_DIR}"
 
 verify_installed_runtime_paths
 verify_mkdocs

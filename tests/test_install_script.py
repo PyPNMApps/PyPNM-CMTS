@@ -53,6 +53,28 @@ def test_install_script_update_ga_mode() -> None:
     assert "PYPNM_CMTS_INSTALL_TEST_MODE=update-ga" in result.stdout
 
 
+def test_install_script_update_mode_defaults_to_main_target() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    result = _run_install(script_path, ["--update"], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_MODE=update" in result.stdout
+    assert "PYPNM_CMTS_INSTALL_TEST_UPDATE_TARGET=" not in result.stdout
+
+
+def test_install_script_update_mode_with_explicit_target() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "install.sh"
+    env = os.environ.copy()
+    env["PYPNM_CMTS_INSTALL_TEST"] = "1"
+    result = _run_install(script_path, ["--update", "v0.1.2.3"], env)
+    assert result.returncode == 0
+    assert "PYPNM_CMTS_INSTALL_TEST_MODE=update" in result.stdout
+    assert "PYPNM_CMTS_INSTALL_TEST_UPDATE_TARGET=v0.1.2.3" in result.stdout
+
+
 def test_install_script_allows_local_project_pythonpath() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = repo_root / "install.sh"
