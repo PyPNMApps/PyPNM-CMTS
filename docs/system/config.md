@@ -34,6 +34,7 @@ flowchart TD
 ## SGW worker guard settings
 
 `CmtsOrchestrator.sgw.guard` configures the shared in-process worker governor used by the SGW refresh supervisor.
+Even though this lives under `CmtsOrchestrator`, it applies to SGW runtime used by `pypnm-cmts serve` discovery startup as well (not only orchestrator run commands).
 
 Example:
 
@@ -43,8 +44,8 @@ Example:
     "sgw": {
       "guard": {
         "enabled": true,
-        "rss_restart_threshold_mb": 1024,
-        "max_consecutive_error_cycles": 5,
+        "rss_restart_threshold_mb": 1536,
+        "max_consecutive_error_cycles": 3,
         "min_restart_interval_seconds": 300,
         "max_restarts_per_hour": 6
       }
@@ -66,6 +67,14 @@ Operational notes:
 - Guard decisions and restart budgeting are implemented in `src/pypnm_cmts/support/worker_guard.py`.
 - SGW restart state is surfaced through SGW startup status fields such as `guard_restart_count` and `last_guard_reason`.
 - This guard is process-local. Use an external process supervisor as well if you need recovery from hard crashes or blocked native calls.
+
+Default guard policy:
+
+- `enabled`: `true`
+- `rss_restart_threshold_mb`: `1536`
+- `max_consecutive_error_cycles`: `3`
+- `min_restart_interval_seconds`: `300`
+- `max_restarts_per_hour`: `6`
 
 ## Web-service reload sentinel
 

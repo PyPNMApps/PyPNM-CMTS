@@ -207,6 +207,13 @@ Every Worker Loop.
 - Process RSS reaches `sgw.guard.rss_restart_threshold_mb`.
 - Consecutive refresh cycles with one or more errors reaches `sgw.guard.max_consecutive_error_cycles`.
 
+Default policy values:
+
+- `sgw.guard.rss_restart_threshold_mb`: `1536`
+- `sgw.guard.max_consecutive_error_cycles`: `3`
+- `sgw.guard.min_restart_interval_seconds`: `300`
+- `sgw.guard.max_restarts_per_hour`: `6`
+
 ### Restart Behavior
 
 - The Existing SGW Refresh Loop Stops At A Cycle Boundary.

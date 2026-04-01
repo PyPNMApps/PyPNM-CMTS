@@ -176,6 +176,13 @@ Current advantage of forcing `workers=1` with SGW enabled:
 - keeps SGW-backed endpoints consistent
 - reduces unnecessary memory and SNMP load
 
+SGW guard defaults are also active for `serve` startup/discovery runtime:
+
+- `rss_restart_threshold_mb`: `1536`
+- `max_consecutive_error_cycles`: `3`
+- `min_restart_interval_seconds`: `300`
+- `max_restarts_per_hour`: `6`
+
 ## Discovery (CMTS Inventory)
 
 Discover service groups and registered cable modems from a CMTS using SNMP.
