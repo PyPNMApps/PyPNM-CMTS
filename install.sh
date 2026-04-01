@@ -19,6 +19,9 @@ UPDATE_HOT_FIX_MODE="0"
 UPDATE_DEVELOPMENT_PYPNM_DOCSIS_MODE="0"
 PM="none"
 GITLEAKS_VERSION="8.18.1"
+PREVIOUS_SYSTEM_CONFIG_PATH=""
+SYSTEM_CONFIG_BACKUP_FILE=""
+RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="0"
 
 usage() {
   cat <<'USAGE_EOF'
@@ -733,6 +736,102 @@ run_tests() {
   (cd "${PROJECT_ROOT}" && python -m pytest -v)
 }
 
+resolve_system_config_path_from_python() {
+  local python_bin="$1"
+  if [[ ! -x "${python_bin}" ]]; then
+    return
+  fi
+  "${python_bin}" - <<'PYCODE' 2>/dev/null || true
+from pypnm.config.system_config_settings import SystemConfigSettings
+print(SystemConfigSettings.get_config_path())
+PYCODE
+}
+
+resolve_existing_system_config_path() {
+  local path_candidate=""
+
+  path_candidate="$(resolve_system_config_path_from_python "${PROJECT_ROOT}/${VENV_DIR}/bin/python" | tail -n 1)"
+  if [[ "${path_candidate}" != "" && -f "${path_candidate}" ]]; then
+    echo "${path_candidate}"
+    return
+  fi
+
+  path_candidate="${PROJECT_ROOT}/.data/system.json"
+  if [[ -f "${path_candidate}" ]]; then
+    echo "${path_candidate}"
+    return
+  fi
+}
+
+resolve_install_target_system_config_path() {
+  local path_candidate=""
+  path_candidate="$(resolve_system_config_path_from_python "${PROJECT_ROOT}/${VENV_DIR}/bin/python" | tail -n 1)"
+  if [[ "${path_candidate}" != "" ]]; then
+    echo "${path_candidate}"
+    return
+  fi
+  echo "${PROJECT_ROOT}/.data/system.json"
+}
+
+prepare_system_config_carry_over() {
+  local existing_path
+  local carry_answer
+
+  existing_path="$(resolve_existing_system_config_path)"
+  if [[ "${existing_path}" == "" ]]; then
+    return
+  fi
+
+  PREVIOUS_SYSTEM_CONFIG_PATH="${existing_path}"
+  echo "⚠️  Previous installation detected."
+  echo "⚠️  This install can overwrite runtime configuration files."
+  echo "Detected existing system config: ${PREVIOUS_SYSTEM_CONFIG_PATH}"
+
+  if [[ -t 0 ]]; then
+    read -r -p "Carry over existing system config after install? [Y/n]: " carry_answer
+  else
+    carry_answer="y"
+    echo "ℹ️  Non-interactive shell detected; defaulting to carry-over: yes."
+  fi
+
+  case "${carry_answer}" in
+    ""|y|Y|yes|YES)
+      SYSTEM_CONFIG_BACKUP_FILE="$(mktemp)"
+      cp "${PREVIOUS_SYSTEM_CONFIG_PATH}" "${SYSTEM_CONFIG_BACKUP_FILE}"
+      RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="1"
+      echo "✅ Backed up existing system config for post-install restore."
+      ;;
+    *)
+      RESTORE_SYSTEM_CONFIG_AFTER_INSTALL="0"
+      echo "ℹ️  Continuing without carrying over existing system config."
+      ;;
+  esac
+}
+
+restore_carried_system_config() {
+  local target_path=""
+  if [[ "${RESTORE_SYSTEM_CONFIG_AFTER_INSTALL}" != "1" ]]; then
+    return
+  fi
+  if [[ "${SYSTEM_CONFIG_BACKUP_FILE}" == "" || ! -f "${SYSTEM_CONFIG_BACKUP_FILE}" ]]; then
+    return
+  fi
+
+  target_path="$(resolve_install_target_system_config_path)"
+  if [[ "${target_path}" == "" ]]; then
+    target_path="${PREVIOUS_SYSTEM_CONFIG_PATH}"
+  fi
+  if [[ "${target_path}" == "" ]]; then
+    target_path="${PROJECT_ROOT}/.data/system.json"
+  fi
+
+  mkdir -p "$(dirname "${target_path}")"
+  cp "${SYSTEM_CONFIG_BACKUP_FILE}" "${target_path}"
+  rm -f "${SYSTEM_CONFIG_BACKUP_FILE}"
+  SYSTEM_CONFIG_BACKUP_FILE=""
+  echo "✅ Restored carried-over system config to: ${target_path}"
+}
+
 if [[ $# -eq 0 ]]; then
   MODE="standard"
 else
@@ -863,6 +962,9 @@ ensure_python
 check_python_version
 ensure_git
 ensure_venv_support
+if [[ "${MODE}" == "standard" || "${MODE}" == "development" || "${MODE}" == "update-ga" || "${MODE}" == "update-hot-fix" ]]; then
+  prepare_system_config_carry_over
+fi
 
 if [[ "${CLEAN_MODE}" == "1" || "${UNINSTALL_MODE}" == "1" ]]; then
   clean_previous_install
@@ -889,6 +991,7 @@ else
     fi
   fi
 fi
+restore_carried_system_config
 
 verify_installed_runtime_paths
 verify_mkdocs
