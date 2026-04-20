@@ -112,7 +112,7 @@ def test_system_webservice_reload_writes_sentinel(
 ) -> None:
     _disable_startup(monkeypatch)
     sentinel_path = tmp_path / "runtime" / "webservice.reload"
-    trigger_path = tmp_path / "src" / "pypnm_cmts" / "_reload_trigger.py"
+    trigger_path = tmp_path / "src" / "pypnm_cmts" / "_reload_trigger_generated.py"
     monkeypatch.setenv(ENV_WEB_SERVICE_RELOAD_SENTINEL, str(sentinel_path))
     monkeypatch.setattr(
         "pypnm_cmts.support.web_service_reload.resolve_dev_reload_trigger_path",

@@ -119,7 +119,7 @@ Operational notes:
 - The watcher is started from the FastAPI lifespan and runs only in the active web-service process.
 - Guard decisions reuse the shared worker-guard budgeting logic in `src/pypnm_cmts/support/worker_guard.py`.
 - Guard-triggered reloads use the same `request_web_service_reload(...)` path as the manual reload endpoint.
-- In `serve --reload` development mode, the guard-triggered reload also touches the watched reload trigger file under `src/`.
+- In `serve --reload` development mode, the guard-triggered reload also rewrites a generated watched reload trigger file under `src/`.
 
 Configuration sources, in precedence order:
 

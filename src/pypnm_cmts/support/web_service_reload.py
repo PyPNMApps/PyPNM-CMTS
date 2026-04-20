@@ -24,8 +24,8 @@ def resolve_reload_sentinel_path() -> Path:
 
 
 def resolve_dev_reload_trigger_path() -> Path:
-    """Return the watched Python file used to trigger uvicorn dev reload."""
-    return Path(__file__).resolve().parents[1] / "_reload_trigger.py"
+    """Return the generated watched Python file used to trigger uvicorn dev reload."""
+    return Path(__file__).resolve().parents[1] / "_reload_trigger_generated.py"
 
 
 def _write_dev_reload_trigger(trigger_path: Path, request_id: str, timestamp: str) -> None:

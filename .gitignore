@@ -34,6 +34,7 @@ logs/*
 backup/*
 issues/*
 deploy/docker/compose/.env
+src/pypnm_cmts/_reload_trigger_generated.py
 
 # AI AGENTS
 AGENTS.md
