@@ -124,6 +124,11 @@ For non-systemd environments, use the recorded serve launch-state replay helper:
   --restart-cmd "./tools/support/restart_from_launch_state.py"
 ```
 
+When `pypnm-cmts serve --reload` is active, PyPNM-CMTS automatically starts a
+detached local sentinel watcher that replays the recorded launch state on
+`POST /cmts/system/webService/reload`. This makes the WebUI Reload button recycle
+the dev service without requiring a separate manual watcher process.
+
 `pypnm-cmts serve` records the latest runtime launch settings in:
 
 - `<runtime_dir>/pypnm-cmts-serve-launch.json`

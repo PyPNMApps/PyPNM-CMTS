@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from pydantic import ValidationError
-from pypnm.cli import _runtime_profile_selection_message
 from pypnm.lib.types import HostNameStr, SnmpReadCommunity, SnmpWriteCommunity
 from pypnm.support import serve_background
 from pypnm.support.worker_profile import (
@@ -39,6 +38,7 @@ from pypnm_cmts.lib.types import (
     OwnerId,
     ServiceGroupId,
 )
+from pypnm_cmts.support.reload_watcher import ensure_reload_watcher
 from pypnm_cmts.support.serve_launch_state import build_launch_state, write_launch_state
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
@@ -122,6 +122,25 @@ def _prepare_runtime_paths_for_serve(args: argparse.Namespace) -> None:
         args.reload_dirs = resolved_reload_dirs
 
     _sanitize_pythonpath_for_serve(project_root)
+
+
+def _runtime_profile_selection_message(workers: int, limit_max_requests: int) -> str:
+    """Build the serve-time runtime profile selection message."""
+    source = os.environ.get("PYPNM_ACTIVE_RUNTIME_SOURCE", "explicit_cli")
+    profile_env_path = os.environ.get("PYPNM_SERVE_ENV_FILE", str(default_profile_env_path()))
+
+    if source == "seeded_profile":
+        return (
+            "Auto-selected FastAPI runtime profile: "
+            f"workers={workers} limit_max_requests={limit_max_requests} "
+            f"profile={profile_env_path}"
+        )
+
+    return (
+        "FastAPI runtime profile: "
+        f"workers={workers} limit_max_requests={limit_max_requests} "
+        f"source={source} profile={profile_env_path}"
+    )
 
 
 def _log_runtime_profile_selection(workers: int, limit_max_requests: int) -> None:
@@ -942,6 +961,15 @@ def _run_cli() -> int:
             )
         )
         print(f"[INFO] Recorded serve launch state: {launch_state_path}")
+        if args.reload:
+            watcher_started, watcher_pidfile = ensure_reload_watcher(
+                project_root=_project_root(),
+                python_executable=sys.executable,
+            )
+            if watcher_started:
+                print(f"[INFO] Started reload sentinel watcher: pidfile={watcher_pidfile}")
+            else:
+                print(f"[INFO] Reusing reload sentinel watcher: pidfile={watcher_pidfile}")
         _record_background_parent_pid()
 
         try:

@@ -106,6 +106,8 @@ Operational notes:
 - An external watcher or supervisor must observe that file and restart `pypnm-cmts`.
 - The API logs the restart request before it writes the sentinel file.
 - A repo-local watcher helper is available at `tools/support/watch_reload_sentinel.py`.
+- `pypnm-cmts serve --reload` auto-starts a local watcher that consumes the same
+  sentinel and restarts from the recorded launch state for dev workflows.
 
 Example watcher:
 
