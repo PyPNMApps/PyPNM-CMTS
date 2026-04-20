@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 from time import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import uvicorn
 from pydantic import ValidationError
@@ -70,6 +70,8 @@ BACKGROUND_PIDFILE_ENV = getattr(
     "PYPNM_BACKGROUND_PIDFILE",
 )
 launch_background_serve = serve_background.launch_background_serve
+_LaunchArgv: TypeAlias = list[str]
+_LaunchCommand: TypeAlias = tuple[str, _LaunchArgv]
 
 
 def _project_root() -> Path:
@@ -154,6 +156,16 @@ def _record_background_parent_pid() -> None:
     if pidfile == "":
         return
     Path(pidfile).write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+
+def _current_launch_command() -> _LaunchCommand:
+    """Return the best-effort command needed to relaunch the current serve process."""
+    original_argv = [str(value) for value in getattr(sys, "orig_argv", []) if str(value).strip() != ""]
+    if len(original_argv) >= 2:
+        return sys.executable, original_argv[1:]
+
+    argv0 = str(Path(sys.argv[0]).resolve())
+    return sys.executable, [argv0, *[str(value) for value in sys.argv[1:]]]
 
 
 def _resolve_runtime_worker_profile(args: argparse.Namespace) -> tuple[int, int]:
@@ -954,10 +966,11 @@ def _run_cli() -> int:
             workers=effective_workers,
             limit_max_requests=effective_limit_max_requests,
         )
+        launch_executable, launch_argv = _current_launch_command()
         launch_state_path = write_launch_state(
             build_launch_state(
-                executable=sys.executable,
-                argv=list(sys.argv[1:]),
+                executable=launch_executable,
+                argv=launch_argv,
             )
         )
         print(f"[INFO] Recorded serve launch state: {launch_state_path}")
