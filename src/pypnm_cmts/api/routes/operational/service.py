@@ -31,8 +31,6 @@ from pypnm_cmts.api.common.service.pnm.operation_service import (
 )
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
-    MemoryAllocateRequestModel,
-    MemoryAllocateResponseModel,
     MemoryDetailResponseModel,
     MemoryObjectTypeDebugModel,
     MemoryOperationDebugModel,
@@ -54,10 +52,6 @@ from pypnm_cmts.api.routes.operational.schemas import (
 )
 from pypnm_cmts.combined_mode import combined_mode_enabled
 from pypnm_cmts.config.orchestrator_config import CmtsOrchestratorSettings
-from pypnm_cmts.config.runtime_flags import (
-    ENV_ENABLE_DEBUG_MEMORY_TOOLS,
-    is_env_flag_enabled,
-)
 from pypnm_cmts.config.system_config_settings import CmtsSystemConfigSettings
 from pypnm_cmts.lib.constants import CacheRefreshMode, OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import CoordinationElectionName, ServiceGroupId
@@ -67,10 +61,6 @@ from pypnm_cmts.sgw.runtime_state import (
     get_sgw_manager,
     get_sgw_startup_status,
     get_sgw_store,
-)
-from pypnm_cmts.support.debug_memory_tools import (
-    allocate_retained_debug_memory_mb,
-    retained_debug_memory_bytes,
 )
 from pypnm_cmts.types.orchestrator_types import OrchestratorMode
 from pypnm_cmts.version import __version__
@@ -322,30 +312,6 @@ class OperationalService:
             message="Triggered gc.collect() and best-effort malloc_trim().",
         )
 
-    def allocate_debug_memory(self, payload: MemoryAllocateRequestModel) -> MemoryAllocateResponseModel:
-        """Retain process memory so the web-service RSS guard can be exercised on demand."""
-        meta = self.build_identity()
-        rss_before_bytes = self._read_process_rss_bytes()
-        retained_bytes = self._allocate_retained_debug_memory_mb(int(payload.megabytes))
-        rss_after_bytes = self._read_process_rss_bytes()
-        self.logger.warning(
-            "[DEBUG_MEMORY_ALLOCATE] requested_mb=%s rss_before_bytes=%s rss_after_bytes=%s retained_bytes=%s",
-            payload.megabytes,
-            rss_before_bytes,
-            rss_after_bytes,
-            retained_bytes,
-        )
-        return MemoryAllocateResponseModel(
-            status=OperationalStatus.OK,
-            timestamp=self._utc_now(),
-            meta=meta,
-            requested_megabytes=int(payload.megabytes),
-            rss_before_bytes=rss_before_bytes,
-            rss_after_bytes=rss_after_bytes,
-            retained_bytes=retained_bytes,
-            message="Retained debug memory allocation in-process; wait for the RSS guard poll interval.",
-        )
-
     def version(self) -> VersionResponseModel:
         """
         Build the operational version response.
@@ -583,21 +549,6 @@ class OperationalService:
     def _release_unused_memory() -> None:
         """Trigger lower-layer best-effort process memory reclamation."""
         ProcessMemory.release_unused_memory()
-
-    @staticmethod
-    def debug_memory_tools_enabled() -> bool:
-        """Return whether dev/test debug memory tools are enabled for this process."""
-        return is_env_flag_enabled(ENV_ENABLE_DEBUG_MEMORY_TOOLS)
-
-    @staticmethod
-    def _allocate_retained_debug_memory_mb(megabytes: int) -> int:
-        """Allocate retained debug memory and return total retained bytes."""
-        return allocate_retained_debug_memory_mb(megabytes)
-
-    @staticmethod
-    def _retained_debug_memory_bytes() -> int:
-        """Return total retained debug memory bytes."""
-        return retained_debug_memory_bytes()
 
     def sgw_reset(self, payload: SgwResetRequestModel) -> SgwResetResponseModel:
         """

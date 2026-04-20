@@ -118,6 +118,7 @@ pypnm-cmts config-menu [options]
 - `--mute-pypnm-endpoints`: Suppress legacy PyPNM routes mounted under `/cm`.
 - `--mute-tags`: Comma-separated route tags to mute at startup.
 - `--mute-tags-hard`: Enforce `403 Forbidden` for routes matched by `--mute-tags`.
+- `--debug`: Enable debug-only API routes under `/ops/debug`.
 - `--log-level`: Uvicorn log level (default: `info`).
 - `--workers`: Number of Uvicorn worker processes (default: `1`).
 - `--no-access-log`: Disable Uvicorn access logging.

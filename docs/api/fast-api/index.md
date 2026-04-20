@@ -159,10 +159,12 @@ may request a refresh, but they do not execute SNMP in the request thread.
 - `GET /ops/servingGroupWorker/poll-interval` - SGW poll interval summary.
 - `POST /ops/servingGroupWorker/restart` - Queue a heavy refresh for an SGW worker.
 - `POST /ops/servingGroupWorker/resetCounters` - Reset refresh counters for an SGW worker.
+- `POST /ops/debug/allocateMemory` - Debug-mode-only retained-memory trigger for RSS-guard testing.
 
 ## Endpoint Documentation
 
 - [Operational endpoints](operational.md)
+- [Debug endpoints](debug.md)
 - [Serving group endpoints](serving-group.md)
 - [SG PNM operations](pnm-sg-operations.md)
 - [RxMER deep dive](pnm-rxmer.md)

@@ -102,6 +102,7 @@ Options:
 - `--mute-pypnm-endpoints` Suppress legacy PyPNM endpoints under `/cm`.
 - `--mute-tags` Comma-separated route tags to mute.
 - `--mute-tags-hard` Return `403` for routes matched by `--mute-tags`.
+- `--debug` Enable debug-only API routes under `/ops/debug`.
 - `--log-level` Uvicorn log level.
 - `--workers` Uvicorn worker count.
 - `--no-access-log` Disable access log.

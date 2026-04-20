@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pypnm.docsis.data_type.sysDescr import SystemDescriptorModel
@@ -14,7 +13,6 @@ from pypnm_cmts.config.orchestrator_config import (
     CmtsOrchestratorSettings,
     ServiceGroupDescriptor,
 )
-from pypnm_cmts.config.runtime_flags import ENV_ENABLE_DEBUG_MEMORY_TOOLS
 from pypnm_cmts.lib.constants import OperationalStatus, ReadinessCheck
 from pypnm_cmts.lib.types import ServiceGroupId
 from pypnm_cmts.sgw.manager import SgwManager
@@ -387,45 +385,6 @@ def test_ops_release_memory_reports_rss_delta(tmp_path: Path, monkeypatch: objec
     assert payload["rss_after_bytes"] == 320
     assert payload["reclaimed_bytes"] == 180
     assert called == ["released"]
-
-
-def test_ops_debug_allocate_memory_requires_debug_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    state_dir = tmp_path / "state"
-    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
-    app = _load_app(settings, monkeypatch)
-    client = _client(app)
-    response = client.post("/ops/debug/allocateMemory", json={"megabytes": 16})
-    assert response.status_code == 403
-    assert "Debug memory tools are disabled" in response.json()["detail"]
-
-
-def test_ops_debug_allocate_memory_reports_retained_bytes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state_dir = tmp_path / "state"
-    settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
-    app = _load_app(settings, monkeypatch)
-    from pypnm_cmts.api.routes.operational.service import OperationalService
-
-    monkeypatch.setenv(ENV_ENABLE_DEBUG_MEMORY_TOOLS, "1")
-    rss_values = iter([256, 768])
-    monkeypatch.setattr(OperationalService, "_read_process_rss_bytes", staticmethod(lambda: next(rss_values)))
-    monkeypatch.setattr(
-        OperationalService,
-        "_allocate_retained_debug_memory_mb",
-        staticmethod(lambda megabytes: megabytes * 1024 * 1024),
-    )
-
-    client = _client(app)
-    response = client.post("/ops/debug/allocateMemory", json={"megabytes": 32})
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == OperationalStatus.OK.value
-    assert payload["requested_megabytes"] == 32
-    assert payload["rss_before_bytes"] == 256
-    assert payload["rss_after_bytes"] == 768
-    assert payload["retained_bytes"] == 32 * 1024 * 1024
 
 
 class _FakePnmService:

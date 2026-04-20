@@ -151,8 +151,8 @@ Operational notes:
   sentinel and restarts from the recorded launch state for dev workflows.
 - `POST /ops/debug/allocateMemory` is a dev/test retained-memory trigger that can be
   used to push the process above `rssRestartThresholdMb` and verify guard-triggered reloads.
-- That retained-memory trigger is enabled automatically under `serve --reload`, or explicitly
-  with `PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1`.
+- That retained-memory trigger is available only when debug mode is enabled with
+  `pypnm-cmts serve --debug`.
 
 Example watcher:
 

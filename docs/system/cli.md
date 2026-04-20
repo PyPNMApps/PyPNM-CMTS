@@ -101,7 +101,7 @@ pypnm-cmts serve --reload
 `--reload` is development-only and always forces `workers=1`, even if the
 hardware profile would normally choose a higher worker count.
 
-When `--reload` is active, PyPNM-CMTS also enables the dev/test retained-memory
+When debug mode is active, PyPNM-CMTS enables the dev/test retained-memory
 tool at `POST /ops/debug/allocateMemory`. Use it to push process RSS over
 the web-service memory-guard threshold and confirm that the current process
 reloads.
@@ -114,10 +114,17 @@ curl -s -X POST http://127.0.0.1:8080/ops/debug/allocateMemory \
   -d '{"megabytes": 1700}'
 ```
 
-For non-reload development runs, enable the same tool explicitly with:
+Enable debug mode explicitly with:
 
 ```bash
-export PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1
+pypnm-cmts serve --debug
+```
+
+Combine `--debug` with `--reload` when you want both debug routes and source-file
+auto-reload:
+
+```bash
+pypnm-cmts serve --debug --reload
 ```
 
 ### Reload with custom watch paths

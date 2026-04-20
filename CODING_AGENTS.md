@@ -133,6 +133,20 @@ Before introducing new types, constants, validators, or storage patterns:
 - Do not block request paths with `time.sleep()`.
 - Do not use `-` in endpoint URL path segments. Prefer existing repo-style camelCase such as `webService`, `servingGroupWorker`, and `resetCounters`.
 
+## Debug Route Rule
+
+- All debug-only API endpoints must live under a dedicated debug route area, not mixed into operational, system, orchestrator, or PNM route modules.
+- Use a dedicated route package such as `src/pypnm_cmts/api/routes/debug/` for debug-only endpoints and related service/schema code.
+- Public debug endpoint paths must live under `/ops/debug/...`.
+- Debug endpoints must not be enabled by environment-variable export as the primary user workflow.
+- Debug endpoints must be enabled explicitly through CLI debug mode, for example `pypnm-cmts serve --debug`.
+- When debug mode is not enabled:
+  - `/ops/debug/...` routes must not be advertised in OpenAPI/docs.
+  - `/ops/debug/...` routes must not be reachable.
+  - Hidden or muted debug routes must return a controlled non-success response if probed.
+- Prefer startup-time route registration or schema exclusion over ad hoc per-handler checks when keeping debug endpoints hidden by default.
+- User docs must describe debug routes as debug-mode-only tools and show `serve --debug` as the enablement path.
+
 ## Logger Naming Rule
 
 - Do not use full module-path logger names in production classes.

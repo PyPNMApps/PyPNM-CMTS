@@ -22,6 +22,7 @@ from pypnm_cmts.config.request_defaults import (
     ENV_CM_TFTP_IPV6,
 )
 from pypnm_cmts.config.runtime_flags import (
+    ENV_DEBUG_MODE,
     ENV_MUTE_PYPNM_ENDPOINTS,
     ENV_MUTE_TAGS,
     ENV_MUTE_TAGS_HARD,
@@ -59,6 +60,7 @@ def test_cli_serve_sets_adapter_overrides(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv(ENV_CM_SNMPV2C_WRITE_COMMUNITY, raising=False)
     monkeypatch.delenv(ENV_CM_TFTP_IPV4, raising=False)
     monkeypatch.delenv(ENV_CM_TFTP_IPV6, raising=False)
+    monkeypatch.delenv(ENV_DEBUG_MODE, raising=False)
     monkeypatch.delenv(ENV_MUTE_PYPNM_ENDPOINTS, raising=False)
     monkeypatch.delenv(ENV_MUTE_TAGS, raising=False)
     monkeypatch.delenv(ENV_MUTE_TAGS_HARD, raising=False)
@@ -85,6 +87,7 @@ def test_cli_serve_sets_adapter_overrides(monkeypatch: pytest.MonkeyPatch) -> No
         cm_snmpv2c_write_community = CM_SNMPV2C_WRITE_COMMUNITY
         cm_tftp_ipv4 = CM_TFTP_IPV4
         cm_tftp_ipv6 = CM_TFTP_IPV6
+        debug = False
         mute_pypnm_endpoints = False
         mute_tags = ""
         mute_tags_hard = False
@@ -116,6 +119,7 @@ def test_cli_serve_sets_adapter_overrides(monkeypatch: pytest.MonkeyPatch) -> No
     assert os.environ[ENV_CM_SNMPV2C_WRITE_COMMUNITY] == CM_SNMPV2C_WRITE_COMMUNITY
     assert os.environ[ENV_CM_TFTP_IPV4] == CM_TFTP_IPV4
     assert os.environ[ENV_CM_TFTP_IPV6] == CM_TFTP_IPV6
+    assert ENV_DEBUG_MODE not in os.environ
     assert ENV_MUTE_PYPNM_ENDPOINTS not in os.environ
     assert ENV_MUTE_TAGS not in os.environ
     assert ENV_MUTE_TAGS_HARD not in os.environ
@@ -148,6 +152,7 @@ def test_cli_serve_sets_mute_pypnm_flag(monkeypatch: pytest.MonkeyPatch) -> None
         cm_snmpv2c_write_community = ""
         cm_tftp_ipv4 = ""
         cm_tftp_ipv6 = ""
+        debug = False
         mute_tags = ""
         mute_tags_hard = False
 
@@ -198,6 +203,7 @@ def test_cli_serve_sets_mute_tags_flags(monkeypatch: pytest.MonkeyPatch) -> None
         cm_snmpv2c_write_community = ""
         cm_tftp_ipv4 = ""
         cm_tftp_ipv6 = ""
+        debug = False
 
     monkeypatch.setattr(
         cli_module,
@@ -216,6 +222,54 @@ def test_cli_serve_sets_mute_tags_flags(monkeypatch: pytest.MonkeyPatch) -> None
     assert exit_code == 0
     assert os.environ[ENV_MUTE_TAGS] == "Orchestrator, Operational"
     assert os.environ[ENV_MUTE_TAGS_HARD] == "1"
+
+
+def test_cli_serve_sets_debug_mode_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_DEBUG_MODE, raising=False)
+
+    class _Args:
+        command = "serve"
+        host = HOST
+        port = PORT
+        ssl = False
+        cert = "./certs/cert.pem"
+        key = "./certs/key.pem"
+        with_runner = False
+        debug = True
+        mute_pypnm_endpoints = False
+        mute_tags = ""
+        mute_tags_hard = False
+        log_level = "info"
+        workers = None
+        limit_max_requests = None
+        no_access_log = False
+        reload = False
+        reload_dirs: list[str] = []
+        reload_includes: list[str] = ["*.py"]
+        reload_excludes: list[str] = ["*.pyc", "*__pycache__*", "*.tmp", "*.log"]
+        cmts_hostname = ""
+        read_community = ""
+        write_community = ""
+        cm_snmpv2c_write_community = ""
+        cm_tftp_ipv4 = ""
+        cm_tftp_ipv6 = ""
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_parser",
+        lambda: type("P", (), {"parse_args": lambda self: _Args()})(),
+    )
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda **_kwargs: None)
+    monkeypatch.setattr(cli_module, "_print_serve_usage", lambda _parser: None)
+    monkeypatch.setattr(
+        orchestrator_config.CmtsOrchestratorSettings,
+        "from_system_config",
+        staticmethod(lambda: object()),
+    )
+
+    exit_code = cli_module._run_cli()
+    assert exit_code == 0
+    assert os.environ[ENV_DEBUG_MODE] == "1"
 
 
 def test_cli_serve_invalid_config_prints_usage(monkeypatch: pytest.MonkeyPatch) -> None:

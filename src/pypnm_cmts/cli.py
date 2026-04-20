@@ -28,7 +28,7 @@ from pypnm_cmts.config.request_defaults import (
     ENV_CM_TFTP_IPV6,
 )
 from pypnm_cmts.config.runtime_flags import (
-    ENV_ENABLE_DEBUG_MEMORY_TOOLS,
+    ENV_DEBUG_MODE,
     ENV_MUTE_PYPNM_ENDPOINTS,
     ENV_MUTE_TAGS,
     ENV_MUTE_TAGS_HARD,
@@ -451,6 +451,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mute-tags-hard",
         action="store_true",
         help="When used with --mute-tags, enforce 403 for matching tagged routes.",
+    )
+    serve_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug-only API routes under /ops/debug.",
     )
 
     serve_parser.add_argument(
@@ -883,12 +888,17 @@ def _run_cli() -> int:
             os.environ[ENV_CM_TFTP_IPV4] = str(args.cm_tftp_ipv4).strip()
         if str(args.cm_tftp_ipv6).strip() != "":
             os.environ[ENV_CM_TFTP_IPV6] = str(args.cm_tftp_ipv6).strip()
+        debug_mode = bool(getattr(args, "debug", False))
         if bool(args.mute_pypnm_endpoints):
             os.environ[ENV_MUTE_PYPNM_ENDPOINTS] = "1"
         if str(args.mute_tags).strip() != "":
             os.environ[ENV_MUTE_TAGS] = str(args.mute_tags).strip()
         if bool(args.mute_tags_hard):
             os.environ[ENV_MUTE_TAGS_HARD] = "1"
+        if debug_mode:
+            os.environ[ENV_DEBUG_MODE] = "1"
+        else:
+            os.environ.pop(ENV_DEBUG_MODE, None)
 
         try:
             settings = CmtsOrchestratorSettings.from_system_config()
@@ -925,7 +935,6 @@ def _run_cli() -> int:
             uvicorn_args["workers"] = DEFAULT_WORKERS
 
         if args.reload:
-            os.environ.setdefault(ENV_ENABLE_DEBUG_MEMORY_TOOLS, "1")
             if resolved_workers != DEFAULT_WORKERS:
                 print("[WARN] --workers is ignored when --reload is enabled; using workers=1 for dev reload.")
                 uvicorn_args["workers"] = DEFAULT_WORKERS
@@ -940,6 +949,8 @@ def _run_cli() -> int:
                 }
             )
             print(f"🔁 Auto-reload enabled. Watching: {', '.join(reload_dirs)}")
+        if debug_mode:
+            print("[INFO] Debug mode enabled. Registering /ops/debug routes.")
 
         if args.with_runner:
             os.environ[COMBINED_MODE_ENV] = "1"

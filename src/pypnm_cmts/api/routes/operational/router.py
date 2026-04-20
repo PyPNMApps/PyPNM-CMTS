@@ -11,8 +11,6 @@ from starlette.responses import JSONResponse
 
 from pypnm_cmts.api.routes.operational.schemas import (
     HealthResponseModel,
-    MemoryAllocateRequestModel,
-    MemoryAllocateResponseModel,
     MemoryDetailResponseModel,
     MemoryReleaseResponseModel,
     OperationalStatusResponseModel,
@@ -92,33 +90,6 @@ class OperationalRouter:
             Triggers best-effort process memory reclamation and returns before/after RSS.
             """
             return self._service.release_memory()
-
-        @self.router.post(
-            "/debug/allocateMemory",
-            response_model=MemoryAllocateResponseModel,
-            summary="Operational debug retained-memory allocation",
-            description="Development-only tool that retains process memory so the web-service RSS guard can be exercised.",
-            responses={
-                **JSON_ONLY_FAST_API_RESPONSE,
-                HTTPStatus.FORBIDDEN.value: {
-                    "description": "Debug memory tools are disabled",
-                },
-            },
-        )
-        def debug_allocate_memory(payload: MemoryAllocateRequestModel) -> MemoryAllocateResponseModel:
-            """
-            **Operational Debug Allocate Memory**
-
-            Retains memory inside the running process for RSS-guard testing.
-            """
-            if not self._service.debug_memory_tools_enabled():
-                return JSONResponse(
-                    status_code=HTTPStatus.FORBIDDEN.value,
-                    content={
-                        "detail": "Debug memory tools are disabled. Enable PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1 or run serve --reload.",
-                    },
-                )
-            return self._service.allocate_debug_memory(payload)
 
         @self.router.get(
             "/ready",
