@@ -118,6 +118,54 @@ Field notes:
 - `python_gc` reports the top GC-tracked Python object families by count and shallow byte size. It is intentionally bounded and is not a full heap dump.
 - `total_abandoned_futures` is especially important when investigating per-modem timeout leaks because it shows timed-out futures still being tracked by active runners.
 
+### POST /ops/health/debugAllocateMemory
+
+Development-only retained-memory trigger.
+This endpoint keeps the requested allocation alive inside the running process so the
+web-service RSS guard can be exercised under real runtime conditions.
+
+It is enabled automatically by `pypnm-cmts serve --reload`.
+For non-reload development runs, enable it explicitly with:
+
+```bash
+export PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1
+```
+
+Example:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/ops/health/debugAllocateMemory \
+  -H 'content-type: application/json' \
+  -d '{"megabytes": 1700}'
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-01T00:00:00+00:00",
+  "meta": {
+    "mode": "standalone",
+    "election_name": "",
+    "state_dir": ".data/coordination",
+    "sg_id": null
+  },
+  "requested_megabytes": 1700,
+  "rss_before_bytes": 329695232,
+  "rss_after_bytes": 2118123520,
+  "retained_bytes": 1782579200,
+  "message": "Retained debug memory allocation in-process; wait for the RSS guard poll interval."
+}
+```
+
+Notes:
+
+- This is a dev/test tool, not a normal operational action.
+- The allocation is intentionally retained so the RSS guard can observe it on the next poll.
+- After allocation, wait at least one guard poll interval before expecting a reload.
+- When the endpoint is disabled, it returns HTTP 403.
+
 ### GET /ops/ready
 
 Readiness Probe.

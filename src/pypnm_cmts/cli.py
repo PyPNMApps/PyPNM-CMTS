@@ -28,6 +28,7 @@ from pypnm_cmts.config.request_defaults import (
     ENV_CM_TFTP_IPV6,
 )
 from pypnm_cmts.config.runtime_flags import (
+    ENV_ENABLE_DEBUG_MEMORY_TOOLS,
     ENV_MUTE_PYPNM_ENDPOINTS,
     ENV_MUTE_TAGS,
     ENV_MUTE_TAGS_HARD,
@@ -924,6 +925,7 @@ def _run_cli() -> int:
             uvicorn_args["workers"] = DEFAULT_WORKERS
 
         if args.reload:
+            os.environ.setdefault(ENV_ENABLE_DEBUG_MEMORY_TOOLS, "1")
             if resolved_workers != DEFAULT_WORKERS:
                 print("[WARN] --workers is ignored when --reload is enabled; using workers=1 for dev reload.")
                 uvicorn_args["workers"] = DEFAULT_WORKERS
