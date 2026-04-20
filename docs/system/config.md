@@ -149,7 +149,7 @@ Operational notes:
 - A repo-local watcher helper is available at `tools/support/watch_reload_sentinel.py`.
 - `pypnm-cmts serve --reload` auto-starts a local watcher that consumes the same
   sentinel and restarts from the recorded launch state for dev workflows.
-- `POST /ops/health/debugAllocateMemory` is a dev/test retained-memory trigger that can be
+- `POST /ops/debug/allocateMemory` is a dev/test retained-memory trigger that can be
   used to push the process above `rssRestartThresholdMb` and verify guard-triggered reloads.
 - That retained-memory trigger is enabled automatically under `serve --reload`, or explicitly
   with `PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1`.

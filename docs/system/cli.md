@@ -102,14 +102,14 @@ pypnm-cmts serve --reload
 hardware profile would normally choose a higher worker count.
 
 When `--reload` is active, PyPNM-CMTS also enables the dev/test retained-memory
-tool at `POST /ops/health/debugAllocateMemory`. Use it to push process RSS over
+tool at `POST /ops/debug/allocateMemory`. Use it to push process RSS over
 the web-service memory-guard threshold and confirm that the current process
 reloads.
 
 Example:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8080/ops/health/debugAllocateMemory \
+curl -s -X POST http://127.0.0.1:8080/ops/debug/allocateMemory \
   -H 'content-type: application/json' \
   -d '{"megabytes": 1700}'
 ```

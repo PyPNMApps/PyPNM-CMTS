@@ -94,7 +94,7 @@ class OperationalRouter:
             return self._service.release_memory()
 
         @self.router.post(
-            "/health/debugAllocateMemory",
+            "/debug/allocateMemory",
             response_model=MemoryAllocateResponseModel,
             summary="Operational debug retained-memory allocation",
             description="Development-only tool that retains process memory so the web-service RSS guard can be exercised.",

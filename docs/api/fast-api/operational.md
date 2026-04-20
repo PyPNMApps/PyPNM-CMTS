@@ -118,7 +118,7 @@ Field notes:
 - `python_gc` reports the top GC-tracked Python object families by count and shallow byte size. It is intentionally bounded and is not a full heap dump.
 - `total_abandoned_futures` is especially important when investigating per-modem timeout leaks because it shows timed-out futures still being tracked by active runners.
 
-### POST /ops/health/debugAllocateMemory
+### POST /ops/debug/allocateMemory
 
 Development-only retained-memory trigger.
 This endpoint keeps the requested allocation alive inside the running process so the
@@ -134,7 +134,7 @@ export PYPNM_CMTS_ENABLE_DEBUG_MEMORY_TOOLS=1
 Example:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/ops/health/debugAllocateMemory \
+curl -s -X POST http://127.0.0.1:8000/ops/debug/allocateMemory \
   -H 'content-type: application/json' \
   -d '{"megabytes": 1700}'
 ```

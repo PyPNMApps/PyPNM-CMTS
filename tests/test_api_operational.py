@@ -394,7 +394,7 @@ def test_ops_debug_allocate_memory_requires_debug_flag(tmp_path: Path, monkeypat
     settings = _build_settings(OrchestratorMode.STANDALONE, state_dir, [])
     app = _load_app(settings, monkeypatch)
     client = _client(app)
-    response = client.post("/ops/health/debugAllocateMemory", json={"megabytes": 16})
+    response = client.post("/ops/debug/allocateMemory", json={"megabytes": 16})
     assert response.status_code == 403
     assert "Debug memory tools are disabled" in response.json()["detail"]
 
@@ -418,7 +418,7 @@ def test_ops_debug_allocate_memory_reports_retained_bytes(
     )
 
     client = _client(app)
-    response = client.post("/ops/health/debugAllocateMemory", json={"megabytes": 32})
+    response = client.post("/ops/debug/allocateMemory", json={"megabytes": 32})
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == OperationalStatus.OK.value
