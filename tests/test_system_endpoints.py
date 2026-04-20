@@ -112,7 +112,12 @@ def test_system_webservice_reload_writes_sentinel(
 ) -> None:
     _disable_startup(monkeypatch)
     sentinel_path = tmp_path / "runtime" / "webservice.reload"
+    trigger_path = tmp_path / "src" / "pypnm_cmts" / "_reload_trigger.py"
     monkeypatch.setenv(ENV_WEB_SERVICE_RELOAD_SENTINEL, str(sentinel_path))
+    monkeypatch.setattr(
+        "pypnm_cmts.support.web_service_reload.resolve_dev_reload_trigger_path",
+        lambda: trigger_path,
+    )
 
     with TestClient(app) as client:
         response = client.post("/cmts/system/webService/reload")
@@ -123,14 +128,20 @@ def test_system_webservice_reload_writes_sentinel(
     assert payload["reload_requested"] is True
     assert payload["sentinel_path"] == str(sentinel_path)
     assert sentinel_path.exists()
+    assert trigger_path.exists()
     first_payload = sentinel_path.read_text(encoding="utf-8")
+    first_trigger_payload = trigger_path.read_text(encoding="utf-8")
     assert "requested_at=" in first_payload
     assert "request_id=" in first_payload
     assert "actor=cmts.system.webService.reload" in first_payload
     assert "reason=api_reload_request" in first_payload
+    assert 'RELOAD_REQUEST_ID = "' in first_trigger_payload
+    assert 'RELOAD_REQUESTED_AT = "' in first_trigger_payload
 
     with TestClient(app) as client:
         second = client.post("/cmts/system/webService/reload")
     assert second.status_code == 200
     second_payload = sentinel_path.read_text(encoding="utf-8")
+    second_trigger_payload = trigger_path.read_text(encoding="utf-8")
     assert second_payload != first_payload
+    assert second_trigger_payload != first_trigger_payload
