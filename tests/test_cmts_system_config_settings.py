@@ -48,7 +48,19 @@ def _write_system_config(path: Path) -> None:
                         },
                     },
                 }
-            ]
+            ],
+            "service": {
+                "webService": {
+                    "reloadSentinelPath": "/tmp/pypnm-cmts/webservice.reload",
+                    "memoryGuard": {
+                        "enabled": True,
+                        "rssRestartThresholdMb": 1024,
+                        "pollSeconds": 15,
+                        "minRestartIntervalSeconds": 120,
+                        "maxRestartsPerHour": 4,
+                    },
+                }
+            },
         }
     }
     path.write_text(json.dumps(config, indent=4) + "\n", encoding="utf-8")
@@ -85,7 +97,12 @@ def test_cmts_system_config_settings_reads_cmts_values(tmp_path: Path) -> None:
         assert CmtsSystemConfigSettings.cmts_snmp_v3_priv_protocol(0) == "AES"
         assert CmtsSystemConfigSettings.cmts_snmp_v3_priv_password(0) == "priv-pass"
         assert CmtsSystemConfigSettings.cmts_snmp_v3_retries(0) == 3
-        assert CmtsSystemConfigSettings.web_service_reload_sentinel_path() == CmtsSystemConfigSettings.coordination_state_dir() / "webservice.reload"
+        assert CmtsSystemConfigSettings.web_service_reload_sentinel_path() == Path("/tmp/pypnm-cmts/webservice.reload")
+        assert CmtsSystemConfigSettings.web_service_memory_guard_enabled() is True
+        assert CmtsSystemConfigSettings.web_service_memory_guard_rss_restart_threshold_mb() == 1024
+        assert CmtsSystemConfigSettings.web_service_memory_guard_poll_seconds() == 15
+        assert CmtsSystemConfigSettings.web_service_memory_guard_min_restart_interval_seconds() == 120
+        assert CmtsSystemConfigSettings.web_service_memory_guard_max_restarts_per_hour() == 4
         assert CmtsSystemConfigSettings.data_root_dir() == Path(CmtsSystemConfigSettings.pnm_dir()).parent
         assert CmtsSystemConfigSettings.coordination_state_dir() == CmtsSystemConfigSettings.data_root_dir() / "coordination"
         assert CmtsSystemConfigSettings.sg_operations_dir() == CmtsSystemConfigSettings.data_root_dir() / "sg_operations"

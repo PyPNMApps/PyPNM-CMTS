@@ -109,6 +109,19 @@
         "log_dir": "logs",
         "log_filename": "pypnm-cmts.log"
     },
+    "pypnm-cmts": {
+        "service": {
+            "webService": {
+                "memoryGuard": {
+                    "enabled": true,
+                    "rssRestartThresholdMb": 1536,
+                    "pollSeconds": 10,
+                    "minRestartIntervalSeconds": 300,
+                    "maxRestartsPerHour": 6
+                }
+            }
+        }
+    },
     "TestMode": {
         "global": {
             "mode": {

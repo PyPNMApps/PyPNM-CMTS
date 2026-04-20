@@ -34,6 +34,11 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
     _DEFAULT_CMTS_SNMP_V3_AUTH_PROTOCOL: str = "SHA"
     _DEFAULT_CMTS_SNMP_V3_PRIV_PROTOCOL: str = "AES"
     _DEFAULT_CMTS_SNMP_V3_SECURITY_LEVEL: str = "authPriv"
+    _DEFAULT_WEB_SERVICE_MEMORY_GUARD_ENABLED: bool = True
+    _DEFAULT_WEB_SERVICE_MEMORY_GUARD_RSS_RESTART_THRESHOLD_MB: int = 1536
+    _DEFAULT_WEB_SERVICE_MEMORY_GUARD_POLL_SECONDS: int = 10
+    _DEFAULT_WEB_SERVICE_MEMORY_GUARD_MIN_RESTART_INTERVAL_SECONDS: int = 300
+    _DEFAULT_WEB_SERVICE_MEMORY_GUARD_MAX_RESTARTS_PER_HOUR: int = 6
 
     @classmethod
     def _cmts_entries(cls) -> list[dict[str, object]]:
@@ -274,6 +279,66 @@ class CmtsSystemConfigSettings(SystemConfigSettings):
         if configured_path.strip() != "":
             return Path(configured_path).expanduser()
         return cls.coordination_state_dir() / "webservice.reload"
+
+    @classmethod
+    def web_service_memory_guard_enabled(cls) -> bool:
+        """Return whether the web-service RSS guard is enabled."""
+        return cls._get_nested_bool(
+            cls._DEFAULT_WEB_SERVICE_MEMORY_GUARD_ENABLED,
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "memoryGuard",
+            "enabled",
+        )
+
+    @classmethod
+    def web_service_memory_guard_rss_restart_threshold_mb(cls) -> int:
+        """Return the RSS threshold in MiB for web-service reload requests."""
+        return cls._get_nested_int(
+            cls._DEFAULT_WEB_SERVICE_MEMORY_GUARD_RSS_RESTART_THRESHOLD_MB,
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "memoryGuard",
+            "rssRestartThresholdMb",
+        )
+
+    @classmethod
+    def web_service_memory_guard_poll_seconds(cls) -> int:
+        """Return the polling interval for the web-service RSS guard."""
+        return cls._get_nested_int(
+            cls._DEFAULT_WEB_SERVICE_MEMORY_GUARD_POLL_SECONDS,
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "memoryGuard",
+            "pollSeconds",
+        )
+
+    @classmethod
+    def web_service_memory_guard_min_restart_interval_seconds(cls) -> int:
+        """Return the minimum seconds between web-service guard reload requests."""
+        return cls._get_nested_int(
+            cls._DEFAULT_WEB_SERVICE_MEMORY_GUARD_MIN_RESTART_INTERVAL_SECONDS,
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "memoryGuard",
+            "minRestartIntervalSeconds",
+        )
+
+    @classmethod
+    def web_service_memory_guard_max_restarts_per_hour(cls) -> int:
+        """Return the maximum web-service guard reload requests allowed per hour."""
+        return cls._get_nested_int(
+            cls._DEFAULT_WEB_SERVICE_MEMORY_GUARD_MAX_RESTARTS_PER_HOUR,
+            cls._cfg.get(cls._CMTS_ROOT_KEY) or {},
+            cls._CMTS_SERVICE_KEY,
+            cls._CMTS_WEB_SERVICE_KEY,
+            "memoryGuard",
+            "maxRestartsPerHour",
+        )
 
     @classmethod
     def cmts_snmp_v3_security_level(cls, index: int) -> str:

@@ -35,6 +35,7 @@ from pypnm_cmts.sgw.runtime_state import (
 )
 from pypnm_cmts.sgw.startup import SgwStartupService
 from pypnm_cmts.startup.startup import StartUp
+from pypnm_cmts.support.web_service_memory_guard import WebServiceMemoryGuard
 from pypnm_cmts.version import __version__
 
 GZIP_MIN_SIZE_BYTES = 100_000
@@ -74,6 +75,7 @@ validate configuration state, and drive PNM workflows across fleets.
 _combined_runner: CombinedModeRunner | None = None
 _sgw_startup_service = SgwStartupService()
 _health_service = CmtsHealthService()
+_web_service_memory_guard = WebServiceMemoryGuard()
 _hard_muted_routes: list[APIRoute] = []
 
 
@@ -115,11 +117,15 @@ async def _lifespan(_app: FastAPI) -> object:
     if isawaitable(init_result):
         await init_result
     started_refresh = False
+    started_web_memory_guard = False
     if not _pytest_running():
         started_refresh = start_sgw_background_refresh()
+        started_web_memory_guard = _web_service_memory_guard.start()
     try:
         yield
     finally:
+        if started_web_memory_guard:
+            _web_service_memory_guard.stop()
         if started_refresh:
             stop_sgw_background_refresh()
         if _combined_runner is not None:

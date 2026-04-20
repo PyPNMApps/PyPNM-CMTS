@@ -80,6 +80,47 @@ Default guard policy:
 
 `GET /cmts/system` endpoints are safe to call in production, but web-service reload is handled through an external watcher contract rather than Uvicorn `--reload`.
 
+## Web-service memory guard
+
+`pypnm-cmts.service.webService.memoryGuard` configures a process-level RSS watcher for the
+FastAPI web service. When enabled, it checks the current process RSS on a fixed interval and
+requests a web-service reload when the threshold is reached.
+
+Example:
+
+```json
+{
+  "pypnm-cmts": {
+    "service": {
+      "webService": {
+        "memoryGuard": {
+          "enabled": true,
+          "rssRestartThresholdMb": 1536,
+          "pollSeconds": 10,
+          "minRestartIntervalSeconds": 300,
+          "maxRestartsPerHour": 6
+        }
+      }
+    }
+  }
+}
+```
+
+Field meanings:
+
+- `enabled` enables the process-level web-service RSS watcher.
+- `rssRestartThresholdMb` requests a web-service reload when process RSS reaches the configured MiB threshold. `0` disables RSS-based reload.
+- `pollSeconds` sets how often the watcher samples process RSS.
+- `minRestartIntervalSeconds` suppresses rapid repeat reload requests after a guard-triggered recycle.
+- `maxRestartsPerHour` caps guard-triggered web-service reload requests per rolling hour window.
+
+Operational notes:
+
+- The watcher is started from the FastAPI lifespan and runs only in the active web-service process.
+- Guard decisions reuse the shared worker-guard budgeting logic in `src/pypnm_cmts/support/worker_guard.py`.
+- Guard-triggered reloads use the same `request_web_service_reload(...)` path as the manual reload endpoint.
+- In `serve --reload` development mode, the guard-triggered reload also touches the watched reload trigger file under `src/`.
+
 Configuration sources, in precedence order:
 
 - `PYPNM_CMTS_WEB_SERVICE_RELOAD_SENTINEL`
